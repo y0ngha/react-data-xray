@@ -1,0 +1,10 @@
+{
+  "ignore": {
+    "overrides": [
+      {
+        "files": ["src/**/__tests__/**"],
+        "rules": ["react-doctor/no-fetch-in-effect"]
+      }
+    ]
+  }
+}

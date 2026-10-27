@@ -1,0 +1,89 @@
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { flush } from '../../testing/fetchMock.js';
+import { RdxDevtools } from '../RdxDevtools.js';
+
+const openPanel = () => {
+  const button = screen.getByRole('button', { name: 'React Data X-ray 열기' });
+  fireEvent.pointerDown(button, { clientX: 0, clientY: 0, pointerId: 1 });
+  fireEvent.pointerUp(button, { pointerId: 1 });
+  return screen.getByRole('complementary', { name: 'React Data X-ray' });
+};
+
+afterEach(() => vi.restoreAllMocks());
+
+describe('RdxDevtools', () => {
+  it('버튼을 누르면 패널이 열리고, 탭을 영역별로 옮겨 다니며, 닫을 수 있다', async () => {
+    render(<RdxDevtools />);
+    const panel = openPanel();
+    expect(within(panel).getByText(/요소 선택\]을 누르고/)).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: '분석' }));
+    expect(within(panel).getByText(/렌더 분석 · 최근 10초/)).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: '타임라인' }));
+    expect(within(panel).getByText('네트워크 타임라인 · 최근 20초')).toBeTruthy();
+    fireEvent.click(within(panel).getByTitle('닫기'));
+    expect(screen.queryByRole('complementary')).toBeNull();
+  });
+
+  it('요청 기록에서 요청을 누르면 상세가 열리고, 뒤로 가면 탭으로 돌아온다', async () => {
+    await fetch('/api/a');
+    await fetch('/api/a');
+    render(<RdxDevtools />);
+    await act(flush);
+    const panel = openPanel();
+    fireEvent.click(within(panel).getByRole('button', { name: /요청/ }));
+    expect(within(panel).getByRole('button', { name: /요청 ⚠1/ })).toBeTruthy();
+    fireEvent.click(within(panel).getByText('전체 기록'));
+    fireEvent.click(within(panel).getAllByRole('button', { name: /GET \/api\/a/ })[0]);
+    expect(within(panel).getByText('← 뒤로')).toBeTruthy();
+    fireEvent.click(within(panel).getByText('← 뒤로'));
+    expect(within(panel).getByText('엔드포인트별')).toBeTruthy();
+  });
+
+  it('단축키로 요소 선택을 켜고, 요소를 누르면 출처 결과를 보여 준다', async () => {
+    const target = document.createElement('p');
+    target.textContent = 'not from api';
+    document.body.append(target);
+    Object.defineProperty(document, 'elementFromPoint', { value: () => target, configurable: true });
+    render(<RdxDevtools hotkey={{ key: 'e', shift: true }} />);
+    fireEvent.keyDown(window, { key: 'e', metaKey: true, shiftKey: true });
+    expect(screen.getByText(/화면의 요소를 클릭하세요/)).toBeTruthy();
+    fireEvent.click(target);
+    expect(screen.getByText('연결된 API 응답을 찾지 못했습니다.')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    target.remove();
+  });
+
+  it('도킹 방식을 바꾸면 기억하고, 하단 도킹에서는 끌어서 높이를 바꾼다', () => {
+    render(<RdxDevtools />);
+    const panel = openPanel();
+    fireEvent.click(within(panel).getByTitle('하단에 도킹 (넓게 보기)'));
+    expect(JSON.parse(localStorage.getItem('react-data-xray:dock')!).dock).toBe('bottom');
+    const handle = within(screen.getByRole('complementary')).getByRole('separator');
+    fireEvent.pointerDown(handle);
+    fireEvent.pointerMove(window, { clientY: window.innerHeight - 400 });
+    fireEvent.pointerUp(window);
+    expect(JSON.parse(localStorage.getItem('react-data-xray:dock')!).bottomHeight).toBe(400);
+    fireEvent.click(within(screen.getByRole('complementary')).getByTitle('오른쪽에 도킹'));
+    expect(within(screen.getByRole('complementary')).getByRole('separator').getAttribute('aria-orientation')).toBe('vertical');
+  });
+
+  it('별도 창으로 띄우면 패널을 그 창에 그리고, 창이 막히면 작게 보기로 돌아온다', () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    render(<RdxDevtools />);
+    const panel = openPanel();
+    fireEvent.click(within(panel).getByTitle('도킹 해제 (별도 창)'));
+    expect(JSON.parse(localStorage.getItem('react-data-xray:dock')!).dock).toBe('float');
+  });
+
+  it('전체 표시를 켜고 끌 수 있다', () => {
+    render(<RdxDevtools />);
+    const panel = openPanel();
+    const toggle = within(panel).getByRole('button', { name: /전체 표시/ });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  });
+});

@@ -166,9 +166,33 @@ dev 환경 전용이라 요청과 응답의 원문을 보관해도 됩니다. �
 - React Query의 structural sharing 때문에 다시 받아 온 데이터라도 바뀌지 않은 객체는 처음 요청이 출처로 표시됩니다.
 - 응답 경로가 `$`(응답 전체)인 정확 매칭은 "이 API 어딘가"라는 뜻입니다. 숫자 하나만 props로 받는 컴포넌트는 필드까지 좁히지 못합니다.
 
-## 7. 개발 기록
+## 7. 코드 구조
+
+역할별로 나눕니다. `core` 는 React UI 와 무관한 로직, `ui` 는 화면입니다. 파일 하나에 책임 하나를 원칙으로 합니다.
+
+```
+src/
+  index.ts                 공개 진입점(production 에서는 빈 컴포넌트)
+  shared/                  storage(안전한 localStorage), format(표시용 순수 함수), collections
+  core/capture/            fetch·XHR·JSON.parse 가로채기, 요청 문맥(호출 스택·자동 재요청), payload 직렬화, 헤더·content-type
+  core/requests/           기록 저장소, 응답 객체 출처 등록, 요청 키, 중복·같은 응답 판정, 분류, 몰림, 엔드포인트 집계
+  core/fiber/              fiber 타입과 트리 탐색, 컴포넌트가 들고 있는 값 수집
+  core/inspect/            정확·파생·글자 매칭, 요소 검사, 전체 표시 박스, 요청을 쓰는 컴포넌트 찾기
+  core/render/             DevTools 훅, 렌더 이유, 네트워크 원인, 렌더 감시, 요약·그룹·조언
+  ui/RdxDevtools.tsx       조립 지점(상태를 모아 패널·오버레이·버튼에 나눠 준다)
+  ui/hooks/                useDraggable, useDockSettings, usePopupWindow, useElementPicker, useNow, useRequestAnalysis …
+  ui/components/           Badge, Button, Section, KeyValues, CodeBlock, TabGroup, FixedRect …(범용)
+  ui/request/              요청 배지·링크·요약·상세·쓰는 컴포넌트 목록
+  ui/panels/               패널 틀·도구 막대·도킹, 탭별 폴더(inspect, requests, timeline, renders)
+  ui/overlays/             전체 표시, 요청을 쓰는 컴포넌트 강조, 요소 선택 강조
+  testing/                 테스트 공통 설정과 도우미(빌드·커버리지에서 제외)
+```
+
+품질 도구: oxlint(정적 검사), oxfmt(포맷), react-doctor(React 진단), vitest 커버리지(80% 이상). `pnpm check` 가 모두 돌립니다.
+
+## 8. 개발 기록
 
 - 패키지 위치: `~/Project/react-data-xray`. 커밋은 개인 계정으로 합니다.
 - whatap-front 테스트: `.worktrees/rdx` 워크트리(브랜치 `local/react-data-xray`)에 `file:` 의존성으로 붙여 확인합니다. whatap-front 쪽 변경은 커밋하지 않습니다.
-- 패키지를 고치면 `pnpm build` 후 whatap-front의 `node_modules`에 dist를 복사하고, dev 서버를 `--force`로 다시 띄웁니다. 같은 버전으로 덮어쓰면 브라우저 캐시에 이전 모듈이 남으므로, 그 모듈 URL을 `cache: 'reload'`로 한 번 받아 둔 뒤 새로고침합니다.
+- 패키지를 고치면 `pnpm sync <앱 경로>` 로 빌드·반영하고(Vite 캐시 파일도 지운다), dev 서버를 `--force`로 다시 띄웁니다. 같은 버전으로 덮어쓰면 브라우저 캐시에 이전 모듈이 남으므로, 그 모듈 URL을 `cache: 'reload'`로 한 번 받아 둔 뒤 새로고침합니다.
 - 감사 기록: 코드 감사(구현과 문서 대조)와 문제 해결 적합성 평가를 서브에이전트로 따로 했습니다. 코드 감사에서 나온 버그(파생 매칭 기준, 이전 fiber 트리 읽기, 오버레이 비용, XHR 재사용, 스트리밍 버퍼링, 경로 접두사 비교, 렌더 첫 commit 과다 집계, webpack production 잔존)는 고쳤습니다. 적합성 평가의 개선 제안은 ROADMAP에 넣었습니다.

@@ -1,0 +1,96 @@
+import type { RequestRecord } from '../../core/requests/types.js';
+import { prettyText, queryParamsOf, truncate, valueAt } from '../../shared/format.js';
+import { Button } from '../components/Button.js';
+import { CodeBlock } from '../components/CodeBlock.js';
+import { KeyValues } from '../components/KeyValues.js';
+import { Muted } from '../components/Muted.js';
+import { Section } from '../components/Section.js';
+import type { Focus } from '../contexts.js';
+import { ClassBadge } from './ClassBadge.js';
+import { ConsumerList } from './ConsumerList.js';
+import { RequestStatusLine } from './RequestSummary.js';
+
+// 아주 큰 응답을 그대로 그리면 패널이 멈추므로 상세 화면에서는 이만큼만 보여 준다(복사도 같은 내용).
+const MAX_DETAIL_TEXT = 200_000;
+
+const TRIGGER_TEXT: Record<NonNullable<RequestRecord['trigger']>, string> = {
+  focus: '창 포커스·탭 전환 직후에 나간 요청입니다(라이브러리의 자동 재요청).',
+  reconnect: '네트워크 재연결 직후에 나간 요청입니다.',
+};
+
+const requestBodyText = (record: RequestRecord): string | undefined =>
+  record.requestBody === undefined ? undefined : prettyText(record.requestBody);
+
+// 파싱된 응답 객체가 있으면 그것을 정렬해 보여 준다. 원문은 100KB 에서 잘려 JSON 으로 다시 읽히지 않을 수 있다.
+const responseBodyText = (record: RequestRecord): string | undefined => {
+  if (record.body !== undefined) return truncate(JSON.stringify(record.body, null, 2) ?? '', MAX_DETAIL_TEXT);
+  return record.responseText === undefined ? undefined : prettyText(record.responseText);
+};
+
+const RequestBodySection = ({ record }: { record: RequestRecord }) => {
+  const text = requestBodyText(record);
+  const content = record.bodyUnreadable ? (
+    <Muted>(Blob·스트림처럼 바로 읽을 수 없는 본문)</Muted>
+  ) : text === undefined ? (
+    <Muted>(없음)</Muted>
+  ) : (
+    <CodeBlock text={text} />
+  );
+  return (
+    <Section title="Request Body" copy={text}>
+      {content}
+    </Section>
+  );
+};
+
+const ResponseBodySection = ({ record }: { record: RequestRecord }) => {
+  const text = responseBodyText(record);
+  return (
+    <Section title="Response Body" copy={text}>
+      {text === undefined ? <Muted>(텍스트가 아닌 응답이거나 아직 받지 못했습니다)</Muted> : <CodeBlock text={text} />}
+    </Section>
+  );
+};
+
+const RepeatInfo = ({ record }: { record: RequestRecord }) => (
+  <div style={{ marginTop: 4 }}>
+    <ClassBadge record={record} />
+    {record.duplicateOf && <Muted>앞선 요청 #{record.duplicateOf}</Muted>}
+    {record.sameResponseAs && <Muted>같은 응답 #{record.sameResponseAs}</Muted>}
+  </div>
+);
+
+/** 요청 상세: 컴포넌트가 쓰는 데이터, 쓰는 컴포넌트, 보낸 코드, Query, 헤더, 본문 */
+export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord; focus?: Focus; onBack: () => void }) => (
+  <div>
+    <Button onClick={onBack}>← 뒤로</Button>
+    <div style={{ marginTop: 8 }}>
+      <b>{record.method}</b> {record.url}
+    </div>
+    <RequestStatusLine record={record} />
+    <RepeatInfo record={record} />
+    {focus && (
+      <Section title={`이 컴포넌트가 쓰는 데이터: ${focus.path} ← ${focus.via}`}>
+        <CodeBlock text={JSON.stringify(valueAt(record.body, focus.path), null, 2) ?? '(값 없음)'} />
+      </Section>
+    )}
+    {record.trigger && <Muted>{TRIGGER_TEXT[record.trigger]}</Muted>}
+    <ConsumerList record={record} />
+    {record.stack && (
+      <Section title="요청을 보낸 코드" copy={record.stack}>
+        <CodeBlock text={record.stack} />
+      </Section>
+    )}
+    <Section title="Query">
+      <KeyValues values={queryParamsOf(record.url)} />
+    </Section>
+    <Section title="Request Headers">
+      <KeyValues values={record.requestHeaders} />
+    </Section>
+    <RequestBodySection record={record} />
+    <Section title="Response Headers">
+      <KeyValues values={record.responseHeaders} />
+    </Section>
+    <ResponseBodySection record={record} />
+  </div>
+);
