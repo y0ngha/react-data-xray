@@ -1,7 +1,9 @@
-import { install } from './capture';
-import { DataSourceDevtools as Devtools, type DataSourceDevtoolsProps } from './Devtools';
+// 순서가 중요하다: renderMonitor 는 react-dom 보다 먼저 평가돼야 렌더 훅을 잡을 수 있다.
+import './renderMonitor.js';
+import { install } from './capture.js';
+import { DataSourceDevtools as Devtools, type DataSourceDevtoolsProps } from './Devtools.js';
 
-export type { DataSourceDevtoolsProps } from './Devtools';
+export type { DataSourceDevtoolsProps } from './Devtools.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
 

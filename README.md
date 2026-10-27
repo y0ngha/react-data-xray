@@ -1,15 +1,16 @@
 # data-source-inspector
 
-화면의 요소를 클릭하면, 그 컴포넌트가 보여 주는 데이터가 **어느 API 응답의 어느 필드에서 왔는지** 알려 주는 React 개발용 도구입니다. React Query Devtools처럼 컴포넌트 하나만 넣으면 됩니다.
+화면의 React 컴포넌트가 **어느 API 응답으로 그려지는지**, 요청이 낭비되거나 렌더가 반복되지 않는지 보여 주는 개발용 도구입니다. React Query Devtools처럼 컴포넌트 하나만 넣으면 됩니다.
 
 - React 18 이상
-- `fetch`, `XMLHttpRequest`(axios 포함), React Query, `useEffect` + `fetch`, redux 모두 대응
+- `fetch`, `XMLHttpRequest`를 가로채므로 React Query, SWR, axios, `useEffect` + `fetch`, redux 모두 대응
 - production 빌드에서는 빈 컴포넌트가 되어 아무것도 하지 않습니다
 
 ## 사용법
 
 ```tsx
-// 엔트리 파일의 첫 import 로 둡니다. 다른 모듈이 요청을 보내기 전에 fetch 를 감싸야 합니다.
+// 엔트리 파일의 앞쪽에서 import 합니다. 다른 모듈이 요청을 보내기 전에 fetch 를 감싸야 하고,
+// 렌더 감시를 위해 react-dom 보다 먼저 평가돼야 합니다.
 import { DataSourceDevtools } from 'data-source-inspector';
 
 createRoot(root).render(
@@ -20,27 +21,19 @@ createRoot(root).render(
 );
 ```
 
-1. `Ctrl+Shift+D`(macOS는 `Cmd+Shift+D`)로 검사 모드를 켭니다.
-2. 확인할 요소를 클릭합니다.
-3. 패널에 컴포넌트 이름, 요청(메서드, URL, 상태, 시간), 응답 안의 경로, React Query라면 `queryKey`가 나옵니다.
+오른쪽 아래의 `API` 버튼(드래그로 이동)을 누르면 패널이 열립니다.
 
-단축키는 `<DataSourceDevtools hotkey={{ key: 'e', shift: true }} />`로 바꿀 수 있습니다.
+| 기능 | 하는 일 |
+|---|---|
+| ⌖ 요소 선택 | 요소를 클릭하면 컴포넌트, 요청(URL, 쿼리, payload), 응답 안의 경로, queryKey를 보여 줍니다. 단축키 Ctrl/Cmd+Shift+D |
+| ▦ 전체 표시 | 데이터 출처가 있는 요소마다 박스와 URL 라벨을 그립니다. 빨강은 낭비 요청에서 온 데이터입니다. |
+| 요청 탭 | 엔드포인트별 호출 수, 중복 요청, 같은 응답 재요청, 평균 응답 시간 |
+| 타임라인 탭 | 최근 20초의 요청, 렌더 commit, 요청 몰림 구간 |
+| 렌더 탭 | 렌더가 잦은 컴포넌트와 그 컴포넌트가 쓰는 API |
 
-## 동작 방식
+매칭은 `[정확]`(같은 참조), `[파생]`(가공된 객체지만 필드 값이 일치), `[추정]`(화면 글자만 일치) 세 단계로 표시합니다.
 
-1. `fetch`, `Response.json/text`, `XMLHttpRequest`, `JSON.parse`를 감싸서 응답 JSON 안의 모든 객체와 배열을 `WeakMap<객체, {요청, 경로}>`에 등록합니다.
-2. 클릭한 DOM에서 React fiber를 찾아 위로 올라가며 props와 훅 state를 훑습니다. 등록된 객체가 **같은 참조로** 있으면 `[정확]`으로 표시합니다.
-3. 참조로 찾지 못하면(가공해서 새 객체가 된 경우) 클릭한 요소의 글자와 같은 값을 최근 응답에서 찾아 `[추정]`으로 표시합니다.
+## 문서
 
-## 한계
-
-- `select`, `.map(i => ({...i}))`처럼 새 객체를 만들면 참조가 끊겨 추정으로만 찾습니다.
-- context로만 내려받은 값은 아직 찾지 못합니다.
-- React 내부 구조(fiber)를 읽으므로, React가 그 구조를 바꾸면 깨질 수 있습니다.
-- 최근 응답 200건만 기억합니다.
-
-## 로드맵
-
-- React Query 캐시키 설계 감시: 같은 데이터를 다른 키로 중복 캐시하는지, 무효화(`invalidateQueries`)에 쓰는 키 접두사가 실제 쿼리와 맞는지, 키에 빠진 의존 값이 있는지
-- context 값 추적
-- 요청을 보낸 코드 위치(호출 스택) 표시
+- [CONTEXT.md](./docs/CONTEXT.md): 목표, 방법과 그 이유, 한계
+- [ROADMAP.md](./docs/ROADMAP.md): 앞으로 할 일
