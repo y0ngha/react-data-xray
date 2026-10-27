@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
+import { findQueryClients } from '../../core/reactQuery/cacheAudit.js';
 import { getTopRenders } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
 import { findBursts, isInitialLoad } from '../../core/requests/bursts.js';
@@ -9,6 +10,8 @@ import { useInterval } from './useInterval.js';
 import { useRenderMonitoring } from './useRenderMonitoring.js';
 
 const TICK_MS = 1000;
+// React Query 캐시 감시를 패널을 열기 전부터 시작하도록, 이 간격마다 화면의 QueryClient 를 찾는다(트리를 훑는 일이라 드물게).
+const FIND_CLIENTS_EVERY = 5;
 // 버튼을 깜빡이게 할 "방금" 의 범위
 const RECENT_MS = 2000;
 
@@ -47,8 +50,11 @@ export const useProblemSignal = (
 ) => {
   useRenderMonitoring();
   const [signal, setSignal] = useState<Signal>({ storming: new Set(), lastBurst: 0, alert: false });
+  // 렌더에 쓰지 않는 횟수라 state 가 아니라 ref 에 센다(매초 다시 렌더하지 않게).
+  const ticks = useRef(0);
   useInterval(() => {
     const now = Date.now();
+    if (ticks.current++ % FIND_CLIENTS_EVERY === 0) findQueryClients();
     const storming = stormingNames(now);
     // useInterval 이 최신 콜백을 쓰므로 records 는 늘 지금 기록이다.
     const burstEnd = latestBurstEnd(records, classOf, now);

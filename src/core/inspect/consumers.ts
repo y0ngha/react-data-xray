@@ -32,10 +32,20 @@ const holdsResponseOf = (root: unknown, requestKey: string): boolean => {
 export const findConsumers = (record: RequestRecord, isOwnUi: (el: Element) => boolean): Consumer[] => {
   const key = requestKeyOf(record);
   const consumers: Consumer[] = [];
+  // 같은 객체(react-intl 의 IntlContext 값처럼 수천 컴포넌트가 함께 읽는 context 등)는 한 번만 훑는다.
+  const known = new Map<object, boolean>();
+  const holds = (value: unknown): boolean => {
+    if (value === null || typeof value !== 'object') return false;
+    const cached = known.get(value);
+    if (cached !== undefined) return cached;
+    const result = holdsResponseOf(value, key);
+    known.set(value, result);
+    return result;
+  };
   findRootFibers().forEach((root) =>
     walkFibers(root.child, (f) => {
       if (consumers.length >= MAX_CONSUMERS) return false;
-      const found = isComposite(f) ? collectValues(f).find(({ value }) => holdsResponseOf(value, key)) : undefined;
+      const found = isComposite(f) ? collectValues(f).find(({ value }) => holds(value)) : undefined;
       if (found && hostNodesOf(f).some((n) => !isOwnUi(n)))
         consumers.push({ id: consumers.length, name: getComponentName(f), rect: componentRect(f, isOwnUi), via: found.via });
       return true;

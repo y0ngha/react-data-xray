@@ -43,6 +43,27 @@ describe('React Query 캐시키 점검', () => {
     expect(found?.requests).toEqual(['GET /api/list?page=1', 'GET /api/list?page=2']);
   });
 
+  it('setQueryData 로 직접 넣은 데이터는 요청으로 세지 않는다(수정 응답으로 캐시를 갱신하는 정상 패턴)', async () => {
+    const client = new QueryClient();
+    withClient(client, <p>app</p>);
+    await client.fetchQuery({ queryKey: ['todo', 1], queryFn: load('/api/todos/1') });
+    auditQueryCache(sameOrOk, getRecords());
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ id: 1, title: 'updated', done: true }));
+    const updated = await fetch('/api/todos/1', { method: 'PUT', body: '{}' }).then((r) => r.json());
+    client.setQueryData(['todo', 1], updated);
+    expect(auditQueryCache(sameOrOk, getRecords()).filter((f) => f.kind === 'key-missing-param')).toEqual([]);
+  });
+
+  it('지금은 없어도(GC 등) 이 화면에서 만든 적 있는 키를 무효화하면 미스가 아니다', async () => {
+    const client = new QueryClient();
+    withClient(client, <p>app</p>);
+    findQueryClients();
+    await client.fetchQuery({ queryKey: ['reports', 7], queryFn: load('/api/reports/7') });
+    client.removeQueries({ queryKey: ['reports'] });
+    await client.invalidateQueries({ queryKey: ['reports'] });
+    expect(auditQueryCache(sameOrOk, getRecords()).filter((f) => f.kind === 'invalidate-miss')).toEqual([]);
+  });
+
   it('무효화한 키와 맞는 쿼리가 없으면 부른 위치와 함께 알리고, 무효화는 그대로 한다', async () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
