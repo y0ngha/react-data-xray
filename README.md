@@ -1,4 +1,4 @@
-# data-source-inspector
+# react-data-xray (rdx)
 
 화면의 React 컴포넌트가 **어느 API 응답으로 그려지는지**, 요청이 낭비되거나 렌더가 반복되지 않는지 보여 주는 개발용 도구입니다. React Query Devtools처럼 컴포넌트 하나만 넣으면 됩니다.
 
@@ -11,19 +11,19 @@
 ```tsx
 // 엔트리 파일의 앞쪽에서 import 합니다. 다른 모듈이 요청을 보내기 전에 fetch 를 감싸야 하고,
 // 렌더 감시를 위해 react-dom 보다 먼저 평가돼야 합니다.
-import { DataSourceDevtools } from 'data-source-inspector';
+import { RdxDevtools } from 'react-data-xray';
 
 createRoot(root).render(
   <>
     <App />
-    <DataSourceDevtools />
+    <RdxDevtools />
   </>,
 );
 ```
 
-오른쪽 아래의 `API` 버튼(드래그로 이동)을 누르면 패널이 열립니다. 패널 오른쪽 위에서 표시 방식을 고릅니다: 작게 보기(▭), 하단 도킹(⬓), 오른쪽 도킹(◨), 별도 창(⧉). 도킹했을 때는 안쪽 가장자리를 끌어 크기를 바꿉니다.
+오른쪽 아래의 `RDX` 버튼(드래그로 이동)을 누르면 패널이 열립니다. 패널 오른쪽 위에서 표시 방식을 고릅니다: 작게 보기(▭), 하단 도킹(⬓), 오른쪽 도킹(◨), 별도 창(⧉). 도킹했을 때는 안쪽 가장자리를 끌어 크기를 바꿉니다.
 
-dsi가 보여 주는 요청은 어디서든 클릭하면 **요청 상세**(Query, Request/Response Headers, Body)가 열립니다.
+rdx가 보여 주는 요청은 어디서든 클릭하면 **요청 상세**(Query, Request/Response Headers, Body)가 열립니다.
 
 | 기능 | 하는 일 |
 |---|---|

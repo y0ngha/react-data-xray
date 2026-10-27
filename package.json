@@ -1,5 +1,5 @@
 {
-  "name": "data-source-inspector",
+  "name": "react-data-xray",
   "version": "0.1.0",
   "description": "화면의 React 컴포넌트가 어느 API 응답을 보여 주는지 찾아 주는 dev 전용 devtools",
   "type": "module",

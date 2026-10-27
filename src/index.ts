@@ -1,10 +1,10 @@
 // 순서가 중요하다: renderMonitor 는 react-dom 보다 먼저 평가돼야 렌더 훅을 잡을 수 있다.
 import './renderMonitor.js';
 import { install } from './capture.js';
-import { DataSourceDevtools as Devtools, type DataSourceDevtoolsProps } from './Devtools.js';
+import { RdxDevtools as Devtools, type RdxDevtoolsProps } from './Devtools.js';
 import { ignoreComponent } from './renderMonitor.js';
 
-export type { DataSourceDevtoolsProps } from './Devtools.js';
+export type { RdxDevtoolsProps } from './Devtools.js';
 
 // 조건을 변수에 담지 않고 직접 쓴다. 그래야 webpack 도 production 에서 dev 분기를 상수로 접어 패널 코드를 지운다.
 if (process.env.NODE_ENV !== 'production') {
@@ -15,5 +15,5 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 /** production 빌드에서는 아무것도 그리지 않는 빈 컴포넌트로 바뀐다. */
-export const DataSourceDevtools: (props: DataSourceDevtoolsProps) => ReturnType<typeof Devtools> | null =
+export const RdxDevtools: (props: RdxDevtoolsProps) => ReturnType<typeof Devtools> | null =
   process.env.NODE_ENV !== 'production' ? Devtools : () => null;

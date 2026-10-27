@@ -5,17 +5,17 @@ import { collectBoxes, inspect, inspectFiber, type Box, type Hit, type InspectRe
 import { endpointOf, getRecords, pathOf as shortUrl, subscribe, type RequestRecord } from './registry.js';
 import { getCommits, getTopRenders, setRenderMonitoring } from './renderMonitor.js';
 
-export interface DataSourceDevtoolsProps {
+export interface RdxDevtoolsProps {
   /** 요소 선택 단축키. 기본값 Ctrl+Shift+D (macOS 는 Cmd 도 허용) */
   hotkey?: { key: string; shift?: boolean; alt?: boolean };
 }
 
 type Tab = 'inspect' | 'requests' | 'timeline' | 'renders';
 
-const ROOT_ATTR = 'data-dsi-root';
+const ROOT_ATTR = 'data-rdx-root';
 const Z = 2147483647;
-const POSITION_KEY = 'data-source-inspector:button';
-const DOCK_KEY = 'data-source-inspector:dock';
+const POSITION_KEY = 'react-data-xray:button';
+const DOCK_KEY = 'react-data-xray:dock';
 
 /** float: 버튼 옆 작은 패널 · bottom/right: 화면 가장자리에 도킹 · window: 별도 창(도킹 해제) */
 type Dock = 'float' | 'bottom' | 'right' | 'window';
@@ -101,7 +101,7 @@ const valueAt = (body: unknown, path: string): unknown => {
 };
 
 
-// ---- 요청 상세: dsi 가 보여 주는 모든 요청에서 클릭하면 연다 ----
+// ---- 요청 상세: rdx 가 보여 주는 모든 요청에서 클릭하면 연다 ----
 
 /** 검사 결과에서 연 경우, 컴포넌트가 실제로 쓰는 응답 위치 */
 interface Focus {
@@ -859,13 +859,13 @@ const usePopupWindow = (enabled: boolean, onClosed: () => void): Window | null =
   onClosedRef.current = onClosed;
   useEffect(() => {
     if (!enabled) return;
-    const win = window.open('', 'data-source-inspector', 'width=960,height=640');
+    const win = window.open('', 'react-data-xray', 'width=960,height=640');
     if (!win) {
       // 팝업이 막히면 작게 보기로 돌아간다.
       onClosedRef.current();
       return;
     }
-    win.document.title = 'Data Source Inspector';
+    win.document.title = 'React Data X-ray';
     win.document.body.style.margin = '0';
     win.document.body.style.background = color.bg;
     setPopup(win);
@@ -897,7 +897,7 @@ const panelStyle: CSSProperties = {
   wordBreak: 'break-all',
 };
 
-export const DataSourceDevtools = ({ hotkey = { key: 'd', shift: true } }: DataSourceDevtoolsProps) => {
+export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsProps) => {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('inspect');
   const [picking, setPicking] = useState(false);
@@ -994,7 +994,7 @@ export const DataSourceDevtools = ({ hotkey = { key: 'd', shift: true } }: DataS
           : { ...floatPos, width: 480, maxHeight: '70vh', borderRadius: 8, boxShadow: '0 4px 24px rgba(0,0,0,.4)' };
 
   const panel = (
-    <div style={{ ...panelStyle, ...dockStyle }} role="dialog" aria-label="Data source inspector" {...{ [ROOT_ATTR]: '' }}>
+    <div style={{ ...panelStyle, ...dockStyle }} role="dialog" aria-label="React Data X-ray" {...{ [ROOT_ATTR]: '' }}>
       {(dock === 'bottom' || dock === 'right') && (
         <ResizeHandle
           edge={dock === 'bottom' ? 'top' : 'left'}
@@ -1069,8 +1069,8 @@ export const DataSourceDevtools = ({ hotkey = { key: 'd', shift: true } }: DataS
       {open && dock === 'window' && popup && createPortal(panel, popup.document.body)}
       <button
         type="button"
-        aria-label="Data source inspector 열기"
-        title="Data source inspector (드래그로 이동)"
+        aria-label="React Data X-ray 열기"
+        title="React Data X-ray (드래그로 이동)"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={() => {
@@ -1093,7 +1093,7 @@ export const DataSourceDevtools = ({ hotkey = { key: 'd', shift: true } }: DataS
           touchAction: 'none',
         }}
       >
-        API
+        RDX
       </button>
     </div>
     </OpenRequestContext.Provider>,

@@ -1,4 +1,4 @@
-# data-source-inspector 로드맵
+# react-data-xray 로드맵
 
 목표와 방법은 [CONTEXT.md](./CONTEXT.md)에 있습니다. 여기서는 아직 하지 않은 일을 우선순위대로 적습니다.
 
