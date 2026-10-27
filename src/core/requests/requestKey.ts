@@ -1,4 +1,5 @@
 import { parseUrl } from '../../shared/format.js';
+import { actionNameOf } from './serverActionNames.js';
 import type { RequestRecord } from './types.js';
 
 /** 같은 API 를 상대·절대 경로로 부른 것을 한데 모은다. 같은 출처면 경로만, 다른 출처면 호스트를 붙인다. */
@@ -11,8 +12,9 @@ export const pathOf = (url: string): string => {
 // 화면에 보일 Server Action id 길이(전체는 40자 남짓)
 const ACTION_ID_LENGTH = 8;
 
-/** Server Action 이면 어느 함수인지 붙인다. 같은 페이지 경로의 서로 다른 함수를 나눠 센다. */
-const actionSuffix = (action: string | undefined): string => (action ? ` (action ${action.slice(0, ACTION_ID_LENGTH)})` : '');
+/** Server Action 이면 어느 함수인지 붙인다(이름을 알면 이름, 아니면 id 앞부분). 같은 페이지 경로의 서로 다른 함수를 나눠 센다. */
+const actionSuffix = (action: string | undefined): string =>
+  action ? ` (${actionNameOf(action) ?? `action ${action.slice(0, ACTION_ID_LENGTH)}`})` : '';
 
 /** 쿼리스트링을 뺀 "메서드 경로". 엔드포인트별 집계 단위다. */
 export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url' | 'action'>): string =>
@@ -25,5 +27,6 @@ export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url' | 'actio
 export const requestKeyOf = (record: Pick<RequestRecord, 'method' | 'url' | 'requestBody' | 'action'>): string => {
   const u = parseUrl(record.url);
   u?.searchParams.sort();
-  return `${record.method} ${u?.href ?? record.url}${actionSuffix(record.action)} ${record.requestBody ?? ''}`;
+  // 같은 요청인지는 이름을 알기 전후로 바뀌면 안 되므로 id 그대로 쓴다.
+  return `${record.method} ${u?.href ?? record.url}${record.action ? ` ${record.action}` : ''} ${record.requestBody ?? ''}`;
 };

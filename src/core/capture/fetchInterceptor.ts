@@ -1,3 +1,4 @@
+import { actionNameOf, learnActionNames } from '../requests/serverActionNames.js';
 import { createRecord, finishRecord, keepResponseText, registerBody } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
 import { isJson, isReadableText } from './contentType.js';
@@ -51,6 +52,8 @@ export const interceptFetch = (): void => {
     const requestHeaders = headersToObject(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     const action = requestHeaders?.['next-action'];
     const record = annotateRequest(createRecord('fetch', method, toUrl(input), requestBodyOf(input, init), action));
+    // 처음 보는 Server Action 이면 함수 이름을 찾아 둔다(받아 둔 스크립트를 한 번씩만 읽는다).
+    if (action && !actionNameOf(action)) void learnActionNames();
     record.requestHeaders = requestHeaders;
     const res = await originalFetch.call(this, input, init).catch((e: unknown) => {
       // 실패·취소된 요청도 목록에 남기고, 앱에는 원래 에러를 그대로 던진다.

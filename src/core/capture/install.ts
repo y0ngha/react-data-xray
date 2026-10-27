@@ -3,6 +3,8 @@ import { keepNativeFetch } from './nativeFetch.js';
 import { interceptJsonParse } from './jsonParseInterceptor.js';
 import { trackRefetchTriggers } from './requestContext.js';
 import { interceptXhr } from './xhrInterceptor.js';
+import { onActionNames } from '../requests/serverActionNames.js';
+import { touchRecords } from '../requests/store.js';
 
 let installed = false;
 
@@ -18,4 +20,6 @@ export const installCapture = (): void => {
   }
   if (typeof XMLHttpRequest !== 'undefined') interceptXhr();
   interceptJsonParse();
+  // Server Action 이름을 찾으면 엔드포인트 이름이 바뀌므로 화면을 다시 그린다.
+  onActionNames(touchRecords);
 };

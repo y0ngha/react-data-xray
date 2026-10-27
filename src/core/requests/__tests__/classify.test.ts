@@ -97,4 +97,14 @@ describe('classifyRecords', () => {
       expect(classifyRecords(list, new Set()).get(list[2].id)).toBe('same-response');
     });
   });
+
+  it('Server Action polling 은 action 별로 주기 요청으로 나누고, 같은 주소의 다른 action 과 섞지 않는다', () => {
+    const poll = (t: number) =>
+      rec(t, { method: 'POST', url: '/MSFT/news', requestBody: '["MSFT"]', action: '40828a5a92cb004a18', sameResponseAs: 1 });
+    const polls = [0, 3_000, 6_000, 9_000].map(poll);
+    const other = rec(7_000, { method: 'POST', url: '/MSFT/news', requestBody: '["MSFT"]', action: '601f13b65c219414' });
+    const classes = classifyRecords([...polls, other], new Set());
+    expect(polls.slice(1).map((r) => classes.get(r.id))).toEqual(['periodic', 'periodic', 'periodic']);
+    expect(classes.get(other.id)).toBe('ok');
+  });
 });
