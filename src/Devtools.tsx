@@ -421,7 +421,7 @@ const HitRow = ({ hit, stats }: { hit: Hit; stats: Map<string, EndpointStat> }) 
 // ---- 탭 ----
 
 const InspectTab = ({ result, stats }: { result: InspectResult | null; stats: Map<string, EndpointStat> }) => {
-  if (!result) return <div style={{ color: color.muted }}>[요소 선택]을 누르고 화면의 요소를 클릭하세요.</div>;
+  if (!result) return <div style={{ color: color.muted }}>[요소 선택]을 누르고 화면의 요소를 클릭하면, 그 요소의 데이터가 어느 API 응답에서 왔는지 보여 줍니다.</div>;
   const withHits = result.components.filter((c) => c.hits.length > 0);
   return (
     <div>
@@ -606,7 +606,7 @@ const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: Map<string, Endpoint
   return (
     <div>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-        <span style={{ color: color.muted }}>최근 10초 ·</span>
+        <span style={{ color: color.muted }}>렌더 분석 · 최근 10초 ·</span>
         <Button active={sort === 'avoidable'} onClick={() => setSort('avoidable')} title="줄일 수 있는 렌더(같은 내용 새 참조, 부모/context)가 많은 순">
           줄일 수 있는 렌더순
         </Button>
@@ -724,12 +724,12 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, color: color.muted }}>
-        <span>최근 20초</span>
+        <span>네트워크 타임라인 · 최근 20초</span>
         <span>
           <span style={{ color: color.accent }}>■</span> 요청 <span style={{ color: color.warn }}>■</span> 낭비 <span style={{ color: color.review }}>■</span> 확인 필요(주기·포커스){' '}
           <span style={{ color: color.muted }}>■</span> 정상 반복{' '}
           <span style={{ color: '#fb923c' }}>■</span> 실패{' '}
-          <span style={{ color: '#a78bfa' }}>▮</span> 렌더(높이 = 렌더된 컴포넌트 수)
+          <span style={{ color: '#a78bfa' }}>▮</span> 비교용 렌더 commit(높이 = 렌더된 컴포넌트 수, 자세히는 렌더 › 분석)
         </span>
         <span style={{ marginLeft: 'auto' }}>
           <Button active={paused} onClick={() => setPaused((p) => !p)}>
@@ -969,6 +969,14 @@ const useDraggable = () => {
   return { pos, onPointerDown, onPointerMove, onPointerUp };
 };
 
+/** 탭을 영역(데이터·네트워크·렌더)별로 묶어 앞에 영역 이름을 붙인다. */
+const TabGroup = ({ label, children }: { label: string; children: ReactNode }) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '0 4px', borderLeft: `1px solid ${color.border}` }}>
+    <span style={{ color: color.muted, fontSize: 10, marginRight: 2 }}>{label}</span>
+    {children}
+  </span>
+);
+
 // ---- 도킹: 표시 방식 선택, 크기 조절, 별도 창 ----
 
 const DOCK_OPTIONS: Array<{ dock: Dock; icon: string; title: string }> = [
@@ -1194,18 +1202,25 @@ export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsP
           ▦ 전체 표시
         </Button>
         <span style={{ flex: 1 }} />
-        <Button active={tab === 'inspect' && !selected} onClick={() => (setTab('inspect'), setSelected(null))}>
-          검사
-        </Button>
-        <Button active={tab === 'requests' && !selected} onClick={() => (setTab('requests'), setSelected(null))}>
-          요청{wastefulCount > 0 ? ` ⚠${wastefulCount}` : ''}
-        </Button>
-        <Button active={tab === 'timeline' && !selected} onClick={() => (setTab('timeline'), setSelected(null))}>
-          타임라인
-        </Button>
-        <Button active={tab === 'renders' && !selected} onClick={() => (setTab('renders'), setSelected(null))}>
-          렌더
-        </Button>
+        {/* 네트워크와 렌더는 따로 보는 영역이라, 탭을 영역별로 묶어 어느 쪽을 보고 있는지 헷갈리지 않게 한다. */}
+        <TabGroup label="데이터">
+          <Button active={tab === 'inspect' && !selected} onClick={() => (setTab('inspect'), setSelected(null))} title="요소를 클릭해 어느 API 응답의 데이터인지 봅니다">
+            출처
+          </Button>
+        </TabGroup>
+        <TabGroup label="네트워크">
+          <Button active={tab === 'requests' && !selected} onClick={() => (setTab('requests'), setSelected(null))} title="네트워크 요청 목록과 엔드포인트별 낭비 지표">
+            요청{wastefulCount > 0 ? ` ⚠${wastefulCount}` : ''}
+          </Button>
+          <Button active={tab === 'timeline' && !selected} onClick={() => (setTab('timeline'), setSelected(null))} title="네트워크 요청을 시간축에 놓고, 비교용으로 렌더 commit 을 함께 보여 줍니다">
+            타임라인
+          </Button>
+        </TabGroup>
+        <TabGroup label="렌더">
+          <Button active={tab === 'renders' && !selected} onClick={() => (setTab('renders'), setSelected(null))} title="렌더 횟수, 이유, 줄일 수 있는 렌더">
+            분석
+          </Button>
+        </TabGroup>
         <span style={{ width: 8 }} />
         <DockPicker dock={dock} onChange={(next) => updateDock({ dock: next })} />
         <Button onClick={() => setOpen(false)} title="닫기">
