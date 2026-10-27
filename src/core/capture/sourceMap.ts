@@ -66,12 +66,26 @@ export const parseMappings = (mappings: string): Segment[][] => {
 
 const MAP_COMMENT = /\/[/*][#@]\s*sourceMappingURL=([^\s*]+)\s*(?:\*\/\s*)?$/;
 
-/** data URL 의 내용(UTF-8). base64 면 바이트로 풀어 UTF-8 로 읽는다(한글 경로 등). */
-const dataUrlText = (url: string): string => {
+/** data URL 의 내용(UTF-8). base64 면 바이트로 풀어 UTF-8 로 읽는다(한글 경로 등). 깨진 값이면 null */
+const dataUrlText = (url: string): string | null => {
   const comma = url.indexOf(',');
   const body = url.slice(comma + 1);
-  if (!url.slice(0, comma).endsWith(';base64')) return decodeURIComponent(body);
-  return new TextDecoder().decode(Uint8Array.from(atob(body), (c) => c.charCodeAt(0)));
+  try {
+    if (!url.slice(0, comma).endsWith(';base64')) return decodeURIComponent(body);
+    return new TextDecoder().decode(Uint8Array.from(atob(body), (c) => c.charCodeAt(0)));
+  } catch {
+    return null;
+  }
+};
+
+/** 소스맵 JSON. 깨진 값이면 null(그 모듈은 원래 위치 그대로 둔다) */
+const parseMapJson = (text: string | null): unknown => {
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 };
 
 const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
@@ -82,10 +96,12 @@ const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   if (!ref) return null;
   const mapUrl = new URL(ref, scriptUrl).href;
   const json = mapUrl.startsWith('data:')
-    ? JSON.parse(dataUrlText(mapUrl))
-    : await send(mapUrl, { credentials: 'same-origin' }).then((r) => r.json());
-  const map = json as { sources?: string[]; sourceRoot?: string; mappings?: string };
-  if (!map.mappings || !map.sources) return null;
+    ? parseMapJson(dataUrlText(mapUrl))
+    : await send(mapUrl, { credentials: 'same-origin' })
+        .then((r) => (r.ok ? r.text() : null))
+        .then(parseMapJson);
+  const map = json as { sources?: string[]; sourceRoot?: string; mappings?: string } | null;
+  if (!map?.mappings || !map.sources) return null;
   const root = map.sourceRoot ? map.sourceRoot.replace(/\/?$/, '/') : '';
   // sources 는 소스맵(또는 모듈) 위치 기준 상대 경로일 수 있다(Vite: "global.ts"). 모듈 주소 기준으로 풀어 경로를 살린다.
   return { sources: map.sources.map((s) => sourcePath(`${root}${s}`, scriptUrl)), lines: parseMappings(map.mappings) };
