@@ -21,7 +21,12 @@ export const isSameOrChildPath = (path: string, parent: string): boolean =>
  * 값 안에서 응답 객체를 같은 참조로 찾는다. 응답 객체를 찾으면 그 아래는 더 내려가지 않는다.
  * 참조로 못 찾은 객체는 파생 매칭 후보로 함께 돌려준다.
  */
-export const findExactOrigins = (root: unknown, via: string, queryKey?: unknown): { hits: Hit[]; candidates: Candidate[] } => {
+export const findExactOrigins = (
+  root: unknown,
+  via: string,
+  queryKey?: unknown,
+  maxDepth = MAX_SEARCH_DEPTH,
+): { hits: Hit[]; candidates: Candidate[] } => {
   const hits: Hit[] = [];
   const candidates: Candidate[] = [];
   const seen = new WeakSet<object>();
@@ -39,11 +44,11 @@ export const findExactOrigins = (root: unknown, via: string, queryKey?: unknown)
     }
     // React element 는 props 만 따라간다(_owner 등으로 끝없이 퍼지는 것을 막는다).
     if ((value as { $$typeof?: unknown }).$$typeof) {
-      if (depth < MAX_SEARCH_DEPTH) walk((value as { props?: unknown }).props, `${where}.props`, depth + 1);
+      if (depth < maxDepth) walk((value as { props?: unknown }).props, `${where}.props`, depth + 1);
       return;
     }
     if (!Array.isArray(value) && candidates.length < MAX_CANDIDATES) candidates.push({ value, where });
-    if (depth < MAX_SEARCH_DEPTH) childEntries(value, MAX_CHILDREN).forEach(([key, child]) => walk(child, `${where}${key}`, depth + 1));
+    if (depth < maxDepth) childEntries(value, MAX_CHILDREN).forEach(([key, child]) => walk(child, `${where}${key}`, depth + 1));
   };
   walk(root, via, 0);
   return { hits, candidates };

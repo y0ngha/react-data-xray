@@ -149,6 +149,25 @@ describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => 
     expect(findConsumers(record, () => false).map((c) => [c.name, c.via])).toContainEqual(['Badge', 'context(UserContext)']);
   });
 
+  it('응답을 깊이 품은 context(라우터 상태 등)를 읽기만 하는 래퍼는 그 응답의 소비자로 보지 않는다', async () => {
+    const RouterState = createContext<unknown>(null);
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ items: [{ id: 1, title: 'loader' }] }));
+    const loaderData = await fetch('/api/loader').then((r) => r.json());
+    const Link = () => {
+      useContext(RouterState);
+      return <a href="#x">link</a>;
+    };
+    const routerState = { state: { loaderData: { route: loaderData } } };
+    render(
+      <RouterState.Provider value={routerState}>
+        <Link />
+      </RouterState.Provider>,
+    );
+    const record = getRecords().find((r) => r.url === '/api/loader')!;
+    expect(findConsumers(record, () => false).map((c) => c.name)).not.toContain('Link');
+    expect(inspect(screen.getByText('link')).components[0].hits).toEqual([]);
+  });
+
   it('이름이 같은 조상 컴포넌트가 여러 개여도 깊이로 구분한다', async () => {
     const Wrap = ({ item, children }: { item: object; children: React.ReactNode }) => <div data-x={String(!!item)}>{children}</div>;
     const pickPair = (json: typeof DEFAULT_BODY) => json.data.list;

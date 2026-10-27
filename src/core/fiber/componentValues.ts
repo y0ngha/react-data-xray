@@ -6,7 +6,12 @@ export interface ComponentValue {
   value: unknown;
   /** React Query 의 useQuery 결과면 그 queryKey */
   queryKey?: unknown;
+  /** 출처를 찾을 깊이. context 는 얕게 본다(라우터 상태처럼 응답을 깊이 품은 context 를 읽기만 하는 래퍼를 소비자로 잡지 않게) */
+  searchDepth?: number;
 }
+
+/** context 값은 그 값 자체와 바로 아래 한 단계까지만 출처로 본다. */
+export const CONTEXT_SEARCH_DEPTH = 1;
 
 interface QueryObserverLike {
   getCurrentResult: () => { data?: unknown };
@@ -37,7 +42,7 @@ const hookValue = (hook: Hook, index: number): ComponentValue => {
 const contextValues = (fiber: Fiber): ComponentValue[] => {
   const values: ComponentValue[] = [];
   for (let dep = fiber.dependencies?.firstContext ?? null; dep; dep = dep.next) {
-    values.push({ via: `context(${dep.context?.displayName || 'Context'})`, value: dep.memoizedValue });
+    values.push({ via: `context(${dep.context?.displayName || 'Context'})`, value: dep.memoizedValue, searchDepth: CONTEXT_SEARCH_DEPTH });
   }
   return values;
 };

@@ -1,5 +1,5 @@
 import { findRootFibers, walkFibers } from '../fiber/tree.js';
-import { findDerivedOrigin } from '../inspect/derivedMatch.js';
+import { findDerivedOrigin, flushIndex } from '../inspect/derivedMatch.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
@@ -78,22 +78,34 @@ interface Fetched {
   request: string;
 }
 
+/** 성공 이벤트에서 남긴 것. 출처 매칭은 점검할 때 한다(앱의 dispatch 안에서 색인을 조회하지 않게). */
+interface PendingFetch {
+  at: number;
+  queryHash: string;
+  queryKey: unknown;
+  /** 데이터를 붙잡지 않는다(큰 응답이 2분 동안 남지 않게) */
+  data: WeakRef<object>;
+}
+
 interface ClientHistory {
+  pending: PendingFetch[];
   fetched: Fetched[];
-  /** 지금까지 만든 쿼리 키(무효화 미스 판정용) */
+  /** 지금까지 만든 쿼리 키(queryHash → queryKey, 무효화 미스 판정용) */
   keys: Map<string, unknown>;
   misses: Array<{ at: number; finding: CacheFinding }>;
 }
+
+const MAX_KEYS = 2000;
 
 const histories = new WeakMap<QueryClientLike, ClientHistory>();
 
 const describeRequest = (r: RequestRecord): string => `${r.method} ${r.url}`;
 
-/** 쿼리 함수가 가져온 데이터의 요청. 같은 참조가 아니면(structural sharing 이 복사) 필드 값으로 찾되, 방금 끝난 요청만 */
-const fetchedRequest = (data: unknown, now: number): RequestRecord | undefined => {
-  if (data === null || typeof data !== 'object') return undefined;
+/** 쿼리 함수가 가져온 데이터의 요청. 같은 참조가 아니면(structural sharing 이 복사) 필드 값으로 찾되, 성공 직전에 끝난 요청만 */
+const fetchedRequest = (data: object, at: number): RequestRecord | undefined => {
   const record = (getOrigin(data) ?? findDerivedOrigin(data))?.record;
-  return record && now - (record.startedAt + record.durationMs) <= FETCH_WINDOW_MS ? record : undefined;
+  const finished = record ? record.startedAt + record.durationMs : -Infinity;
+  return record && finished <= at && at - finished <= FETCH_WINDOW_MS ? record : undefined;
 };
 
 /** v5 는 invalidateQueries({ queryKey }), v4 는 invalidateQueries(queryKey) 도 받는다. */
@@ -103,55 +115,86 @@ const invalidatedKey = (args: unknown[]): unknown => {
   return (first as { queryKey?: unknown } | undefined)?.queryKey;
 };
 
-/** react-query 의 접두사 일치: 무효화 키의 각 요소가 쿼리 키의 앞부분과 같으면 맞는다. */
-const matchesPrefix = (prefix: unknown, key: unknown): boolean =>
-  Array.isArray(prefix) && Array.isArray(key) && prefix.length <= key.length && prefix.every((p, i) => keyText(p) === keyText(key[i]));
+/**
+ * react-query 의 partialMatchKey 와 같은 규칙: 무효화 키가 쿼리 키의 앞부분이면 맞고, 객체 요소는 무효화 쪽에 있는 필드만
+ * 같으면 맞는다(키 순서는 보지 않는다). 배열도 객체처럼 첨자별로 비교하므로 짧은 접두사가 맞는다.
+ */
+const partialMatch = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null || typeof a !== 'object') return false;
+  return Object.keys(a).every((k) => partialMatch((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+};
 
-const recordFetch = (
-  history: ClientHistory,
-  q: QueryLike,
-  record: RequestRecord | undefined = fetchedRequest(q.state.data, Date.now()),
-): void => {
-  const now = Date.now();
-  if (!record) return;
-  history.fetched.push({
-    at: now,
-    queryHash: q.queryHash,
-    queryKey: keyText(q.queryKey),
-    requestKey: requestKeyOf(record),
-    request: describeRequest(record),
+const pushBounded = <T>(list: T[], item: T): void => {
+  list.push(item);
+  if (list.length > MAX_EVENTS) list.shift();
+};
+
+const toFetched = (at: number, queryHash: string, queryKey: unknown, record: RequestRecord): Fetched => ({
+  at,
+  queryHash,
+  queryKey: keyText(queryKey),
+  requestKey: requestKeyOf(record),
+  request: describeRequest(record),
+});
+
+const rememberKey = (history: ClientHistory, q: QueryLike): void => {
+  history.keys.delete(q.queryHash);
+  history.keys.set(q.queryHash, q.queryKey);
+  if (history.keys.size > MAX_KEYS) history.keys.delete(history.keys.keys().next().value as string);
+};
+
+/** 미뤄 둔 성공 이벤트의 출처를 찾는다. 색인을 먼저 마쳐 방금 받은 응답이 빠지지 않게 한다. */
+const resolvePending = (history: ClientHistory): void => {
+  if (history.pending.length === 0) return;
+  flushIndex();
+  history.pending.forEach(({ at, queryHash, queryKey, data }) => {
+    const value = data.deref();
+    const record = value && fetchedRequest(value, at);
+    if (record) pushBounded(history.fetched, toFetched(at, queryHash, queryKey, record));
   });
-  if (history.fetched.length > MAX_EVENTS) history.fetched.shift();
+  history.pending = [];
 };
 
 const recordInvalidate = (history: ClientHistory, args: unknown[]): void => {
   const key = invalidatedKey(args);
-  if (key === undefined || [...history.keys.values()].some((k) => matchesPrefix(key, k))) return;
-  history.misses.push({
+  if (key === undefined || [...history.keys.values()].some((k) => partialMatch(key, k))) return;
+  pushBounded(history.misses, {
     at: Date.now(),
     finding: { kind: 'invalidate-miss', keys: [keyText(key)], requests: [], stack: new Error().stack },
   });
-  if (history.misses.length > MAX_EVENTS) history.misses.shift();
 };
 
 /** 처음 본 client 를 감시한다: 쿼리 성공을 기록하고, 무효화가 빗나가는지 본다. 원래 동작은 그대로 한다. */
 const watch = (client: QueryClientLike): void => {
   if (histories.has(client)) return;
-  const history: ClientHistory = { fetched: [], keys: new Map(), misses: [] };
+  const history: ClientHistory = { pending: [], fetched: [], keys: new Map(), misses: [] };
   histories.set(client, history);
   const cache = client.getQueryCache();
-  // 찾기 전에 가져온 데이터: 같은 참조로 출처가 확실한 것만 기록으로 채운다.
+  // 찾기 전에 가져온 데이터: 같은 참조로 출처가 확실한 것만 기록으로 채운다(파생 매칭은 쓰지 않는다).
+  const now = Date.now();
   cache.getAll().forEach((q) => {
-    history.keys.set(keyText(q.queryKey), q.queryKey);
+    rememberKey(history, q);
     const data = q.state.data;
-    if (data !== null && typeof data === 'object') recordFetch(history, q, getOrigin(data)?.record);
+    const record = data !== null && typeof data === 'object' ? getOrigin(data)?.record : undefined;
+    if (record) pushBounded(history.fetched, toFetched(now, q.queryHash, q.queryKey, record));
   });
   cache.subscribe((event) => {
     try {
-      if (!event.query) return;
-      history.keys.set(keyText(event.query.queryKey), event.query.queryKey);
-      // 직접 넣은 데이터(setQueryData 는 manual)는 요청이 아니다.
-      if (event.type === 'updated' && event.action?.type === 'success' && !event.action.manual) recordFetch(history, event.query);
+      const q = event.query;
+      if (!q) return;
+      if (event.type === 'added') rememberKey(history, q);
+      // 직접 넣은 데이터(setQueryData 는 manual)는 요청이 아니다. 출처는 점검할 때 찾는다(dispatch 안에서 일을 줄인다).
+      const data = q.state.data;
+      if (
+        event.type === 'updated' &&
+        event.action?.type === 'success' &&
+        !event.action.manual &&
+        data !== null &&
+        typeof data === 'object'
+      ) {
+        pushBounded(history.pending, { at: Date.now(), queryHash: q.queryHash, queryKey: q.queryKey, data: new WeakRef(data) });
+      }
     } catch {
       // 점검 실패가 앱의 캐시 동작을 막으면 안 된다.
     }
@@ -208,32 +251,41 @@ const refetchesOnEveryVisit = (q: QueryLike): boolean =>
   !!q.observers?.length &&
   q.observers.every((o) => !o.options?.refetchInterval && (o.options?.staleTime ?? q.options?.staleTime ?? 0) === 0);
 
-const staleFindings = (client: QueryClientLike, sameResponse: ReadonlySet<string>): CacheFinding[] =>
-  client
-    .getQueryCache()
-    .getAll()
-    .filter(refetchesOnEveryVisit)
-    .flatMap((q): CacheFinding[] => {
-      const data = q.state.data;
-      const record = data !== null && typeof data === 'object' ? getOrigin(data)?.record : undefined;
-      return record && sameResponse.has(requestKeyOf(record))
-        ? [{ kind: 'stale-zero', keys: [keyText(q.queryKey)], requests: [describeRequest(record)] }]
-        : [];
-    });
+/** 지금 캐시의 데이터 출처. 데이터가 바뀌지 않아 기록(2분)이 지난 중복 캐시도 찾게 같은 참조인 것을 더한다. */
+const currentFetched = (queries: readonly QueryLike[], now: number): Fetched[] =>
+  queries.flatMap((q) => {
+    const data = q.state.data;
+    const record = data !== null && typeof data === 'object' ? getOrigin(data)?.record : undefined;
+    return record ? [toFetched(now, q.queryHash, q.queryKey, record)] : [];
+  });
+
+const staleFindings = (queries: readonly QueryLike[], sameResponse: ReadonlySet<string>): CacheFinding[] =>
+  queries.filter(refetchesOnEveryVisit).flatMap((q): CacheFinding[] => {
+    const data = q.state.data;
+    // queryFn 이 응답을 가공해 돌려줘도 찾도록 필드 값까지 본다.
+    const record = data !== null && typeof data === 'object' ? (getOrigin(data) ?? findDerivedOrigin(data))?.record : undefined;
+    return record && sameResponse.has(requestKeyOf(record))
+      ? [{ kind: 'stale-zero', keys: [keyText(q.queryKey)], requests: [describeRequest(record)] }]
+      : [];
+  });
 
 /** 지금 점검한다. classOf 는 같은 응답 재요청 판정에 쓴다. */
 export const auditQueryCache = (classOf: (r: RequestRecord) => RequestClass, records: readonly RequestRecord[]): CacheFinding[] => {
   const now = Date.now();
   const sameResponse = new Set(records.filter((r) => classOf(r) === 'same-response').map(requestKeyOf));
-  const findings = findQueryClients().flatMap((client) => {
+  const fetched: Fetched[] = [];
+  const others: CacheFinding[] = [];
+  // 여러 QueryClient 를 쓰면 client 사이의 중복 캐시도 보도록 함께 판정한다.
+  findQueryClients().forEach((client) => {
     const history = histories.get(client)!;
+    resolvePending(history);
     history.fetched = history.fetched.filter((f) => now - f.at <= HISTORY_MS);
     history.misses = history.misses.filter((m) => now - m.at <= HISTORY_MS);
-    return keyFindings(history.fetched).concat(
-      staleFindings(client, sameResponse),
-      history.misses.map((m) => m.finding),
-    );
+    const queries = client.getQueryCache().getAll();
+    fetched.push(...history.fetched, ...currentFetched(queries, now));
+    others.push(...staleFindings(queries, sameResponse), ...history.misses.map((m) => m.finding));
   });
+  const findings = keyFindings(fetched).concat(others);
   // 같은 종류·키·요청은 하나로 합친다(같은 키를 여러 번 무효화한 경우 등).
   return Array.from(new Map(findings.map((f) => [findingId(f), f])).values());
 };

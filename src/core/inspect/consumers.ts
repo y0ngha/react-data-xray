@@ -12,14 +12,14 @@ const MAX_DEPTH = 3;
 const MAX_CHILDREN = 100;
 
 /** 값 안에 이 요청(같은 요청의 이전 응답 포함)의 응답 객체가 있는지 */
-const holdsResponseOf = (root: unknown, requestKey: string): boolean => {
+const holdsResponseOf = (root: unknown, requestKey: string, maxDepth = MAX_DEPTH): boolean => {
   const seen = new WeakSet<object>();
   const walk = (value: unknown, depth: number): boolean => {
     if (value === null || typeof value !== 'object' || seen.has(value)) return false;
     seen.add(value);
     const origin = getOrigin(value);
     if (origin) return requestKeyOf(origin.record) === requestKey;
-    if (depth >= MAX_DEPTH || isOpaque(value)) return false;
+    if (depth >= maxDepth || isOpaque(value)) return false;
     return childEntries(value, MAX_CHILDREN).some(([, child]) => walk(child, depth + 1));
   };
   return walk(root, 0);
@@ -33,19 +33,21 @@ export const findConsumers = (record: RequestRecord, isOwnUi: (el: Element) => b
   const key = requestKeyOf(record);
   const consumers: Consumer[] = [];
   // 같은 객체(react-intl 의 IntlContext 값처럼 수천 컴포넌트가 함께 읽는 context 등)는 한 번만 훑는다.
-  const known = new Map<object, boolean>();
-  const holds = (value: unknown): boolean => {
+  const known = new Map<number, Map<object, boolean>>();
+  const holds = (value: unknown, depth = MAX_DEPTH): boolean => {
     if (value === null || typeof value !== 'object') return false;
-    const cached = known.get(value);
+    const byDepth = known.get(depth) ?? new Map<object, boolean>();
+    known.set(depth, byDepth);
+    const cached = byDepth.get(value);
     if (cached !== undefined) return cached;
-    const result = holdsResponseOf(value, key);
-    known.set(value, result);
+    const result = holdsResponseOf(value, key, depth);
+    byDepth.set(value, result);
     return result;
   };
   findRootFibers().forEach((root) =>
     walkFibers(root.child, (f) => {
       if (consumers.length >= MAX_CONSUMERS) return false;
-      const found = isComposite(f) ? collectValues(f).find(({ value }) => holds(value)) : undefined;
+      const found = isComposite(f) ? collectValues(f).find(({ value, searchDepth }) => holds(value, searchDepth)) : undefined;
       if (found && hostNodesOf(f).some((n) => !isOwnUi(n)))
         consumers.push({ id: consumers.length, name: getComponentName(f), rect: componentRect(f, isOwnUi), via: found.via });
       return true;

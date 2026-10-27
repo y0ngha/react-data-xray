@@ -37,9 +37,17 @@ const uniqueHits = (hits: readonly Hit[]): Hit[] =>
 
 /** 컴포넌트 하나가 들고 있는 데이터의 출처. 참조로 못 찾으면 필드 값 겹침(파생)으로 찾는다. */
 export const inspectFiber = (fiber: Fiber): Hit[] => {
-  const found = collectValues(fiber).map(({ via, value, queryKey }) => findExactOrigins(value, via, queryKey));
-  const exact = uniqueHits(found.flatMap((f) => f.hits));
-  return mergeHits(exact.length > 0 ? exact : derivedHits(found.flatMap((f) => f.candidates)));
+  // context 는 props·훅에서 못 찾았을 때만 본다(래퍼가 읽는 넓은 context 가 실제 데이터를 가리지 않게).
+  const values = collectValues(fiber);
+  const own = values.filter((v) => v.searchDepth === undefined);
+  const search = (list: typeof values) =>
+    list.map(({ via, value, queryKey, searchDepth }) => findExactOrigins(value, via, queryKey, searchDepth));
+  const ownFound = search(own);
+  const ownExact = uniqueHits(ownFound.flatMap((f) => f.hits));
+  if (ownExact.length > 0) return mergeHits(ownExact);
+  const ownDerived = derivedHits(ownFound.flatMap((f) => f.candidates));
+  if (ownDerived.length > 0) return mergeHits(ownDerived);
+  return mergeHits(uniqueHits(search(values.filter((v) => v.searchDepth !== undefined)).flatMap((f) => f.hits)));
 };
 
 const ancestorsOf = (fiber: Fiber | null): Fiber[] => (fiber ? [fiber, ...ancestorsOf(fiber.return)] : []);

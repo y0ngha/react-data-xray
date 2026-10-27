@@ -46,7 +46,8 @@
         "src/testing/**"
       ],
       "rules": {
-        "unicorn/consistent-function-scoping": "off"
+        "unicorn/consistent-function-scoping": "off",
+        "react/jsx-no-constructed-context-values": "off"
       }
     }
   ]

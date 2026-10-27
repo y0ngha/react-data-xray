@@ -64,6 +64,21 @@ describe('React Query 캐시키 점검', () => {
     expect(auditQueryCache(sameOrOk, getRecords()).filter((f) => f.kind === 'invalidate-miss')).toEqual([]);
   });
 
+  it('객체 요소는 무효화 쪽 필드만 같으면 맞는다(react-query 의 부분 일치, 키 순서 무시)', async () => {
+    const client = new QueryClient();
+    withClient(client, <p>app</p>);
+    findQueryClients();
+    await client.fetchQuery({ queryKey: ['todos', { status: 'done', page: 1 }], queryFn: load('/api/todos?status=done&page=1') });
+    await client.invalidateQueries({ queryKey: ['todos', { status: 'done' }] });
+    await client.invalidateQueries({ queryKey: ['todos', { page: 1, status: 'done' }] });
+    await client.invalidateQueries({ queryKey: ['todos', { status: 'open' }] });
+    expect(
+      auditQueryCache(sameOrOk, getRecords())
+        .filter((f) => f.kind === 'invalidate-miss')
+        .map((f) => f.keys[0]),
+    ).toEqual(['["todos",{"status":"open"}]']);
+  });
+
   it('무효화한 키와 맞는 쿼리가 없으면 부른 위치와 함께 알리고, 무효화는 그대로 한다', async () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
