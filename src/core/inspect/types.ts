@@ -18,6 +18,8 @@ export interface ComponentResult {
   depth: number;
   name: string;
   hits: Hit[];
+  /** 분석 대상(범위)으로 쓸 컴포넌트 fiber */
+  fiber: unknown;
 }
 
 export interface InspectResult {

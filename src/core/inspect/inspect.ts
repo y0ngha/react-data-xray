@@ -50,9 +50,15 @@ export const inspect = (el: Element): InspectResult => {
   const components: ComponentResult[] = [];
   for (const fiber of ancestorsOf(getFiber(el)).filter(isComposite).slice(0, MAX_COMPONENTS)) {
     if (components.filter((c) => c.hits.length > 0).length >= MAX_COMPONENTS_WITH_HITS) break;
-    components.push({ depth: components.length, name: getComponentName(fiber), hits: inspectFiber(fiber) });
+    components.push({ depth: components.length, name: getComponentName(fiber), hits: inspectFiber(fiber), fiber });
   }
   const found = components.some((c) => c.hits.length > 0);
   const text = el.childElementCount === 0 ? (el.textContent ?? '') : '';
   return { components, guesses: found ? [] : guessByText(text) };
+};
+
+/** 요소를 고르면 분석 대상으로 삼을 컴포넌트: 데이터를 가진 가장 가까운 조상, 없으면 가장 가까운 컴포넌트 */
+export const scopeOf = (result: InspectResult): { fiber: Fiber; name: string } | null => {
+  const target = result.components.find((c) => c.hits.length > 0) ?? result.components[0];
+  return target ? { fiber: target.fiber as Fiber, name: target.name } : null;
 };

@@ -17,10 +17,10 @@ describe('RdxDevtools', () => {
   it('버튼을 누르면 패널이 열리고, 탭을 영역별로 옮겨 다니며, 닫을 수 있다', async () => {
     render(<RdxDevtools />);
     const panel = openPanel();
-    expect(within(panel).getByText(/요소 선택\]을 누르고/)).toBeTruthy();
-    fireEvent.click(within(panel).getByRole('button', { name: '분석' }));
+    expect(within(panel).getByText(/요소 선택\]으로 화면의 요소를 고르면/)).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: '렌더' }));
     expect(within(panel).getByText(/렌더 분석 · 최근 10초/)).toBeTruthy();
-    fireEvent.click(within(panel).getByRole('button', { name: '타임라인' }));
+    fireEvent.click(within(panel).getByRole('button', { name: '네트워크 타임라인' }));
     expect(within(panel).getByText('네트워크 타임라인 · 최근 20초')).toBeTruthy();
     fireEvent.click(within(panel).getByTitle('닫기'));
     expect(screen.queryByRole('complementary')).toBeNull();
@@ -32,8 +32,8 @@ describe('RdxDevtools', () => {
     render(<RdxDevtools />);
     await act(flush);
     const panel = openPanel();
-    fireEvent.click(within(panel).getByRole('button', { name: /요청/ }));
-    expect(within(panel).getByRole('button', { name: /요청 ⚠1/ })).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: /네트워크 요청/ }));
+    expect(within(panel).getByRole('button', { name: /네트워크 요청 ⚠1/ })).toBeTruthy();
     fireEvent.click(within(panel).getByText('전체 기록'));
     fireEvent.click(within(panel).getAllByRole('button', { name: /GET \/api\/a/ })[0]);
     expect(within(panel).getByText('← 뒤로')).toBeTruthy();
@@ -48,7 +48,7 @@ describe('RdxDevtools', () => {
     Object.defineProperty(document, 'elementFromPoint', { value: () => target, configurable: true });
     render(<RdxDevtools hotkey={{ key: 'e', shift: true }} />);
     fireEvent.keyDown(window, { key: 'e', metaKey: true, shiftKey: true });
-    expect(screen.getByText(/화면의 요소를 클릭하세요/)).toBeTruthy();
+    expect(screen.getByText(/분석할 요소를 화면에서 클릭하세요/)).toBeTruthy();
     fireEvent.click(target);
     expect(screen.getByText('연결된 API 응답을 찾지 못했습니다.')).toBeTruthy();
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -77,13 +77,41 @@ describe('RdxDevtools', () => {
     expect(JSON.parse(localStorage.getItem('react-data-xray:dock')!).dock).toBe('float');
   });
 
-  it('전체 표시를 켜고 끌 수 있다', () => {
+  it('화면 박스를 켜고 끌 수 있다', () => {
     render(<RdxDevtools />);
     const panel = openPanel();
-    const toggle = within(panel).getByRole('button', { name: /전체 표시/ });
+    const toggle = within(panel).getByRole('button', { name: /박스/ });
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('요소를 고르면 그 컴포넌트 안만 분석하고, 화면 전체로 돌아갈 수 있다', async () => {
+    type Item = { id: number; title: string };
+    const Row = ({ item }: { item: Item }) => <li>{item.title}</li>;
+    const used: Item = await fetch('/api/used')
+      .then((r) => r.json())
+      .then((json) => json.data.list[0]);
+    await fetch('/api/unused').then((r) => r.json());
+    render(
+      <ul>
+        <Row item={used} />
+      </ul>,
+    );
+    render(<RdxDevtools hotkey={{ key: 'e', shift: true }} />);
+    await act(flush);
+    const target = screen.getByText(used.title);
+    Object.defineProperty(document, 'elementFromPoint', { value: () => target, configurable: true });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 10, 10));
+    fireEvent.keyDown(window, { key: 'e', metaKey: true, shiftKey: true });
+    fireEvent.click(target);
+    const panel = screen.getByRole('complementary', { name: 'React Data X-ray' });
+    expect(within(panel).getByRole('button', { name: '<Row> 안 ✕' })).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: /네트워크 요청/ }));
+    expect(within(panel).getByText(/이 안의 컴포넌트가 쓰는 요청 1건/)).toBeTruthy();
+    expect(within(panel).queryByText(/\/api\/unused/)).toBeNull();
+    fireEvent.click(within(panel).getByRole('button', { name: '<Row> 안 ✕' }));
+    expect(within(panel).getByText(/GET \/api\/unused/)).toBeTruthy();
   });
 });

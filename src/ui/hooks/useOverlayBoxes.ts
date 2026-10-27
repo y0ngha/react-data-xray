@@ -4,7 +4,9 @@ import { collectBoxes } from '../../core/inspect/boxes.js';
 import { isIndexPending } from '../../core/inspect/derivedMatch.js';
 import type { Box } from '../../core/inspect/types.js';
 import { subscribeCommits } from '../../core/render/monitor.js';
+import type { Fiber } from '../../core/fiber/types.js';
 import { isOwnUi } from '../ownUi.js';
+import { useRenderMonitoring } from './useRenderMonitoring.js';
 
 // 트리 전체를 훑는 일이라, commit 이 몰려도(폴링 화면) 이 간격에 한 번만 한다.
 const COLLECT_MS = 1000;
@@ -12,19 +14,25 @@ const COLLECT_MS = 1000;
 const BUDGET_MS = 12;
 const CONTINUE_MS = 50;
 
+const NO_BOXES: Box[] = [];
+
 /**
- * 전체 표시 박스 목록. 렌더 commit 이 있을 때 다시 모은다.
+ * 분석 대상(화면 전체, 또는 고른 컴포넌트 안)에서 데이터 출처가 있는 컴포넌트 박스 목록. 렌더 commit 이 있을 때 다시 모은다.
+ * 화면 박스 표시뿐 아니라 데이터·네트워크 관점도 이 목록을 쓴다.
  * 스크롤·크기 변경에 따른 위치는 목록을 다시 모으지 않고 그리는 쪽에서 직접 고친다.
  */
-export const useOverlayBoxes = (): Box[] => {
-  const [boxes, setBoxes] = useState<Box[]>([]);
+export const useOverlayBoxes = (enabled: boolean, scope: Fiber | null): Box[] => {
+  const [boxes, setBoxes] = useState<Box[]>(NO_BOXES);
+  // commit 을 받으려면 렌더 감시가 켜져 있어야 한다.
+  useRenderMonitoring(enabled);
   useEffect(() => {
+    if (!enabled) return undefined;
     let timer = 0;
     let last = 0;
     const collect = () => {
       timer = 0;
       last = Date.now();
-      const { boxes: next, deferred } = collectBoxes(isOwnUi, BUDGET_MS);
+      const { boxes: next, deferred } = collectBoxes(isOwnUi, BUDGET_MS, scope ?? undefined);
       setBoxes(next);
       if (deferred) timer = window.setTimeout(collect, CONTINUE_MS);
       // 응답 색인이 덜 끝났으면 commit 이 없어도 평소 간격 뒤에 한 번 더 모은다(색인 뒤에야 찾는 파생 출처).
@@ -39,6 +47,6 @@ export const useOverlayBoxes = (): Box[] => {
       window.clearTimeout(timer);
       unsubscribe();
     };
-  }, []);
-  return boxes;
+  }, [enabled, scope]);
+  return enabled ? boxes : NO_BOXES;
 };

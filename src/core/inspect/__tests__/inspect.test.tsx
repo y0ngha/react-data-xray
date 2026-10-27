@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_BODY, flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { getRecords } from '../../requests/store.js';
+import { getComponentName, getFiber } from '../../fiber/tree.js';
+import type { Fiber } from '../../fiber/types.js';
 import { collectBoxes } from '../boxes.js';
 import { flushIndex, isIndexPending } from '../derivedMatch.js';
 import { findConsumers } from '../consumers.js';
@@ -233,6 +235,58 @@ describe('전체 표시 박스', () => {
     expect(withLayout(() => collectBoxes(() => false).boxes)).toHaveLength(1);
     render(<Row item={rows[1]} />);
     expect(withLayout(() => collectBoxes(() => false).boxes)).toHaveLength(2);
+  });
+
+  it('고른 컴포넌트 안만 모을 때도, 범위 밖 조상이 보여 준 항목 데이터는 덮인 것으로 보고 다른 출처를 그린다', async () => {
+    type Project = { id: number; status: { up: number } };
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ data: { projects: [{ id: 1, status: { up: 1 } }] } }));
+    const project: Project = await fetch('/api/projects')
+      .then((r) => r.json())
+      .then((json) => json.data.projects[0]);
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ total: 3, normal: 2, paused: 0 }));
+    const summary = await fetch('/api/summary').then((r) => r.json());
+    const stat = { ...summary, before: {} };
+    const Body = ({ status, stat: s }: { status: Project['status']; stat: { total: number } }) => (
+      <p>
+        {status.up} {s.total}
+      </p>
+    );
+    const Card = ({ item }: { item: Project }) => (
+      <section>
+        <Body status={item.status} stat={stat} />
+      </section>
+    );
+    render(<Card item={project} />);
+    const body = withLayout(() => collectBoxes(() => false).boxes).find((b) => b.name === 'Body');
+    expect(body).toBeTruthy();
+    const scoped = withLayout(() => collectBoxes(() => false, Infinity, body!.fiber as Fiber).boxes);
+    expect(scoped.map((b) => [b.name, b.hit.record.url])).toEqual([['Body', '/api/summary']]);
+    // 조상이 같은 데이터를 이미 보여 줬어도, 고른 대상 자신은 박스를 그린다.
+    const card = withLayout(() => collectBoxes(() => false).boxes).find((b) => b.name === 'Card');
+    const scopedCard = withLayout(() => collectBoxes(() => false, Infinity, card!.fiber as Fiber).boxes);
+    expect(scopedCard.map((b) => b.name)).toEqual(['Card', 'Body']);
+    // 고른 대상의 출처가 모두 조상에게 덮였으면, 가장 가까운 조상이 보여 준 출처로 그린다.
+    const Leaf = ({ status, stat: s }: { status: Project['status']; stat: { total: number } }) => (
+      <i>
+        {status.up}
+        {s.total}
+      </i>
+    );
+    const Mid = ({ item, stat: s }: { item: Project; stat: { total: number } }) => (
+      <div>
+        <Leaf status={item.status} stat={s} />
+      </div>
+    );
+    const Outer = ({ item }: { item: Project }) => (
+      <article>
+        <Mid item={item} stat={stat} />
+      </article>
+    );
+    const { container } = render(<Outer item={project} />);
+    let leafFiber = getFiber(container.querySelector('i')!)!;
+    while (getComponentName(leafFiber) !== 'Leaf') leafFiber = leafFiber.return!;
+    const leaf = withLayout(() => collectBoxes(() => false, Infinity, leafFiber).boxes);
+    expect(leaf.map((b) => [b.name, b.hit.record.url])).toEqual([['Leaf', '/api/summary']]);
   });
 
   it('commit 이 여러 번 일어나도 지금 화면의 박스만 만든다', async () => {

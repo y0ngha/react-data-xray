@@ -9,6 +9,7 @@ import { isIndexPending } from '../../../core/inspect/derivedMatch.js';
 import { getRecords } from '../../../core/requests/store.js';
 import { inspectFiber } from '../../../core/inspect/inspect.js';
 import type { Fiber } from '../../../core/fiber/types.js';
+import { isWithin } from '../../../core/fiber/tree.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { useNow } from '../../hooks/useNow.js';
@@ -44,11 +45,19 @@ const sourceOf = (group: RenderGroup): Hit | undefined => {
 };
 
 /** 렌더 › 분석: 최근 10초 렌더를 컴포넌트별로 묶어 이유, 줄이는 방법, 네트워크 원인을 보여 준다. */
-export const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: ReadonlyMap<string, EndpointStat> }) => {
+export const RendersTab = ({
+  statsByEndpoint,
+  scope = null,
+}: {
+  statsByEndpoint: ReadonlyMap<string, EndpointStat>;
+  /** 분석 대상 컴포넌트. 있으면 그 컴포넌트와 그 아래의 렌더만 본다. */
+  scope?: Fiber | null;
+}) => {
   useRenderMonitoring();
   const now = useNow(REFRESH_MS);
   const [sort, setSort] = useState<RenderSort>('avoidable');
-  const groups = sortRenderGroups(groupRenders(getTopRenders(MAX_RENDERS, now)), sort).slice(0, MAX_GROUPS);
+  const renders = getTopRenders(MAX_RENDERS, now).filter((e) => !scope || isWithin(e.fiber as Fiber, scope));
+  const groups = sortRenderGroups(groupRenders(renders), sort).slice(0, MAX_GROUPS);
   const showTime = groups.some((g) => g.ms > 0);
   const statOf = (source: Hit | undefined) => (source ? statsByEndpoint.get(endpointOf(source.record)) : undefined);
   return (

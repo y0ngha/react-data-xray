@@ -7,7 +7,10 @@ import { getRecords } from '../../../core/requests/store.js';
 import { renderWithActions } from '../../../testing/withActions.js';
 import { ConsumerHighlight } from '../ConsumerHighlight.js';
 import { PickHighlight } from '../PickHighlight.js';
+import { useOverlayBoxes } from '../../hooks/useOverlayBoxes.js';
 import { SourceOverlay } from '../SourceOverlay.js';
+
+const ScreenBoxes = () => <SourceOverlay boxes={useOverlayBoxes(true, null)} />;
 
 type Item = { id: number; title: string };
 const Row = ({ item }: { item: Item }) => <li>{item.title}</li>;
@@ -41,7 +44,7 @@ describe('오버레이', () => {
   it('전체 표시는 데이터 출처가 있는 컴포넌트마다 URL 라벨을 그리고, 누르면 요청 상세를 연다', async () => {
     render(<List />);
     await act(flush);
-    const { actions } = renderWithActions(<SourceOverlay />, (r) => (r.url === '/api/overlay' ? 'duplicate' : 'ok'));
+    const { actions } = renderWithActions(<ScreenBoxes />, (r) => (r.url === '/api/overlay' ? 'duplicate' : 'ok'));
     await act(flush);
     const labels = screen.getAllByRole('button', { name: /\/api\/overlay/ });
     expect(labels).toHaveLength(2);

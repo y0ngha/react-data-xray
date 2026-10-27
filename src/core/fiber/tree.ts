@@ -18,6 +18,17 @@ export const toCurrent = (fiber: Fiber): Fiber => {
   return (root.stateNode as { current?: Fiber } | null)?.current === root ? fiber : (fiber.alternate ?? fiber);
 };
 
+/** 아직 화면에 붙어 있는지. 언마운트된 fiber 는 return 이 끊겨 HostRoot 까지 올라가지 못한다. */
+export const isMounted = (fiber: Fiber): boolean => hostRootOf(fiber).tag === HOST_ROOT;
+
+/** fiber 가 scope 컴포넌트이거나 그 자손인지. 렌더마다 current·alternate 가 번갈아 쓰여 둘 다 비교한다. */
+export const isWithin = (fiber: Fiber, scope: Fiber): boolean => {
+  for (let f: Fiber | null = fiber; f; f = f.return) {
+    if (f === scope || f === scope.alternate) return true;
+  }
+  return false;
+};
+
 /** 요소(또는 가장 가까운 조상 요소)의 현재 fiber */
 export const getFiber = (el: Element): Fiber | null => {
   const key = findKey(el, FIBER_KEY_PREFIX);

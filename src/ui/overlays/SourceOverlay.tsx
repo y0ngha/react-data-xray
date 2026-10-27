@@ -9,8 +9,6 @@ import { isWaste } from '../../core/requests/classify.js';
 import { pathOf } from '../../core/requests/requestKey.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
-import { useOverlayBoxes } from '../hooks/useOverlayBoxes.js';
-import { useRenderMonitoring } from '../hooks/useRenderMonitoring.js';
 import { color, MATCH_COLOR, SMALL_FONT, Z_OVERLAY } from '../theme.js';
 
 // 렌더 직후 박스를 이만큼 보라색으로 강조한다(React DevTools 의 Highlight updates 처럼).
@@ -162,10 +160,8 @@ const SourceBox = memo(function SourceBox({ box, waste, onOpen, register }: Sour
   );
 });
 
-/** ▦ 전체 표시: 데이터 출처가 있는 컴포넌트마다 박스, URL, 렌더 횟수를 그리고 렌더될 때마다 깜빡인다. */
-export const SourceOverlay = () => {
-  useRenderMonitoring();
-  const boxes = useOverlayBoxes();
+/** 화면 박스: 분석 대상 안에서 데이터 출처가 있는 컴포넌트마다 박스, URL, 렌더 횟수를 그리고 렌더될 때마다 깜빡인다. */
+export const SourceOverlay = ({ boxes }: { boxes: readonly Box[] }) => {
   const register = useBoxPainter();
   const { open, classOf } = useRequestActions();
   return (
