@@ -15,8 +15,8 @@ import { color, MATCH_COLOR, SMALL_FONT, Z_OVERLAY } from '../theme.js';
 
 // 렌더 직후 박스를 이만큼 보라색으로 강조한다(React DevTools 의 Highlight updates 처럼).
 const FLASH_MS = 600;
-// 최근 10초 렌더 횟수가 시간이 지나며 줄어드는 것을 반영하는 주기
-const COUNT_TICK_MS = 1000;
+// 렌더 횟수가 시간이 지나며 줄어드는 것과 commit 없이 바뀐 위치를 반영하는 주기
+const TICK_MS = 1000;
 
 interface BoxElements {
   box: Box;
@@ -25,8 +25,7 @@ interface BoxElements {
   count: HTMLElement;
 }
 
-const paintPosition = ({ box, root }: BoxElements): void => {
-  const rect = unionRect(box.nodes);
+const placeBox = (root: HTMLDivElement, rect: DOMRect | null): void => {
   root.style.display = rect ? '' : 'none';
   if (!rect) return;
   root.style.left = `${rect.left}px`;
@@ -50,7 +49,7 @@ const paintRenders = ({ box, root, label, count }: BoxElements, now: number): vo
 
 /**
  * 박스 위치와 렌더 표시를 React 렌더 없이 DOM 에 직접 쓴다. 박스가 수백 개라 150ms 마다 React 로
- * 다시 그리면 메인 스레드를 다 쓴다. 스크롤은 위치만, commit 은 렌더 표시만 한 프레임에 한 번 고친다.
+ * 다시 그리면 메인 스레드를 다 쓴다. 스크롤은 위치만, commit 은 렌더 표시와 위치를 한 프레임에 한 번 고친다.
  */
 const useBoxPainter = () => {
   const elements = useRef(new Map<number, BoxElements>());
@@ -73,10 +72,13 @@ const useBoxPainter = () => {
     const paint = () => {
       frame = 0;
       const now = Date.now();
-      elements.current.forEach((els) => {
-        if (pending.position) paintPosition(els);
-        if (pending.renders) paintRenders(els, now);
-      });
+      const all = Array.from(elements.current.values());
+      if (pending.position) {
+        // 위치를 모두 읽은 뒤에 쓴다. 읽고 쓰기를 번갈아 하면 박스마다 레이아웃을 다시 계산한다.
+        const rects = all.map((els) => unionRect(els.box.nodes));
+        all.forEach((els, i) => placeBox(els.root, rects[i]));
+      }
+      if (pending.renders) all.forEach((els) => paintRenders(els, now));
       Object.assign(pending, { position: false, renders: false });
     };
     const schedule = (kind: keyof typeof pending) => () => {
@@ -93,7 +95,11 @@ const useBoxPainter = () => {
       // 렌더로 레이아웃이 바뀌었을 수 있다.
       repaintPosition();
     };
-    const timer = window.setInterval(repaintRenders, COUNT_TICK_MS);
+    // 렌더 횟수는 시간이 지나며 줄고, 위치는 commit·스크롤 없이도 바뀐다(늦게 뜬 이미지, 애니메이션).
+    const timer = window.setInterval(() => {
+      repaintRenders();
+      repaintPosition();
+    }, TICK_MS);
     const unsubscribe = subscribeCommits(onCommit);
     window.addEventListener('scroll', repaintPosition, true);
     window.addEventListener('resize', repaintPosition);

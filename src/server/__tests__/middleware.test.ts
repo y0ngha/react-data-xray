@@ -38,6 +38,23 @@ describe('보고서 미들웨어', () => {
     expect(await readFile(join(root, '.rdx/.gitignore'), 'utf8')).toBe('*\n');
   });
 
+  it('GET 으로 물으면 미들웨어가 있다는 표시 헤더로 답한다(본문은 쓰지 않는다)', async () => {
+    const res = await fetch(`${base}/__rdx/report`);
+    expect(res.status).toBe(204);
+    expect(res.headers.get('x-rdx-report')).toBe('1');
+  });
+
+  it('로컬이 아닌 Host(DNS 리바인딩)는 지정하지 않았으면 받지 않는다', async () => {
+    const asHost = (host: string, handle = rdxReportMiddleware(root)) =>
+      new Promise<number>((resolve) => {
+        const res = { statusCode: 0, setHeader: () => undefined, end: () => resolve(res.statusCode) };
+        handle({ method: 'GET', url: '/__rdx/report', headers: { host } } as never, res as never, () => resolve(404));
+      });
+    expect(await asHost('evil.example:5173')).toBe(403);
+    expect(await asHost('192.168.0.10:5173')).toBe(403);
+    expect(await asHost('192.168.0.10:5173', rdxReportMiddleware(root, { allowedHosts: ['192.168.0.10'] }))).toBe(204);
+  });
+
   it('다른 출처, JSON 이 아닌 본문, 다른 경로는 받지 않는다', async () => {
     expect((await post('{}', { origin: 'https://evil.example' })).status).toBe(403);
     expect((await post('{}', { 'content-type': 'text/plain' })).status).toBe(403);

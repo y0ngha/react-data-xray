@@ -113,7 +113,20 @@ const getSegments = (): ReadonlyMap<RequestRecord, Segment> => {
 /** 아직 색인하지 못한 응답이 있는지. 있으면 지금 못 찾은 값도 곧 찾을 수 있다. */
 export const isIndexPending = (): boolean => cache.queue.length > 0;
 
-/** 모든 응답 조각에서 "필드명=값" 을 가진 객체 목록들과 그 합계 */
+/** 남은 색인을 지금 다 한다. 요소 클릭처럼 한 번 묻고 끝나는 조회는 기다리지 않고 바로 답해야 한다. */
+export const flushIndex = (): void => {
+  getSegments();
+  while (cache.queue.length > 0) {
+    const { record, work } = cache.queue[0];
+    if (!cache.segments.has(record) || work.next().done) cache.queue.shift();
+  }
+};
+
+/**
+ * 모든 응답 조각에서 "필드명=값" 을 가진 객체 목록들과 그 합계.
+ * shortcut: 조회마다 조각(최대 200개)을 돈다. 하나로 합친 색인은 밀려난 응답을 붙잡아 힙이 수백 MB 가 됐다.
+ * 프로젝트 목록(기록 200개, 박스 110개)에서 점유율 1% 로 쟀다. 기록 수 상한을 올리면 다시 잰다.
+ */
 const lookup = (segments: ReadonlyMap<RequestRecord, Segment>, key: string): { parts: IndexEntry[][]; total: number } => {
   const parts: IndexEntry[][] = [];
   let total = 0;

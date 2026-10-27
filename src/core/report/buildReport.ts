@@ -65,7 +65,8 @@ const callerOf = (stack: string | undefined): string | undefined =>
   stack
     ?.split('\n')
     .map((line) => line.trim())
-    .filter((line) => line.startsWith('at '))
+    // V8: "at fn (url:1:2)", Firefox·Safari: "fn@url:1:2"
+    .filter((line) => line.startsWith('at ') || /@.+:\d+:\d+$/.test(line))
     .slice(0, CALLER_FRAMES)
     .join(' <- ') || undefined;
 

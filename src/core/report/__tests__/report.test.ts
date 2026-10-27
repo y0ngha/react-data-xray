@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
+import { flush, mockFetch } from '../../../testing/fetchMock.js';
 import { isRenderMonitoring } from '../../render/monitor.js';
+import { createRecord, finishRecord } from '../../requests/store.js';
 import { buildReport } from '../buildReport.js';
-import { installReportApi, REPORT_PATH } from '../reportApi.js';
+import { installReportApi } from '../reportApi.js';
 
 describe('보고서', () => {
   it('엔드포인트별 낭비 수, 보낸 코드 위치, 낭비 URL 예를 담고 응답 본문은 넣지 않는다', async () => {
@@ -19,15 +20,20 @@ describe('보고서', () => {
     expect(report.renders.monitoring).toBe(false);
   });
 
-  it('window.__RDX__ 를 걸고, dev 서버 플러그인이 받으면 보고서를 보내고 렌더 감시를 켠다', async () => {
-    mockFetch.mockImplementation(async (input) =>
-      String(input) === REPORT_PATH ? new Response(null, { status: 204 }) : jsonResponse({ ok: true }),
-    );
+  it('Firefox·Safari 형식의 호출 스택도 보낸 위치로 읽는다', () => {
+    const record = createRecord('fetch', 'GET', '/api/ff');
+    record.stack = 'loadUsers@http://localhost:5173/src/api.ts:12:3\nApp@http://localhost:5173/src/App.tsx:5:1';
+    finishRecord(record, 200);
+    const endpoint = buildReport(false).requests.endpoints.find((e) => e.endpoint === 'GET /api/ff');
+    expect(endpoint?.callers[0].frame).toBe('loadUsers@http://localhost:5173/src/api.ts:12:3 <- App@http://localhost:5173/src/App.tsx:5:1');
+  });
+
+  it('dev 서버 미들웨어가 있다고 답할 때만 보고서를 보내고 렌더 감시를 켠다', async () => {
+    // 1) 프록시·SPA 폴백처럼 200 을 주지만 표시 헤더가 없으면 아무것도 보내지 않는다.
+    mockFetch.mockImplementation(async () => new Response('<html></html>', { status: 200 }));
     installReportApi();
     await flush();
-    const upload = mockFetch.mock.calls.find(([input]) => input === REPORT_PATH);
-    expect(JSON.parse(String(upload?.[1]?.body))).toHaveProperty('requests.endpoints');
-    expect(isRenderMonitoring()).toBe(true);
-    expect(window.__RDX__?.report().renders.monitoring).toBe(true);
+    expect(mockFetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+    expect(isRenderMonitoring()).toBe(false);
   });
 });

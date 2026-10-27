@@ -3,7 +3,8 @@ import { isComposite, type Fiber } from '../fiber/types.js';
 import { getOrigin } from '../requests/origins.js';
 import { findDerivedOrigin, isIndexPending } from './derivedMatch.js';
 import { isSameOrChildPath } from './exactMatch.js';
-import type { Origin } from '../requests/types.js';
+import { getRecords } from '../requests/store.js';
+import type { Origin, RequestRecord } from '../requests/types.js';
 import type { Box, Hit } from './types.js';
 
 const MAX_BOXES = 500;
@@ -12,6 +13,8 @@ const isPlainChild = (key: string, value: unknown): value is object =>
   key !== 'children' && value !== null && typeof value === 'object' && !Array.isArray(value) && !(value as { $$typeof?: unknown }).$$typeof;
 
 // props 객체가 그대로면(렌더되지 않았으면) 지난번 결과를 쓴다. 파생 매칭이 비싸서 매번 다시 찾지 않는다.
+// 기억한 결과가 요청 목록에서 밀려난 응답을 가리키면 다시 찾는다. 수집은 모든 fiber 를 돌므로, 오래 사는
+// props(memo 컴포넌트)가 밀려난 응답 본문을 붙잡아 두지 않는다. 통째로 비우면 그때마다 수집이 수십 ms 가 된다.
 const hitsByProps = new WeakMap<object, Hit[]>();
 // 파생 조회를 미룬 컴포넌트는 직전 결과를 그린다. fiber 는 렌더마다 current 와 alternate 가 번갈아 쓰여 둘 다 키로 둔다.
 const lastHits = new WeakMap<Fiber, Hit[]>();
@@ -19,6 +22,8 @@ const lastHits = new WeakMap<Fiber, Hit[]>();
 interface Budget {
   until: number;
   deferred: boolean;
+  /** 지금 요청 목록에 있는 응답 */
+  live: ReadonlySet<RequestRecord>;
 }
 
 const remember = (fiber: Fiber, hits: Hit[]): Hit[] => {
@@ -45,7 +50,7 @@ const propHits = (fiber: Fiber, budget: Budget): Hit[] => {
   const props = fiber.memoizedProps;
   if (!props || typeof props !== 'object') return [];
   const cached = hitsByProps.get(props);
-  if (cached) return remember(fiber, cached);
+  if (cached?.every((h) => budget.live.has(h.record))) return remember(fiber, cached);
   const entries = plainEntries(props);
   const exact = entries.flatMap(([k, v]) => {
     const origin = getOrigin(v);
@@ -61,31 +66,36 @@ const propHits = (fiber: Fiber, budget: Budget): Hit[] => {
     return origin ? [toHit(k, origin, 'derived')] : [];
   });
   const hits = [...exact, ...derived];
-  // 색인 중에 못 찾은 것은 기억하지 않는다. 색인이 끝나면 찾을 수 있다.
-  if (rest.length === derived.length || !isIndexPending()) hitsByProps.set(props, hits);
+  // 색인 중에는 기억하지 않고, 곧 다시 수집하도록 알린다. 색인이 끝나면 더 최신 응답이나 못 찾은 출처를 찾을 수 있다.
+  if (isIndexPending() && rest.length > 0) budget.deferred = true;
+  else hitsByProps.set(props, hits);
   return remember(fiber, hits);
 };
 
-/** 경로가 속한 목록 항목. $.data.projects[0].status → $.data.projects[0]. 목록 안이 아니면 경로 그대로 */
-const itemOf = (path: string): string => {
+/** 경로가 속한 목록 항목. $.data.projects[0].status → $.data.projects[0]. 목록 안이 아니면 null */
+const itemOf = (path: string): string | null => {
   const end = path.lastIndexOf(']');
-  return end < 0 ? path : path.slice(0, end + 1);
+  return end < 0 ? null : path.slice(0, end + 1);
 };
 
-// 조상 박스가 보여 준 항목 안의 데이터면 다시 그리지 않는다. 카드가 같은 프로젝트 항목의 status·region·type 을
-// 컴포넌트마다 따로 받거나, 같은 객체를 래퍼가 넘겨받을 때 박스가 겹겹이 생기지 않게 한다.
-// 응답 전체($)를 받은 조상은 같은 경로만 덮는다. 그 아래 목록 행처럼 항목 단위 박스가 더 쓸모 있다.
+// 조상 박스가 보여 준 것과 같은 데이터거나, 조상이 목록 항목 안의 데이터를 보여 줬다면 그 항목 안은 다시 그리지 않는다.
+// 카드가 같은 프로젝트 항목의 status·region·type 을 컴포넌트마다 따로 받을 때 박스가 겹겹이 생기지 않게 한다.
+// 목록 밖 경로($, $.data)를 받은 조상은 같은 경로만 덮는다. 그 아래 목록 행처럼 항목 단위 박스가 더 쓸모 있다.
 const covered = (shown: readonly Hit[], h: Hit): boolean =>
-  shown.some((s) => s.record === h.record && (s.path === h.path || (itemOf(s.path) !== '$' && isSameOrChildPath(h.path, itemOf(s.path)))));
+  shown.some((s) => {
+    if (s.record !== h.record) return false;
+    const item = itemOf(s.path);
+    return s.path === h.path || (item !== null && isSameOrChildPath(h.path, item));
+  });
 
 /**
  * 화면의 모든 컴포넌트 중 응답 객체를 props 로 직접 받는 것마다 박스를 만든다.
  * 폴링 화면에서는 카드 수십 개가 한꺼번에 새 데이터를 받아 파생 조회가 몰린다. budgetMs 를 넘기면 남은 컴포넌트는
- * 직전 결과로 그리고 deferred 를 알린다. 부르는 쪽이 곧 다시 부르면 이어서 한다.
+ * 직전 결과로 그리고 deferred 를 알린다. 응답 색인이 덜 끝나 못 찾은 것이 있어도 deferred 다. 부르는 쪽이 곧 다시 부르면 이어서 한다.
  */
 export const collectBoxes = (isOwnUi: (el: Element) => boolean, budgetMs = Infinity): { boxes: Box[]; deferred: boolean } => {
   const boxes: Box[] = [];
-  const budget: Budget = { until: performance.now() + budgetMs, deferred: false };
+  const budget: Budget = { until: performance.now() + budgetMs, deferred: false, live: new Set(getRecords()) };
   const visit = (fiber: Fiber | null, shown: readonly Hit[]): void =>
     walkFibers(fiber, (f) => {
       if (boxes.length >= MAX_BOXES) return false;

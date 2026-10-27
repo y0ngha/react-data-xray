@@ -1,7 +1,7 @@
 import { collectValues } from '../fiber/componentValues.js';
 import { getComponentName, getFiber } from '../fiber/tree.js';
 import { isComposite, type Fiber } from '../fiber/types.js';
-import { findDerivedOrigin } from './derivedMatch.js';
+import { findDerivedOrigin, flushIndex } from './derivedMatch.js';
 import { findExactOrigins, isSameOrChildPath, type Candidate } from './exactMatch.js';
 import { mergeHits } from './mergeHits.js';
 import { guessByText } from './textMatch.js';
@@ -46,6 +46,7 @@ const ancestorsOf = (fiber: Fiber | null): Fiber[] => (fiber ? [fiber, ...ancest
 
 /** 클릭한 요소에서 위로 올라가며 데이터를 가진 컴포넌트를 3개까지 찾는다. 못 찾으면 화면 글자로 추정한다. */
 export const inspect = (el: Element): InspectResult => {
+  flushIndex();
   const components: ComponentResult[] = [];
   for (const fiber of ancestorsOf(getFiber(el)).filter(isComposite).slice(0, MAX_COMPONENTS)) {
     if (components.filter((c) => c.hits.length > 0).length >= MAX_COMPONENTS_WITH_HITS) break;

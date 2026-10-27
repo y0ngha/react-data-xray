@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_BODY, flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { getRecords } from '../../requests/store.js';
 import { collectBoxes } from '../boxes.js';
+import { flushIndex } from '../derivedMatch.js';
 import { findConsumers } from '../consumers.js';
 import { inspect } from '../inspect.js';
 
@@ -188,6 +189,35 @@ describe('전체 표시 박스', () => {
     expect(withLayout(() => collectBoxes(() => false).boxes).map((b) => [b.name, b.hit.record.url, b.hit.match])).toEqual([
       ['Card', '/api/projects', 'exact'],
       ['Body', '/api/summary', 'derived'],
+    ]);
+  });
+
+  it('큰 응답의 색인이 덜 끝나 못 찾았으면 미뤘다고 알리고, 색인이 끝나면 찾는다', async () => {
+    const list = Array.from({ length: 30_000 }, (_, i) => ({ id: 70_000 + i, title: `item-${i}` }));
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ list }));
+    const json: { list: Item[] } = await fetch('/api/big-derived').then((r) => r.json());
+    const Copy = ({ item }: { item: Item }) => <p>{item.title}</p>;
+    render(<Copy item={{ ...json.list[29_999], title: json.list[29_999].title }} />);
+    const first = withLayout(() => collectBoxes(() => false));
+    expect(first.deferred).toBe(true);
+    flushIndex();
+    expect(withLayout(() => collectBoxes(() => false)).boxes.map((b) => [b.name, b.hit.match])).toEqual([['Copy', 'derived']]);
+  });
+
+  it('목록 밖 경로($.data)를 받은 조상 아래의 목록 행은 행마다 그린다', async () => {
+    const json: typeof DEFAULT_BODY = await fetch('/api/dashboard').then((r) => r.json());
+    const Dashboard = ({ data }: { data: typeof DEFAULT_BODY.data }) => (
+      <ul>
+        {data.list.map((item) => (
+          <Row key={item.id} item={item} />
+        ))}
+      </ul>
+    );
+    render(<Dashboard data={json.data} />);
+    expect(withLayout(() => collectBoxes(() => false).boxes).map((b) => [b.name, b.hit.path])).toEqual([
+      ['Dashboard', '$.data'],
+      ['Row', '$.data.list[0]'],
+      ['Row', '$.data.list[1]'],
     ]);
   });
 

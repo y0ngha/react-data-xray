@@ -1,9 +1,8 @@
+import { REPORT_HEADER, REPORT_PATH } from '../../shared/reportPath.js';
 import { getNativeFetch } from '../capture/install.js';
 import { isRenderMonitoring, setRenderMonitoring } from '../render/monitor.js';
 import { buildReport, type RdxReport } from './buildReport.js';
 
-/** dev 서버 플러그인(react-data-xray/vite, react-data-xray/middleware)이 받는 경로 */
-export const REPORT_PATH = '/__rdx/report';
 const UPLOAD_MS = 5000;
 
 declare global {
@@ -27,36 +26,42 @@ const report = (): RdxReport => {
   return buildReport(monitoring);
 };
 
+/** dev 서버에 rdx 미들웨어가 있는지. 본문 없는 GET 으로 묻고, 미들웨어만 붙이는 헤더로 판단한다. */
+const hasReportEndpoint = async (send: typeof fetch): Promise<boolean> => {
+  const res = await send(REPORT_PATH, { method: 'GET', credentials: 'omit' }).catch(() => null);
+  return res?.headers.get(REPORT_HEADER) === '1';
+};
+
 /**
  * 5초마다 보고서가 바뀌었으면 dev 서버로 보내 `.rdx/report.json` 에 쓰게 한다.
- * 플러그인이 없으면(404 등) 첫 응답에서 멈춘다.
+ * 미들웨어가 없는 dev 서버는 이 경로를 원격 백엔드로 프록시하기도 하므로, 먼저 확인하고 없으면 아무것도 보내지 않는다.
  */
-const startUpload = (): void => {
+const startUpload = async (): Promise<void> => {
+  const send = getNativeFetch();
+  if (!send || !(await hasReportEndpoint(send))) return;
+  keepRenderMonitoring();
   let last = '';
-  let timer = 0;
   const upload = async () => {
-    // 플러그인이 있는지 확인하기 전에는 렌더 감시를 켜지 않는다(없는 앱에 비용만 더한다).
     const { generatedAt, ...content } = buildReport(isRenderMonitoring());
     const key = JSON.stringify(content);
     if (key === last) return;
     const body = JSON.stringify({ generatedAt, ...content });
-    const res = await getNativeFetch()(REPORT_PATH, { method: 'POST', headers: { 'content-type': 'application/json' }, body }).catch(
-      () => null,
-    );
-    if (!res?.ok) {
-      window.clearInterval(timer);
-      return;
-    }
-    last = key;
-    keepRenderMonitoring();
+    const res = await send(REPORT_PATH, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'content-type': 'application/json' },
+      body,
+    }).catch(() => null);
+    // dev 서버 재시작처럼 잠깐 실패하면 다음 주기에 다시 보낸다.
+    if (res?.ok) last = key;
   };
-  timer = window.setInterval(() => void upload(), UPLOAD_MS);
-  void upload();
+  window.setInterval(() => void upload(), UPLOAD_MS);
+  await upload();
 };
 
 /** `window.__RDX__` 를 걸고, dev 서버 플러그인이 있으면 보고서를 파일로 보낸다. */
 export const installReportApi = (): void => {
   if (typeof window === 'undefined' || window.__RDX__) return;
   window.__RDX__ = { report };
-  startUpload();
+  void startUpload();
 };

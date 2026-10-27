@@ -5,6 +5,7 @@ import type { Hit } from '../../../core/inspect/types.js';
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import { getTopRenders } from '../../../core/render/monitor.js';
+import { isIndexPending } from '../../../core/inspect/derivedMatch.js';
 import { inspectFiber } from '../../../core/inspect/inspect.js';
 import type { Fiber } from '../../../core/fiber/types.js';
 import { Button } from '../../components/Button.js';
@@ -32,8 +33,11 @@ const sourceOf = (group: RenderGroup): Hit | undefined => {
   const fiber = group.fiber as Fiber;
   const key: unknown = fiber.memoizedState ?? fiber.memoizedProps;
   if (!key || typeof key !== 'object') return inspectFiber(fiber)[0];
-  if (!sources.has(key)) sources.set(key, inspectFiber(fiber)[0]);
-  return sources.get(key);
+  if (sources.has(key)) return sources.get(key);
+  const source = inspectFiber(fiber)[0];
+  // 색인 중에 못 찾은 것은 기억하지 않는다(1초 뒤 다시 찾는다).
+  if (source || !isIndexPending()) sources.set(key, source);
+  return source;
 };
 
 /** 렌더 › 분석: 최근 10초 렌더를 컴포넌트별로 묶어 이유, 줄이는 방법, 네트워크 원인을 보여 준다. */
