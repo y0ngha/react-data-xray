@@ -7,6 +7,12 @@ export interface RequestRecord {
   requestBody?: string;
   /** Blob·스트림처럼 본문을 바로 읽을 수 없어 중복·같은 응답 판정에서 뺀 요청 */
   bodyUnreadable?: boolean;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  /** 응답 원문(텍스트 응답만, 최대 100KB). 상세 화면에서 보여 준다. */
+  responseText?: string;
+  /** 네트워크 실패·취소·타임아웃 */
+  error?: string;
   status: number;
   startedAt: number;
   durationMs: number;
@@ -23,6 +29,7 @@ export interface Origin {
 }
 
 const MAX_RECORDS = 200;
+const MAX_RESPONSE_TEXT = 100_000;
 // 응답 하나가 아주 클 때 등록에 걸리는 시간을 막는다.
 const MAX_NODES_PER_BODY = 50_000;
 const DUPLICATE_WINDOW_MS = 2000;
@@ -34,8 +41,12 @@ const lastByRequest = new Map<string, { id: number; startedAt: number }>();
 const lastResponseByRequest = new Map<string, { id: number; text: string }>();
 const listeners = new Set<() => void>();
 let nextId = 1;
+// 응답 본문이 새로 등록될 때마다 오른다. 파생 매칭 색인을 다시 만들지 판단할 때 쓴다.
+let bodyVersion = 0;
 
 const notify = () => listeners.forEach((l) => l());
+
+export const getBodyVersion = (): number => bodyVersion;
 
 export const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener);
@@ -102,13 +113,22 @@ export const compareResponseText = (record: RequestRecord, text: string): void =
   if (record.bodyUnreadable) return;
   const key = requestKeyOf(record);
   const last = lastResponseByRequest.get(key);
-  if (last && last.text === text) record.sameResponseAs = last.id;
+  if (last && last.text === text) {
+    record.sameResponseAs = last.id;
+    notify();
+  }
   lastResponseByRequest.set(key, { id: record.id, text });
 };
 
+export const keepResponseText = (record: RequestRecord, text: string): void => {
+  record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (100KB 이후 생략)` : text;
+  notify();
+};
+
 /** 응답이 오면 요청 목록에 넣는다. 본문을 읽지 않는 요청도 감시 대상이라 여기서 넣는다. */
-export const finishRecord = (record: RequestRecord, status: number): void => {
+export const finishRecord = (record: RequestRecord, status: number, error?: string): void => {
   record.status = status;
+  record.error = error;
   record.durationMs = Date.now() - record.startedAt;
   records.push(record);
   if (records.length > MAX_RECORDS) records.shift();
@@ -120,6 +140,7 @@ export const registerBody = (record: RequestRecord, body: unknown): void => {
   // 폴리필의 json()이 내부에서 text() + JSON.parse 를 거치면 같은 응답이 두 번 들어온다.
   if (record.body !== undefined) return;
   record.body = body;
+  bodyVersion++;
 
   let count = 0;
   const walk = (value: unknown, path: string) => {

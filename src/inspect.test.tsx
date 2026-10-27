@@ -7,7 +7,8 @@ import { install, serializeBody } from './capture.js';
 import { collectBoxes, inspect } from './inspect.js';
 import { clearRecords, getRecords } from './registry.js';
 
-const body = { data: { list: [{ id: 1, title: 'CPU 경고' }, { id: 2, title: '메모리 경고' }] } };
+// 파생 매칭은 의미 있는 필드 값이 2개 이상 같아야 하므로 id 를 두 자리 이상으로 둔다.
+const body = { data: { list: [{ id: 101, title: 'CPU 경고' }, { id: 102, title: '메모리 경고' }] } };
 
 const jsonResponse = (value: unknown) =>
   new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -193,6 +194,46 @@ describe('inspect', () => {
     expect(inspect(p).components[0].hits).toEqual([
       expect.objectContaining({ path: '$.data.list[0]', via: 'props.region, props.role', match: 'exact' }),
     ]);
+  });
+
+  it('전체 표시는 commit 이 여러 번 일어나도 현재 화면의 박스만 만든다', async () => {
+    const rows = body.data.list;
+    const List = ({ count }: { count: number }) => (
+      <ul>
+        {rows.slice(0, count).map((item) => (
+          <Row key={item.id} item={item} />
+        ))}
+      </ul>
+    );
+    await fetch('/api/rows').then((r) => r.json());
+    // 응답 객체를 등록하려면 같은 참조를 써야 하므로, 방금 받은 응답으로 행을 그린다.
+    const registered = getRecords().find((r) => r.url === '/api/rows')!.body as typeof body;
+    rows.splice(0, rows.length, ...registered.data.list);
+    const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 10, 10));
+
+    const view = render(<List count={2} />);
+    expect(collectBoxes(() => false)).toHaveLength(2);
+    view.rerender(<List count={1} />);
+    expect(collectBoxes(() => false)).toHaveLength(1);
+    view.rerender(<List count={2} />);
+    expect(collectBoxes(() => false)).toHaveLength(2);
+    spy.mockRestore();
+  });
+
+  it('필드 값이 하나만 같으면 파생으로 보지 않는다', async () => {
+    const Single = () => {
+      const [style, setStyle] = useState<{ title: string; extra: number } | null>(null);
+      useEffect(() => {
+        fetch('/api/single')
+          .then((r) => r.json())
+          .then((json) => setStyle({ title: json.data.list[0].title, extra: 3 }));
+      }, []);
+      return style ? <p data-x={style.extra}>{`제목 ${style.title}`}</p> : null;
+    };
+    render(<Single />);
+    const p = await screen.findByText('제목 CPU 경고');
+
+    expect(inspect(p).components.every((c) => c.hits.every((h) => h.match !== 'derived'))).toBe(true);
   });
 
   it('전체 표시는 응답 객체를 props 로 받는 컴포넌트마다 박스를 만든다', async () => {

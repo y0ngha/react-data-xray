@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 import { collectBoxes, inspect, inspectFiber, type Box, type Hit, type InspectResult } from './inspect.js';
 import { endpointOf, getRecords, pathOf as shortUrl, subscribe, type RequestRecord } from './registry.js';
-import { getCommits, getTopRenders, ignoreComponent, setRenderMonitoring } from './renderMonitor.js';
+import { getCommits, getTopRenders, setRenderMonitoring } from './renderMonitor.js';
 
 export interface DataSourceDevtoolsProps {
   /** 요소 선택 단축키. 기본값 Ctrl+Shift+D (macOS 는 Cmd 도 허용) */
@@ -15,6 +15,36 @@ type Tab = 'inspect' | 'requests' | 'timeline' | 'renders';
 const ROOT_ATTR = 'data-dsi-root';
 const Z = 2147483647;
 const POSITION_KEY = 'data-source-inspector:button';
+const DOCK_KEY = 'data-source-inspector:dock';
+
+/** float: 버튼 옆 작은 패널 · bottom/right: 화면 가장자리에 도킹 · window: 별도 창(도킹 해제) */
+type Dock = 'float' | 'bottom' | 'right' | 'window';
+
+interface DockSettings {
+  dock: Dock;
+  bottomHeight: number;
+  rightWidth: number;
+}
+
+const DEFAULT_DOCK: DockSettings = { dock: 'float', bottomHeight: 320, rightWidth: 520 };
+
+const readDock = (): DockSettings => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DOCK_KEY) ?? '');
+    if (saved && ['float', 'bottom', 'right', 'window'].includes(saved.dock)) return { ...DEFAULT_DOCK, ...saved };
+  } catch {
+    // 저장된 설정이 없거나 저장소를 못 쓰면 기본값을 쓴다.
+  }
+  return DEFAULT_DOCK;
+};
+
+const saveDock = (settings: DockSettings) => {
+  try {
+    localStorage.setItem(DOCK_KEY, JSON.stringify(settings));
+  } catch {
+    // 설정 저장은 편의 기능이라 실패해도 넘어간다.
+  }
+};
 
 const isOwnUi = (el: Element | null) => !!el?.closest(`[${ROOT_ATTR}]`);
 
@@ -71,6 +101,166 @@ const valueAt = (body: unknown, path: string): unknown => {
 };
 
 
+// ---- 요청 상세: dsi 가 보여 주는 모든 요청에서 클릭하면 연다 ----
+
+/** 검사 결과에서 연 경우, 컴포넌트가 실제로 쓰는 응답 위치 */
+interface Focus {
+  path: string;
+  via: string;
+}
+
+const OpenRequestContext = createContext<(record: RequestRecord, focus?: Focus) => void>(() => undefined);
+
+/** 감싼 내용을 클릭하면 그 요청의 상세 화면을 연다. */
+const RequestLink = ({ record, focus, children }: { record: RequestRecord; focus?: Focus; children: ReactNode }) => {
+  const openRequest = useContext(OpenRequestContext);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      title="클릭하면 요청 상세(헤더, Request/Response Body)를 봅니다"
+      onClick={() => openRequest(record, focus)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') openRequest(record, focus);
+      }}
+      style={{ cursor: 'pointer' }}
+    >
+      {children}
+    </div>
+  );
+};
+
+// 아주 큰 응답을 그대로 그리면 패널이 멈추므로 상세 화면에서는 이만큼만 보여 준다(복사도 같은 내용).
+const MAX_DETAIL_TEXT = 200_000;
+
+const prettyText = (text: string): string => {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+};
+
+const copyText = (text: string) => {
+  try {
+    void navigator.clipboard?.writeText(text);
+  } catch {
+    // 클립보드를 못 쓰는 환경이면 넘어간다.
+  }
+};
+
+// 앱의 전역 CSS(pre, summary 색 등)가 패널에 새어 들지 않도록 색을 직접 지정한다.
+const preStyle: CSSProperties = {
+  color: color.text,
+  margin: '4px 0',
+  padding: 6,
+  maxHeight: 280,
+  overflow: 'auto',
+  background: color.panel,
+  borderRadius: 4,
+  whiteSpace: 'pre-wrap',
+  font: 'inherit',
+};
+
+const Section = ({ title, children, copy }: { title: string; children: ReactNode; copy?: string }) => (
+  <details open style={{ marginTop: 6 }}>
+    <summary style={{ cursor: 'pointer', color: '#93c5fd' }}>
+      {title}
+      {copy !== undefined && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            copyText(copy);
+          }}
+          style={{ marginLeft: 8, background: 'none', border: `1px solid ${color.border}`, borderRadius: 4, color: color.muted, font: 'inherit', cursor: 'pointer' }}
+        >
+          복사
+        </button>
+      )}
+    </summary>
+    {children}
+  </details>
+);
+
+const KeyValues = ({ values }: { values?: Record<string, string> }) =>
+  values && Object.keys(values).length > 0 ? (
+    <div style={preStyle}>
+      {Object.entries(values).map(([k, v]) => (
+        <div key={k}>
+          <span style={{ color: color.muted }}>{k}:</span> {v}
+        </div>
+      ))}
+    </div>
+  ) : (
+    <div style={{ color: color.muted }}>(없음)</div>
+  );
+
+const queryParamsOf = (url: string): Record<string, string> | undefined => {
+  try {
+    const params = new URL(url, location.href).searchParams;
+    const result: Record<string, string> = {};
+    params.forEach((v, k) => {
+      result[k] = result[k] === undefined ? v : `${result[k]}, ${v}`;
+    });
+    return result;
+  } catch {
+    return undefined;
+  }
+};
+
+export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord; focus?: Focus; onBack: () => void }) => {
+  const requestBody = record.requestBody !== undefined ? prettyText(record.requestBody) : undefined;
+  // 파싱된 응답 객체가 있으면 그것을 정렬해 보여 준다. 원문은 100KB 에서 잘려 JSON 으로 다시 읽히지 않을 수 있다.
+  const responseBody =
+    record.body !== undefined ? truncate(JSON.stringify(record.body, null, 2) ?? '', MAX_DETAIL_TEXT) : record.responseText !== undefined ? prettyText(record.responseText) : undefined;
+  return (
+    <div>
+      <Button onClick={onBack}>← 뒤로</Button>
+      <div style={{ marginTop: 8 }}>
+        <b>{record.method}</b> {record.url}
+      </div>
+      <div style={{ color: record.error || record.status >= 400 ? color.warn : color.muted }}>
+        {record.kind} · {record.error ? `실패 (${record.error})` : record.status} · {record.durationMs}ms · {new Date(record.startedAt).toLocaleTimeString()}
+      </div>
+      <div style={{ marginTop: 4 }}>
+        {record.duplicateOf && <Badge c={color.warn}>중복 요청 (#{record.duplicateOf})</Badge>}
+        {record.sameResponseAs && <Badge c={color.warn}>같은 응답 재요청 (#{record.sameResponseAs})</Badge>}
+      </div>
+      {focus && (
+        <Section title={`이 컴포넌트가 쓰는 데이터: ${focus.path} ← ${focus.via}`}>
+          <pre style={preStyle}>{JSON.stringify(valueAt(record.body, focus.path), null, 2) ?? '(값 없음)'}</pre>
+        </Section>
+      )}
+      <Section title="Query">
+        <KeyValues values={queryParamsOf(record.url)} />
+      </Section>
+      <Section title="Request Headers">
+        <KeyValues values={record.requestHeaders} />
+      </Section>
+      <Section title="Request Body" copy={requestBody}>
+        {record.bodyUnreadable ? (
+          <div style={{ color: color.muted }}>(Blob·스트림처럼 바로 읽을 수 없는 본문)</div>
+        ) : requestBody !== undefined ? (
+          <pre style={preStyle}>{requestBody}</pre>
+        ) : (
+          <div style={{ color: color.muted }}>(없음)</div>
+        )}
+      </Section>
+      <Section title="Response Headers">
+        <KeyValues values={record.responseHeaders} />
+      </Section>
+      <Section title="Response Body" copy={responseBody}>
+        {responseBody !== undefined ? (
+          <pre style={preStyle}>{responseBody}</pre>
+        ) : (
+          <div style={{ color: color.muted }}>(텍스트가 아닌 응답이거나 아직 받지 못했습니다)</div>
+        )}
+      </Section>
+    </div>
+  );
+};
+
 // ---- 요청 감시 지표 ----
 
 interface EndpointStat {
@@ -99,18 +289,25 @@ const getEndpointStats = (records: readonly RequestRecord[]): EndpointStat[] => 
 
 const isWasteful = (stat: EndpointStat | undefined) => !!stat && (stat.duplicates > 0 || stat.sameResponses > 0);
 
-const useRecords = () => {
-  // 요청이 몰리면 패널이 매번 다시 그려지지 않도록 버전 숫자만 구독한다.
-  const version = useRef(0);
-  return useSyncExternalStore(
-    (cb) =>
-      subscribe(() => {
-        version.current++;
-        cb();
-      }),
-    () => version.current,
-  );
+// 요청이 몰려도 패널은 한 프레임에 한 번만 다시 그린다. 버전 숫자만 구독한다.
+let recordsVersion = 0;
+const subscribeRecords = (cb: () => void) => {
+  let frame = 0;
+  const unsubscribe = subscribe(() => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      recordsVersion++;
+      cb();
+    });
+  });
+  return () => {
+    cancelAnimationFrame(frame);
+    unsubscribe();
+  };
 };
+
+const useRecords = () => useSyncExternalStore(subscribeRecords, () => recordsVersion);
 
 // ---- 작은 UI 조각 ----
 
@@ -147,26 +344,31 @@ const RequestFlags = ({ record, stat }: { record: RequestRecord; stat?: Endpoint
 
 const HitRow = ({ hit, stats }: { hit: Hit; stats: Map<string, EndpointStat> }) => (
   <div style={{ padding: '6px 0', borderTop: `1px solid ${color.border}` }}>
-    <div>
-      <Badge c={MATCH_COLOR[hit.match]}>{MATCH_LABEL[hit.match]}</Badge>
-      {hit.record.method} {shortUrl(hit.record.url)}
-    </div>
-    <div style={{ color: color.muted }}>
-      {hit.record.kind} · {hit.record.status} · {hit.record.durationMs}ms · {new Date(hit.record.startedAt).toLocaleTimeString()}
-    </div>
-    <RequestParams record={hit.record} />
-    <div>
-      <RequestFlags record={hit.record} stat={stats.get(endpointOf(hit.record))} />
-    </div>
-    <div>
-      경로: <code>{hit.path}</code> ← <code>{hit.via}</code>
-    </div>
-    {hit.queryKey !== undefined && (
+    <RequestLink record={hit.record} focus={{ path: hit.path, via: hit.via }}>
       <div>
-        queryKey: <code>{formatJson(hit.queryKey)}</code>
+        <Badge c={MATCH_COLOR[hit.match]}>{MATCH_LABEL[hit.match]}</Badge>
+        <u>
+          {hit.record.method} {shortUrl(hit.record.url)}
+        </u>
       </div>
-    )}
-    <div style={{ color: color.muted }}>값: {formatJson(valueAt(hit.record.body, hit.path))}</div>
+      <div style={{ color: color.muted }}>
+        {hit.record.kind} · {hit.record.status} · {hit.record.durationMs}ms · {new Date(hit.record.startedAt).toLocaleTimeString()}
+      </div>
+      <RequestParams record={hit.record} />
+      <div>
+        <RequestFlags record={hit.record} stat={stats.get(endpointOf(hit.record))} />
+      </div>
+      <div>
+        경로: <code>{hit.path}</code> ← <code>{hit.via}</code>
+      </div>
+      {hit.queryKey !== undefined && (
+        <div>
+          queryKey: <code>{formatJson(hit.queryKey)}</code>
+        </div>
+      )}
+      <div style={{ color: color.muted }}>값: {formatJson(valueAt(hit.record.body, hit.path))}</div>
+      <div style={{ color: color.accent }}>클릭하면 요청 상세와 전체 값을 봅니다</div>
+    </RequestLink>
   </div>
 );
 
@@ -206,6 +408,9 @@ const InspectTab = ({ result, stats }: { result: InspectResult | null; stats: Ma
 
 const RequestsTab = ({ records, stats }: { records: readonly RequestRecord[]; stats: EndpointStat[] }) => {
   const [view, setView] = useState<'endpoints' | 'log'>('endpoints');
+  // 엔드포인트를 누르면 그 엔드포인트의 요청만 전체 기록에 보여 준다.
+  const [filter, setFilter] = useState<string | null>(null);
+  const logs = [...records].reverse().filter((r) => !filter || endpointOf(r) === filter);
   return (
     <div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
@@ -215,12 +420,29 @@ const RequestsTab = ({ records, stats }: { records: readonly RequestRecord[]; st
         <Button active={view === 'log'} onClick={() => setView('log')}>
           전체 기록
         </Button>
+        {view === 'log' && filter && (
+          <Button onClick={() => setFilter(null)} title="필터 해제">
+            {filter} ✕
+          </Button>
+        )}
         <span style={{ color: color.muted, marginLeft: 'auto' }}>최근 {records.length}건</span>
       </div>
       {view === 'endpoints'
         ? stats.map((s) => (
-            <div key={s.endpoint} style={{ padding: '4px 0', borderTop: `1px solid ${color.border}` }}>
-              <div style={{ color: isWasteful(s) ? color.warn : color.text }}>{s.endpoint}</div>
+            <div
+              key={s.endpoint}
+              role="button"
+              tabIndex={0}
+              title="이 엔드포인트의 요청 목록 보기"
+              onClick={() => {
+                setFilter(s.endpoint);
+                setView('log');
+              }}
+              style={{ padding: '4px 0', borderTop: `1px solid ${color.border}`, cursor: 'pointer' }}
+            >
+              <div style={{ color: isWasteful(s) ? color.warn : color.text }}>
+                <u>{s.endpoint}</u>
+              </div>
               <div style={{ color: color.muted }}>
                 {s.count}회 · 평균 {s.avgMs}ms
                 {s.duplicates > 0 && <span style={{ color: color.warn }}> · 중복 {s.duplicates}</span>}
@@ -228,17 +450,21 @@ const RequestsTab = ({ records, stats }: { records: readonly RequestRecord[]; st
               </div>
             </div>
           ))
-        : [...records].reverse().map((r) => (
+        : logs.map((r) => (
             <div key={r.id} style={{ padding: '4px 0', borderTop: `1px solid ${color.border}` }}>
-              <div>
-                {r.method} {shortUrl(r.url)}
-              </div>
-              <div style={{ color: color.muted }}>
-                {r.kind} · {r.status} · {r.durationMs}ms · {new Date(r.startedAt).toLocaleTimeString()}{' '}
-                {r.duplicateOf && <Badge c={color.warn}>중복</Badge>}
-                {r.sameResponseAs && <Badge c={color.warn}>같은 응답</Badge>}
-              </div>
-              <RequestParams record={r} />
+              <RequestLink record={r}>
+                <div>
+                  <u>
+                    {r.method} {shortUrl(r.url)}
+                  </u>
+                </div>
+                <div style={{ color: r.error ? color.warn : color.muted }}>
+                  {r.kind} · {r.error ? `실패 (${r.error})` : r.status} · {r.durationMs}ms · {new Date(r.startedAt).toLocaleTimeString()}{' '}
+                  {r.duplicateOf && <Badge c={color.warn}>중복</Badge>}
+                  {r.sameResponseAs && <Badge c={color.warn}>같은 응답</Badge>}
+                </div>
+                <RequestParams record={r} />
+              </RequestLink>
             </div>
           ))}
     </div>
@@ -282,11 +508,13 @@ const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: Map<string, Endpoint
               {e.instances > 1 && <span style={{ color: color.muted }}> × {e.instances}개</span>}
             </div>
             {hit && (
-              <div style={{ color: color.muted }}>
-                ← {hit.record.method} {shortUrl(hit.record.url)}{' '}
-                {stat && stat.duplicates > 0 && <Badge c={color.warn}>중복 {stat.duplicates}</Badge>}
-                {stat && stat.sameResponses > 0 && <Badge c={color.warn}>같은 응답 {stat.sameResponses}</Badge>}
-              </div>
+              <RequestLink record={hit.record}>
+                <div style={{ color: color.muted }}>
+                  ← <u>{hit.record.method} {shortUrl(hit.record.url)}</u>{' '}
+                  {stat && stat.duplicates > 0 && <Badge c={color.warn}>중복 {stat.duplicates}</Badge>}
+                  {stat && stat.sameResponses > 0 && <Badge c={color.warn}>같은 응답 {stat.sameResponses}</Badge>}
+                </div>
+              </RequestLink>
             )}
           </div>
         );
@@ -324,17 +552,25 @@ export const findBursts = (starts: number[]): Array<{ from: number; to: number; 
 const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
   const [now, setNow] = useState(Date.now());
   const [paused, setPaused] = useState(false);
+  const [hovered, setHovered] = useState<{ record: RequestRecord; x: number; y: number } | null>(null);
+  const openRequest = useContext(OpenRequestContext);
+  // 도킹 방식에 따라 패널 너비가 달라지므로 그릴 때마다 실제 너비를 잰다.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [measured, setMeasured] = useState(456);
   useEffect(() => {
     setRenderMonitoring(true);
     return () => setRenderMonitoring(false);
   }, []);
   useEffect(() => {
     if (paused) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      if (boxRef.current) setMeasured(boxRef.current.clientWidth);
+    }, 500);
     return () => window.clearInterval(timer);
   }, [paused]);
 
-  const width = 456;
+  const width = Math.max(240, measured);
   const from = now - TIMELINE_MS;
   const x = (t: number) => ((t - from) / TIMELINE_MS) * width;
   const visible = records.filter((r) => r.startedAt + r.durationMs >= from);
@@ -358,7 +594,7 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, color: color.muted }}>
         <span>최근 20초</span>
         <span>
-          <span style={{ color: color.accent }}>■</span> 요청 <span style={{ color: color.warn }}>■</span> 중복·같은 응답{' '}
+          <span style={{ color: color.accent }}>■</span> 요청 <span style={{ color: color.warn }}>■</span> 중복·같은 응답 <span style={{ color: '#fb923c' }}>■</span> 실패{' '}
           <span style={{ color: '#a78bfa' }}>▮</span> 렌더(높이 = 렌더된 컴포넌트 수)
         </span>
         <span style={{ marginLeft: 'auto' }}>
@@ -367,6 +603,7 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
           </Button>
         </span>
       </div>
+      <div ref={boxRef} style={{ position: 'relative' }} onMouseLeave={() => setHovered(null)}>
       <svg width={width} height={height} style={{ display: 'block', background: color.panel, borderRadius: 4 }}>
         {bursts.map((b, i) => (
           <g key={`b${i}`}>
@@ -379,9 +616,18 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
         {bars.map(({ r, lane }) => {
           const wasteful = !!(r.duplicateOf || r.sameResponseAs);
           return (
-            <rect key={r.id} x={x(r.startedAt)} y={lane * (LANE_H + 2) + 2} width={Math.max(2, x(r.startedAt + r.durationMs) - x(r.startedAt))} height={LANE_H} fill={wasteful ? color.warn : color.accent}>
-              <title>{`${r.method} ${shortUrl(r.url)}${queryOf(r.url)}\n${r.status} · ${r.durationMs}ms${r.duplicateOf ? ' · 중복 요청' : ''}${r.sameResponseAs ? ' · 같은 응답 재요청' : ''}`}</title>
-            </rect>
+            <rect
+              key={r.id}
+              x={x(r.startedAt)}
+              y={lane * (LANE_H + 2) + 2}
+              width={Math.max(3, x(r.startedAt + r.durationMs) - x(r.startedAt))}
+              height={LANE_H}
+              fill={r.error ? '#fb923c' : wasteful ? color.warn : color.accent}
+              stroke={hovered?.record === r ? '#fff' : undefined}
+              style={{ cursor: 'pointer' }}
+              onMouseEnter={() => setHovered({ record: r, x: x(r.startedAt), y: lane * (LANE_H + 2) + LANE_H + 6 })}
+              onClick={() => openRequest(r)}
+            />
           );
         })}
         <line x1={0} x2={width} y1={reqH + 4} y2={reqH + 4} stroke={color.border} />
@@ -399,8 +645,39 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
           </text>
         ))}
       </svg>
+      {hovered && (
+        <div
+          style={{
+            position: 'absolute',
+            left: Math.min(hovered.x, width - 300),
+            top: hovered.y,
+            width: 300,
+            padding: 6,
+            background: '#000',
+            border: `1px solid ${color.border}`,
+            borderRadius: 4,
+            pointerEvents: 'none',
+            zIndex: 1,
+          }}
+        >
+          <div>
+            <b>{hovered.record.method}</b> {shortUrl(hovered.record.url)}
+          </div>
+          <div style={{ color: color.muted }}>
+            {hovered.record.error ? `실패 (${hovered.record.error})` : hovered.record.status} · {hovered.record.durationMs}ms ·{' '}
+            {new Date(hovered.record.startedAt).toLocaleTimeString()}
+          </div>
+          <RequestParams record={hovered.record} />
+          <div>
+            {hovered.record.duplicateOf && <Badge c={color.warn}>중복 요청</Badge>}
+            {hovered.record.sameResponseAs && <Badge c={color.warn}>같은 응답 재요청</Badge>}
+          </div>
+          <div style={{ color: color.accent }}>클릭하면 상세 보기</div>
+        </div>
+      )}
+      </div>
       <div style={{ color: color.muted, marginTop: 6 }}>
-        막대에 마우스를 올리면 요청 정보가 보입니다. 요청이 몰린 직후 렌더 눈금이 연달아 찍히면 요청마다 따로 렌더되고 있다는 뜻입니다.
+        막대에 마우스를 올리면 요청 정보가, 클릭하면 상세(헤더, Request/Response Body)가 보입니다. 요청이 몰린 직후 렌더 눈금이 연달아 찍히면 요청마다 따로 렌더되고 있다는 뜻입니다.
       </div>
     </div>
   );
@@ -408,15 +685,26 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
 
 // ---- 전체 표시 오버레이 ----
 
-const Overlay = ({ statsByEndpoint }: { statsByEndpoint: Map<string, EndpointStat> }) => {
+const Overlay = () => {
   const [boxes, setBoxes] = useState<Box[]>([]);
+  const openRequest = useContext(OpenRequestContext);
   useEffect(() => {
-    const refresh = () => setBoxes(collectBoxes((el) => isOwnUi(el)));
-    refresh();
+    const update = () => setBoxes(collectBoxes((el) => isOwnUi(el)));
+    // 스크롤 이벤트는 매우 잦으므로 한 프레임에 한 번만 다시 계산한다.
+    let frame = 0;
+    const refresh = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    update();
     const timer = window.setInterval(refresh, 1000);
     window.addEventListener('scroll', refresh, true);
     window.addEventListener('resize', refresh);
     return () => {
+      cancelAnimationFrame(frame);
       window.clearInterval(timer);
       window.removeEventListener('scroll', refresh, true);
       window.removeEventListener('resize', refresh);
@@ -425,7 +713,8 @@ const Overlay = ({ statsByEndpoint }: { statsByEndpoint: Map<string, EndpointSta
   return (
     <>
       {boxes.map((b, i) => {
-        const wasteful = isWasteful(statsByEndpoint.get(endpointOf(b.hit.record)));
+        // 같은 엔드포인트의 다른 호출이 아니라, 이 데이터를 준 요청 자체가 낭비였을 때만 빨갛게 그린다.
+        const wasteful = !!(b.hit.record.duplicateOf || b.hit.record.sameResponseAs);
         const c = wasteful ? color.warn : MATCH_COLOR[b.hit.match];
         return (
           <div
@@ -443,10 +732,15 @@ const Overlay = ({ statsByEndpoint }: { statsByEndpoint: Map<string, EndpointSta
             }}
           >
             <span
+              role="button"
+              title="클릭하면 요청 상세를 봅니다"
+              onClick={() => openRequest(b.hit.record)}
               style={{
                 position: 'absolute',
                 left: 0,
                 top: 0,
+                cursor: 'pointer',
+                pointerEvents: 'auto',
                 background: c,
                 color: '#000',
                 font: '10px/1.4 ui-monospace, Menlo, monospace',
@@ -510,12 +804,88 @@ const useDraggable = () => {
   return { pos, onPointerDown, onPointerMove, onPointerUp };
 };
 
+// ---- 도킹: 표시 방식 선택, 크기 조절, 별도 창 ----
+
+const DOCK_OPTIONS: Array<{ dock: Dock; icon: string; title: string }> = [
+  { dock: 'float', icon: '▭', title: '작게 보기 (버튼 옆)' },
+  { dock: 'bottom', icon: '⬓', title: '하단에 도킹 (넓게 보기)' },
+  { dock: 'right', icon: '◨', title: '오른쪽에 도킹' },
+  { dock: 'window', icon: '⧉', title: '도킹 해제 (별도 창)' },
+];
+
+const DockPicker = ({ dock, onChange }: { dock: Dock; onChange: (dock: Dock) => void }) => (
+  <span style={{ display: 'inline-flex', gap: 2 }}>
+    {DOCK_OPTIONS.map((o) => (
+      <Button key={o.dock} active={dock === o.dock} onClick={() => onChange(o.dock)} title={o.title}>
+        {o.icon}
+      </Button>
+    ))}
+  </span>
+);
+
+/** 도킹한 패널의 안쪽 가장자리를 끌어 높이(하단) 또는 너비(오른쪽)를 바꾼다. */
+const ResizeHandle = ({ edge, onResize }: { edge: 'top' | 'left'; onResize: (size: number) => void }) => {
+  const onPointerDown = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const move = (ev: PointerEvent) => {
+      const size = edge === 'top' ? window.innerHeight - ev.clientY : window.innerWidth - ev.clientX;
+      const max = (edge === 'top' ? window.innerHeight : window.innerWidth) - 80;
+      onResize(Math.min(Math.max(size, 160), max));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      title="끌어서 크기 조절"
+      style={
+        edge === 'top'
+          ? { position: 'absolute', left: 0, right: 0, top: -3, height: 6, cursor: 'ns-resize' }
+          : { position: 'absolute', top: 0, bottom: 0, left: -3, width: 6, cursor: 'ew-resize' }
+      }
+    />
+  );
+};
+
+/** 도킹 해제: 패널을 별도 창에 그린다. 사용자가 창을 닫으면 onClosed 를 부른다. */
+const usePopupWindow = (enabled: boolean, onClosed: () => void): Window | null => {
+  const [popup, setPopup] = useState<Window | null>(null);
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
+  useEffect(() => {
+    if (!enabled) return;
+    const win = window.open('', 'data-source-inspector', 'width=960,height=640');
+    if (!win) {
+      // 팝업이 막히면 작게 보기로 돌아간다.
+      onClosedRef.current();
+      return;
+    }
+    win.document.title = 'Data Source Inspector';
+    win.document.body.style.margin = '0';
+    win.document.body.style.background = color.bg;
+    setPopup(win);
+    // 사용자가 창을 직접 닫았는지 확인한다(다른 창의 unload 이벤트는 브라우저마다 다르게 온다).
+    const timer = window.setInterval(() => {
+      if (win.closed) onClosedRef.current();
+    }, 500);
+    return () => {
+      window.clearInterval(timer);
+      setPopup(null);
+      if (!win.closed) win.close();
+    };
+  }, [enabled]);
+  return popup;
+};
+
 // ---- 본체 ----
 
 const panelStyle: CSSProperties = {
   position: 'fixed',
-  width: 480,
-  maxHeight: '70vh',
   display: 'flex',
   flexDirection: 'column',
   zIndex: Z,
@@ -534,7 +904,21 @@ export const DataSourceDevtools = ({ hotkey = { key: 'd', shift: true } }: DataS
   const [showAll, setShowAll] = useState(false);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const [result, setResult] = useState<InspectResult | null>(null);
+  const [selected, setSelected] = useState<{ record: RequestRecord; focus?: Focus } | null>(null);
+  const openRequest = (record: RequestRecord, focus?: Focus) => {
+    setOpen(true);
+    setSelected({ record, focus });
+  };
   const { pos, onPointerDown, onPointerMove, onPointerUp } = useDraggable();
+  const [dockSettings, setDockSettings] = useState(readDock);
+  const { dock } = dockSettings;
+  const updateDock = (patch: Partial<DockSettings>) =>
+    setDockSettings((prev) => {
+      const next = { ...prev, ...patch };
+      saveDock(next);
+      return next;
+    });
+  const popup = usePopupWindow(open && dock === 'window', () => updateDock({ dock: 'float' }));
   useRecords();
 
   const records = getRecords();
@@ -596,13 +980,76 @@ export const DataSourceDevtools = ({ hotkey = { key: 'd', shift: true } }: DataS
     };
   }, [picking]);
 
-  // 패널은 버튼 위쪽(공간이 없으면 아래쪽)에, 화면 밖으로 나가지 않게 둔다.
+  // 작게 보기: 버튼 위쪽(공간이 없으면 아래쪽)에, 화면 밖으로 나가지 않게 둔다.
   const panelLeft = clamp(pos.x + 44 - 480, window.innerWidth - 480);
-  const panelPos: CSSProperties = pos.y > window.innerHeight / 2 ? { left: panelLeft, bottom: window.innerHeight - pos.y + 8 } : { left: panelLeft, top: pos.y + 52 };
+  const floatPos: CSSProperties =
+    pos.y > window.innerHeight / 2 ? { left: panelLeft, bottom: window.innerHeight - pos.y + 8 } : { left: panelLeft, top: pos.y + 52 };
+  const dockStyle: CSSProperties =
+    dock === 'bottom'
+      ? { left: 0, right: 0, bottom: 0, height: dockSettings.bottomHeight, borderTop: `1px solid ${color.border}` }
+      : dock === 'right'
+        ? { top: 0, right: 0, bottom: 0, width: dockSettings.rightWidth, borderLeft: `1px solid ${color.border}` }
+        : dock === 'window'
+          ? { position: 'static', width: '100%', height: '100vh' }
+          : { ...floatPos, width: 480, maxHeight: '70vh', borderRadius: 8, boxShadow: '0 4px 24px rgba(0,0,0,.4)' };
+
+  const panel = (
+    <div style={{ ...panelStyle, ...dockStyle }} role="dialog" aria-label="Data source inspector" {...{ [ROOT_ATTR]: '' }}>
+      {(dock === 'bottom' || dock === 'right') && (
+        <ResizeHandle
+          edge={dock === 'bottom' ? 'top' : 'left'}
+          onResize={(size) => updateDock(dock === 'bottom' ? { bottomHeight: size } : { rightWidth: size })}
+        />
+      )}
+      <div style={{ display: 'flex', gap: 4, padding: 8, borderBottom: `1px solid ${color.border}`, flexWrap: 'wrap' }}>
+        {/* 별도 창으로 띄워도 요소 선택과 전체 표시는 원래 창의 화면에 동작한다. */}
+        <Button
+          active={picking}
+          onClick={() => (picking ? setPicking(false) : startPicking())}
+          title={dock === 'window' ? '원래 창에서 요소를 클릭하세요' : `요소 선택 (Ctrl/Cmd+Shift+${hotkey.key.toUpperCase()})`}
+        >
+          ⌖ 요소 선택
+        </Button>
+        <Button active={showAll} onClick={() => setShowAll((v) => !v)} title="데이터 출처가 있는 요소를 모두 표시">
+          ▦ 전체 표시
+        </Button>
+        <span style={{ flex: 1 }} />
+        <Button active={tab === 'inspect' && !selected} onClick={() => (setTab('inspect'), setSelected(null))}>
+          검사
+        </Button>
+        <Button active={tab === 'requests' && !selected} onClick={() => (setTab('requests'), setSelected(null))}>
+          요청{wastefulCount > 0 ? ` ⚠${wastefulCount}` : ''}
+        </Button>
+        <Button active={tab === 'timeline' && !selected} onClick={() => (setTab('timeline'), setSelected(null))}>
+          타임라인
+        </Button>
+        <Button active={tab === 'renders' && !selected} onClick={() => (setTab('renders'), setSelected(null))}>
+          렌더
+        </Button>
+        <span style={{ width: 8 }} />
+        <DockPicker dock={dock} onChange={(next) => updateDock({ dock: next })} />
+        <Button onClick={() => setOpen(false)} title="닫기">
+          ✕
+        </Button>
+      </div>
+      <div style={{ padding: 8, overflow: 'auto', flex: 1 }}>
+        {picking && <div style={{ color: color.accent, marginBottom: 8 }}>화면의 요소를 클릭하세요. (Esc 취소)</div>}
+        {selected && <RequestDetail record={selected.record} focus={selected.focus} onBack={() => setSelected(null)} />}
+        {/* 상세를 여는 동안에도 탭 상태(필터, 타임라인 멈춤 등)를 잃지 않도록 숨기기만 한다. */}
+        <div style={{ display: selected ? 'none' : undefined }}>
+          {tab === 'inspect' && <InspectTab result={result} stats={statsByEndpoint} />}
+          {tab === 'requests' && <RequestsTab records={records} stats={stats} />}
+          {tab === 'timeline' && <TimelineTab records={records} />}
+          {tab === 'renders' && <RendersTab statsByEndpoint={statsByEndpoint} />}
+        </div>
+      </div>
+    </div>
+  );
 
   return createPortal(
+    <OpenRequestContext.Provider value={openRequest}>
     <div {...{ [ROOT_ATTR]: '' }}>
-      {showAll && <Overlay statsByEndpoint={statsByEndpoint} />}
+      {showAll && <Overlay />}
       {hoverRect && (
         <div
           style={{
@@ -618,41 +1065,8 @@ export const DataSourceDevtools = ({ hotkey = { key: 'd', shift: true } }: DataS
           }}
         />
       )}
-      {open && (
-        <div style={{ ...panelStyle, ...panelPos }} role="dialog" aria-label="Data source inspector">
-          <div style={{ display: 'flex', gap: 4, padding: 8, borderBottom: `1px solid ${color.border}`, flexWrap: 'wrap' }}>
-            <Button active={picking} onClick={() => (picking ? setPicking(false) : startPicking())} title={`요소 선택 (Ctrl/Cmd+Shift+${hotkey.key.toUpperCase()})`}>
-              ⌖ 요소 선택
-            </Button>
-            <Button active={showAll} onClick={() => setShowAll((v) => !v)} title="데이터 출처가 있는 요소를 모두 표시">
-              ▦ 전체 표시
-            </Button>
-            <span style={{ flex: 1 }} />
-            <Button active={tab === 'inspect'} onClick={() => setTab('inspect')}>
-              검사
-            </Button>
-            <Button active={tab === 'requests'} onClick={() => setTab('requests')}>
-              요청{wastefulCount > 0 ? ` ⚠${wastefulCount}` : ''}
-            </Button>
-            <Button active={tab === 'timeline'} onClick={() => setTab('timeline')}>
-              타임라인
-            </Button>
-            <Button active={tab === 'renders'} onClick={() => setTab('renders')}>
-              렌더
-            </Button>
-            <Button onClick={() => setOpen(false)} title="닫기">
-              ✕
-            </Button>
-          </div>
-          <div style={{ padding: 8, overflow: 'auto' }}>
-            {picking && <div style={{ color: color.accent, marginBottom: 8 }}>화면의 요소를 클릭하세요. (Esc 취소)</div>}
-            {tab === 'inspect' && <InspectTab result={result} stats={statsByEndpoint} />}
-            {tab === 'requests' && <RequestsTab records={records} stats={stats} />}
-            {tab === 'timeline' && <TimelineTab records={records} />}
-            {tab === 'renders' && <RendersTab statsByEndpoint={statsByEndpoint} />}
-          </div>
-        </div>
-      )}
+      {open && dock !== 'window' && panel}
+      {open && dock === 'window' && popup && createPortal(panel, popup.document.body)}
       <button
         type="button"
         aria-label="Data source inspector 열기"
@@ -681,10 +1095,9 @@ export const DataSourceDevtools = ({ hotkey = { key: 'd', shift: true } }: DataS
       >
         API
       </button>
-    </div>,
+    </div>
+    </OpenRequestContext.Provider>,
     document.body,
   );
 };
 
-// 패널 자신의 렌더는 렌더 감시에서 뺀다.
-ignoreComponent(DataSourceDevtools);

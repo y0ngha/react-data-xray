@@ -4,6 +4,8 @@
 interface Fiber {
   tag: number;
   type: unknown;
+  memoizedProps: unknown;
+  memoizedState: unknown;
   child: Fiber | null;
   sibling: Fiber | null;
   alternate: Fiber | null;
@@ -54,6 +56,13 @@ const record = (fiber: Fiber, now: number): boolean => {
   let entry = entries.get(fiber) ?? (fiber.alternate ? entries.get(fiber.alternate) : undefined);
   // 부모가 bailout 하면 하위 fiber 는 지난 commit 의 객체(와 플래그)가 그대로 남는다. 같은 객체면 렌더하지 않은 것이다.
   if (entry && entry.fiber === fiber) return false;
+  // 처음 보는 fiber 는 지난 렌더의 플래그가 남아 있을 수 있다. 이전 트리와 props·state 가 같으면 이번에 렌더하지 않은 것이다.
+  if (!entry && fiber.alternate && fiber.alternate.memoizedProps === fiber.memoizedProps && fiber.alternate.memoizedState === fiber.memoizedState) {
+    entry = { name: nameOf(fiber.type), times: [], fiber };
+    entries.set(fiber, entry);
+    entries.set(fiber.alternate, entry);
+    return false;
+  }
   if (!entry) {
     entry = { name: nameOf(fiber.type), times: [], fiber };
     entries.set(fiber, entry);

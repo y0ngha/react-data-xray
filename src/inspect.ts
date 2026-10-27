@@ -1,8 +1,9 @@
-import { getOrigin, getRecords, subscribe, type Origin, type RequestRecord } from './registry.js';
+import { getBodyVersion, getOrigin, getRecords, type Origin, type RequestRecord } from './registry.js';
 
 // React 내부 구조(fiber)는 공개 API가 아니다. 18, 19에서 같은 필드를 쓴다.
 interface Fiber {
   tag: number;
+  alternate: Fiber | null;
   type: unknown;
   return: Fiber | null;
   child: Fiber | null;
@@ -42,6 +43,7 @@ export interface InspectResult {
 
 const FUNCTION = 0;
 const CLASS = 1;
+const HOST_ROOT = 3;
 const HOST_COMPONENT = 5;
 const FORWARD_REF = 11;
 // memo(Comp, compare)(tag 14)는 안쪽 Comp 가 따로 fiber 를 가지므로 넣지 않는다.
@@ -57,10 +59,22 @@ const MAX_DERIVED_CANDIDATES = 30;
 // 이만큼의 필드 값이 같아야 같은 데이터를 가공한 객체로 본다.
 const MIN_DERIVED_FIELDS = 2;
 
+/**
+ * DOM 에 붙은 fiber 는 current 일 수도, 지난 commit 의 alternate 일 수도 있다.
+ * HostRoot 까지 올라가 root.current 와 같은 쪽 트리인지 보고, 아니면 alternate 를 쓴다.
+ */
+const toCurrent = (fiber: Fiber): Fiber => {
+  let node = fiber;
+  while (node.return) node = node.return;
+  if (node.tag !== HOST_ROOT) return fiber;
+  const root = node.stateNode as { current?: Fiber } | null;
+  return root?.current === node ? fiber : (fiber.alternate ?? fiber);
+};
+
 export const getFiber = (el: Element): Fiber | null => {
   for (let node: Element | null = el; node; node = node.parentElement) {
     const key = Object.keys(node).find((k) => k.startsWith('__reactFiber$'));
-    if (key) return (node as unknown as Record<string, Fiber>)[key];
+    if (key) return toCurrent((node as unknown as Record<string, Fiber>)[key]);
   }
   return null;
 };
@@ -103,15 +117,19 @@ const collectValues = (fiber: Fiber): Array<{ via: string; value: unknown; query
 // ---- 파생 매칭: "필드명=값" 색인으로 가공된 객체의 원본 응답 객체를 찾는다 ----
 
 let fieldIndex: Map<string, Origin[]> | null = null;
-subscribe(() => {
-  fieldIndex = null;
-});
+let fieldIndexVersion = -1;
+let fieldIndexBuiltAt = 0;
+// 폴링 화면에서는 응답이 계속 들어오므로, 색인을 다시 만드는 것은 2초에 한 번으로 줄인다.
+const FIELD_INDEX_MIN_AGE_MS = 2000;
 
 const isDistinctive = (v: unknown): v is string | number =>
   (typeof v === 'string' && v.length >= 2 && v.length <= 200) || (typeof v === 'number' && Math.abs(v) >= 10);
 
 const getFieldIndex = (): Map<string, Origin[]> => {
-  if (fieldIndex) return fieldIndex;
+  const version = getBodyVersion();
+  if (fieldIndex && (version === fieldIndexVersion || Date.now() - fieldIndexBuiltAt < FIELD_INDEX_MIN_AGE_MS)) return fieldIndex;
+  fieldIndexVersion = version;
+  fieldIndexBuiltAt = Date.now();
   const index = new Map<string, Origin[]>();
   for (const record of getRecords()) {
     let nodes = 0;
@@ -148,10 +166,10 @@ export const findDerivedOrigin = (value: object): Origin | null => {
     for (const origin of index.get(`${k}\u0000${v}`) ?? []) scores.set(origin, (scores.get(origin) ?? 0) + 1);
   }
   let best: Origin | null = null;
-  let bestScore = MIN_DERIVED_FIELDS - 1;
+  let bestScore = 0;
   // 최신 응답을 우선한다(색인은 오래된 순이므로 같은 점수면 뒤의 것을 고른다).
   for (const [origin, score] of scores) {
-    if (score >= bestScore) {
+    if (score >= MIN_DERIVED_FIELDS && score >= bestScore) {
       best = origin;
       bestScore = score;
     }
@@ -160,6 +178,10 @@ export const findDerivedOrigin = (value: object): Origin | null => {
 };
 
 // ---- 컴포넌트 하나에서 출처 찾기 ----
+
+/** `$.a[1]` 아래의 `$.a[1].b` 는 포함하지만 `$.a[10]` 이나 `$.ab` 는 포함하지 않는다. */
+const isSameOrChildPath = (path: string, parent: string) =>
+  path === parent || path.startsWith(`${parent}.`) || path.startsWith(`${parent}[`);
 
 const findOrigins = (root: unknown, via: string, queryKey: unknown, hits: Hit[], candidates: Array<{ value: object; where: string }>) => {
   const seen = new WeakSet<object>();
@@ -170,7 +192,7 @@ const findOrigins = (root: unknown, via: string, queryKey: unknown, hits: Hit[],
     const origin = getOrigin(value);
     if (origin) {
       // 같은 응답의 하위 객체를 또 내려가며 찾을 필요는 없다.
-      if (!hits.some((h) => h.record === origin.record && origin.path.startsWith(h.path))) {
+      if (!hits.some((h) => h.record === origin.record && isSameOrChildPath(origin.path, h.path))) {
         hits.push({ record: origin.record, path: origin.path, via: where, queryKey, match: 'exact' });
       }
       return;
@@ -262,13 +284,19 @@ export interface Box {
   hit: Hit;
 }
 
+// React 루트 컨테이너는 거의 바뀌지 않으므로 찾은 것을 기억해 두고, 없을 때만 페이지를 훑는다.
+let rootContainers: Element[] = [];
+
+const containerKey = (el: Element) => Object.keys(el).find((k) => k.startsWith('__reactContainer$'));
+
 const findRootFibers = (): Fiber[] => {
-  const roots: Fiber[] = [];
-  for (const el of Array.from(document.querySelectorAll('*'))) {
-    const key = Object.keys(el).find((k) => k.startsWith('__reactContainer$'));
-    if (key) roots.push((el as unknown as Record<string, Fiber>)[key]);
-  }
-  return roots;
+  rootContainers = rootContainers.filter((el) => el.isConnected && containerKey(el));
+  if (rootContainers.length === 0) rootContainers = Array.from(document.querySelectorAll('*')).filter((el) => containerKey(el));
+  // 컨테이너에 붙은 HostRoot fiber 는 처음 만든 것이라 commit 마다 current/alternate 가 바뀐다. root.current 로 따라간다.
+  return rootContainers.map((el) => {
+    const hostRoot = (el as unknown as Record<string, Fiber>)[containerKey(el)!];
+    return (hostRoot.stateNode as { current?: Fiber } | null)?.current ?? hostRoot;
+  });
 };
 
 const hostNodesOf = (fiber: Fiber): Element[] => {
