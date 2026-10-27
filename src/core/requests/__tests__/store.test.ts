@@ -64,6 +64,15 @@ describe('store', () => {
     expect(getRecords()).toHaveLength(0);
   });
 
+  it('측정을 새로 시작하기 전에 나간 요청은 늦게 끝나도 새 기록에 넣지 않는다', () => {
+    const inFlight = createRecord('fetch', 'GET', '/api/poll');
+    clearRecords();
+    finishRecord(inFlight, 200);
+    const fresh = createRecord('fetch', 'GET', '/api/poll');
+    finishRecord(fresh, 200);
+    expect(getRecords()).toEqual([fresh]);
+  });
+
   it('실패한 요청은 상태 0 과 에러로 기록한다', () => {
     const r = createRecord('xhr', 'GET', '/api/fail');
     finishRecord(r, 0, 'abort');

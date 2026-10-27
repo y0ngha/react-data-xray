@@ -8,6 +8,8 @@ const MAX_RESPONSE_TEXT = 100_000;
 const records: RequestRecord[] = [];
 const listeners = new Set<() => void>();
 let nextId = 1;
+// 이 id 보다 앞선 요청은 측정을 새로 시작(clearRecords)하기 전에 나간 것이라, 늦게 끝나도 넣지 않는다.
+let firstLiveId = 1;
 // 같은 탭에서 몇 번째로 연 페이지인지(세션 유지가 정한다). 기록마다 붙인다.
 let currentLoad = 0;
 
@@ -59,6 +61,7 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
   record.status = status;
   record.error = error;
   record.durationMs = Date.now() - record.startedAt;
+  if (record.id < firstLiveId) return;
   records.push(record);
   if (records.length > MAX_RECORDS) records.shift();
   notify();
@@ -96,6 +99,7 @@ export const mergeRecords = (others: readonly RequestRecord[]): void => {
 
 export const clearRecords = (): void => {
   records.length = 0;
+  firstLiveId = nextId;
   resetRepeatDetection();
   notify();
 };

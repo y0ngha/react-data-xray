@@ -1,5 +1,6 @@
-import { REPORT_HEADER, REPORT_PATH } from '../../shared/reportPath.js';
+import { isReportName, REPORT_HEADER, REPORT_PATH } from '../../shared/reportPath.js';
 import { getNativeFetch } from '../capture/nativeFetch.js';
+import { whenSourcesResolved } from '../capture/requestContext.js';
 import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../render/monitor.js';
 import { clearRecords } from '../requests/store.js';
 import { buildReport, type RdxReport } from './buildReport.js';
@@ -12,7 +13,7 @@ export interface RdxApi {
   report: () => RdxReport;
   /** 측정을 새로 시작한다: 요청 기록과 렌더 통계를 비운다 */
   reset: () => void;
-  /** 보고서를 이름 붙여 저장한다(.rdx/<name>.json, dev 서버 플러그인이 있을 때). 고치기 전후를 비교할 때 쓴다 */
+  /** 보고서를 이름 붙여 저장한다(.rdx/<name>.json). 고치기 전후를 비교할 때 쓴다. 저장하지 못하면(플러그인 없음 등) 거부된다 */
   snapshot: (name: string) => Promise<RdxReport>;
 }
 
@@ -41,11 +42,8 @@ const HANDSHAKE_RETRY_MS = 3000;
 // dev 서버가 꺼지면 계속 실패하므로 이만큼 연속 실패하면 멈춘다. 서버가 돌아오면 Vite 가 페이지를 다시 열어 처음부터 확인한다.
 const MAX_UPLOAD_FAILURES = 3;
 
-// 보고서 이름: 파일 이름이 되므로 경로를 만들 수 있는 글자는 받지 않는다.
-export const SNAPSHOT_NAME = /^[\w.-]{1,64}$/;
-
-// 확인한 dev 서버 미들웨어가 있는지(업로드를 시작할 때 정한다)
-let endpointReady = false;
+// dev 서버 미들웨어가 있는지 확인한 결과. snapshot 이 확인이 끝나기 전에 불려도 기다린다.
+let endpointReady: Promise<boolean> = Promise.resolve(false);
 
 const reset = (): void => {
   clearRecords();
@@ -53,19 +51,25 @@ const reset = (): void => {
 };
 
 const snapshot = async (name: string): Promise<RdxReport> => {
-  if (!SNAPSHOT_NAME.test(name) || name.startsWith('.')) {
-    throw new Error(`[react-data-xray] 보고서 이름은 영문·숫자·. _ - 로 64자까지입니다(. 으로 시작할 수 없습니다): ${name}`);
+  if (!isReportName(name)) {
+    throw new Error(
+      `[react-data-xray] 보고서 이름은 영문·숫자·. _ - 로 64자까지입니다(. 으로 시작하거나 'report' 일 수 없습니다): ${name}`,
+    );
   }
-  const result = report();
   const send = getNativeFetch();
-  if (endpointReady && send) {
-    await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
-      method: 'POST',
-      credentials: 'omit',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(result),
-    }).catch(() => null);
+  if (!send || !(await endpointReady)) {
+    throw new Error('[react-data-xray] dev 서버에 rdx 플러그인이 없어 저장하지 못했습니다. window.__RDX__.report() 로 받으세요.');
   }
+  // 호출 위치가 원본 위치와 변환 전 위치로 갈리지 않게, 진행 중인 소스맵 변환을 기다린다.
+  await whenSourcesResolved();
+  const result = report();
+  const res = await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
+    method: 'POST',
+    credentials: 'omit',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(result),
+  }).catch(() => null);
+  if (!res?.ok) throw new Error(`[react-data-xray] .rdx/${name}.json 을 쓰지 못했습니다(${res ? res.status : '응답 없음'}).`);
   return result;
 };
 
@@ -91,8 +95,9 @@ const hasReportEndpoint = async (send: typeof fetch): Promise<boolean> => {
  */
 const startUpload = async (): Promise<void> => {
   const send = getNativeFetch();
-  if (!send || !(await hasReportEndpoint(send))) return;
-  endpointReady = true;
+  if (!send) return;
+  endpointReady = hasReportEndpoint(send);
+  if (!(await endpointReady)) return;
   keepRenderMonitoring();
   let last = '';
   let failures = 0;

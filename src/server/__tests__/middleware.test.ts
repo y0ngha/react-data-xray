@@ -73,6 +73,8 @@ describe('보고서 미들웨어', () => {
     expect(JSON.parse(await readFile(join(root, '.rdx/before-fix.json'), 'utf8'))).toEqual({ scenario: 1 });
     expect((await postAs('../escape')).status).toBe(400);
     expect((await postAs('.gitignore')).status).toBe(400);
+    // 5초마다 덮어쓰는 자동 보고서 자리는 이름으로 쓸 수 없다.
+    expect((await postAs('report')).status).toBe(400);
   });
 
   it('다른 출처, JSON 이 아닌 본문, 다른 경로는 받지 않는다', async () => {

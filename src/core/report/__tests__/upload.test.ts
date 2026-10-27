@@ -28,3 +28,10 @@ it('snapshot 은 이름 붙인 보고서를 보내고, reset 은 기록을 비�
   expect(window.__RDX__!.report().requests.total).toBe(0);
   await expect(window.__RDX__!.snapshot('../x')).rejects.toThrow(/보고서 이름/);
 });
+
+it('snapshot 은 dev 서버가 쓰지 못하면 거부되어, 파일이 없다는 것을 호출한 쪽이 안다', async () => {
+  mockFetch.mockImplementation(async (input, init) =>
+    init?.method === 'POST' && String(input).includes('name=') ? new Response(null, { status: 500 }) : new Response('{}'),
+  );
+  await expect(window.__RDX__!.snapshot('after')).rejects.toThrow(/after\.json/);
+});

@@ -64,6 +64,9 @@ export const parseMappings = (mappings: string): Segment[][] => {
   });
 };
 
+// 이보다 큰 모듈은 앱과 라이브러리를 한 파일에 묶은 번들(webpack 등)이라 소스맵이 수십 MB 다. 메인 스레드를 멈추지 않게 건너뛴다.
+const MAX_MODULE_BYTES = 1_000_000;
+
 const MAP_COMMENT = /\/[/*][#@]\s*sourceMappingURL=([^\s*]+)\s*(?:\*\/\s*)?$/;
 
 /** data URL 의 내용(UTF-8). base64 면 바이트로 풀어 UTF-8 로 읽는다(한글 경로 등). 깨진 값이면 null */
@@ -92,6 +95,7 @@ const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   const send = getNativeFetch();
   if (!send) return null;
   const code = await send(scriptUrl, { credentials: 'same-origin' }).then((r) => (r.ok ? r.text() : ''));
+  if (code.length > MAX_MODULE_BYTES) return null;
   const ref = MAP_COMMENT.exec(code.trimEnd())?.[1];
   if (!ref) return null;
   const mapUrl = new URL(ref, scriptUrl).href;
@@ -103,47 +107,59 @@ const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   const map = json as { sources?: string[]; sourceRoot?: string; mappings?: string } | null;
   if (!map?.mappings || !map.sources) return null;
   const root = map.sourceRoot ? map.sourceRoot.replace(/\/?$/, '/') : '';
+  const base = entryBase();
   // sources 는 소스맵(또는 모듈) 위치 기준 상대 경로일 수 있다(Vite: "global.ts"). 모듈 주소 기준으로 풀어 경로를 살린다.
-  return { sources: map.sources.map((s) => sourcePath(`${root}${s}`, scriptUrl)), lines: parseMappings(map.mappings) };
+  return { sources: map.sources.map((s) => sourcePath(`${root}${s}`, scriptUrl, base)), lines: parseMappings(map.mappings) };
 };
 
-// 모듈마다 한 번만 받는다. 실패도 기억해 다시 묻지 않는다.
+// HMR 이 모듈 주소에 ?t= 를 붙여 새 키가 계속 생기므로, 오래된 것부터 버린다.
+const MAX_MAPS = 200;
+// 모듈마다 한 번만 받는다. 소스맵이 없는 모듈은 기억하고, 네트워크 실패(dev 서버 재시작 중 등)는 다음에 다시 받는다.
 const maps = new Map<string, Promise<ParsedMap | null>>();
 
 const mapOf = (scriptUrl: string): Promise<ParsedMap | null> => {
   const cached = maps.get(scriptUrl);
   if (cached) return cached;
-  const loading = loadMap(scriptUrl).catch(() => null);
+  const loading = loadMap(scriptUrl).catch(() => {
+    maps.delete(scriptUrl);
+    return null;
+  });
   maps.set(scriptUrl, loading);
+  if (maps.size > MAX_MAPS) maps.delete(maps.keys().next().value as string);
   return loading;
 };
 
-/** 원본 경로를 보기 좋게: 프로젝트 안 경로(src/…)부터 */
-const shortPath = (source: string): string => source.replace(/^.*?\/(src|app|pages|components)\//, '$1/').replace(/^(\.\.\/)+/, '');
-
 /** dev 서버가 소스를 내주는 경로(Vite 의 base, 예: /assets/). 모듈 주소에서 떼어 프로젝트 기준 경로로 보인다. */
 const entryBase = (): string => {
-  const scripts = Array.from(document.querySelectorAll<HTMLScriptElement>('script[type="module"][src]'), (el) => new URL(el.src).pathname);
-  // Vite 는 base 아래에 @vite/client 를 넣는다.
-  const client = scripts.find((p) => p.includes('/@vite/client'));
-  if (client) return client.slice(0, client.indexOf('@vite/client'));
-  const entry = scripts.find((p) => !p.includes('/@'));
-  return entry ? entry.replace(/[^/]*$/, '') : '/';
+  // Vite 는 base 아래에 @vite/client 를 넣는다. 못 찾으면(인라인 import 하는 SSR 등) 서버 루트를 base 로 본다.
+  const client = Array.from(
+    document.querySelectorAll<HTMLScriptElement>('script[type="module"][src]'),
+    (el) => new URL(el.src).pathname,
+  ).find((p) => p.includes('/@vite/client'));
+  return client ? client.slice(0, client.indexOf('@vite/client')) : '/';
 };
 
-/** 소스맵의 source 를 사람이 찾을 수 있는 경로로: 절대 경로면 src/… 부터, 상대 경로면 모듈 주소 기준으로 푼다. */
-const sourcePath = (source: string, scriptUrl: string): string => {
-  if (/^(\/|[a-z]+:)/i.test(source) && !source.startsWith('http')) return shortPath(source.replace(/^[a-z]+:\/\/\/?/i, '/'));
+/**
+ * 소스맵의 source 를 사람이 찾을 수 있는 경로로.
+ * 파일 시스템 절대 경로(/Users/…/app/src/x.ts, webpack:///…)는 마지막 src/ 부터, 모듈 주소 기준 상대 경로는 base 를 뗀 서버 경로 그대로.
+ */
+const sourcePath = (source: string, scriptUrl: string, base: string): string => {
+  if (/^(\/|[a-z]+:)/i.test(source) && !source.startsWith('http')) {
+    const path = source.replace(/^[a-z]+:\/\/\/?/i, '/');
+    return path.replace(/^.*\/(?=src\/)/, '');
+  }
   const path = new URL(source, scriptUrl).pathname;
-  const base = entryBase();
-  return shortPath(path.startsWith(base) ? path.slice(base.length) : path.replace(/^\//, ''));
+  return path.startsWith(base) ? path.slice(base.length) : path.replace(/^\//, '');
 };
 
 /** 변환된 코드의 (줄, 열)(1 부터)에 해당하는 원본 위치 */
 export const originalPosition = (map: ParsedMap, line: number, column: number): string | null => {
   const segments = map.lines[line - 1];
   if (!segments?.length) return null;
-  const segment = [...segments].reverse().find((s) => s.column <= column - 1) ?? segments[0];
+  // 열 순서로 정렬돼 있으므로 뒤에서부터 처음 만나는, 그 열 이하에서 시작하는 구간
+  let i = segments.length - 1;
+  while (i > 0 && segments[i].column > column - 1) i--;
+  const segment = segments[i];
   const source = map.sources[segment.source];
   return source ? `${source}:${segment.line + 1}:${segment.sourceColumn + 1}` : null;
 };

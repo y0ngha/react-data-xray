@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 
-import { REPORT_HEADER, REPORT_PATH } from '../shared/reportPath.js';
+import { DEFAULT_REPORT_NAME, isReportName, REPORT_HEADER, REPORT_PATH } from '../shared/reportPath.js';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 // 동시에 들어온 보고서가 같은 임시 파일 이름을 쓰지 않게 붙이는 순번
@@ -101,8 +101,8 @@ export const rdxReportMiddleware = (root = process.cwd(), { dir = '.rdx', allowe
     if (req.method === 'GET') return reply(res, 204);
     if (!req.headers['content-type']?.startsWith('application/json')) return reply(res, 403);
     // window.__RDX__.snapshot(이름) 은 ?name= 으로 따로 저장한다. 파일 이름이 되므로 경로를 만들 수 있는 글자는 받지 않는다.
-    const name = new URL(req.url ?? '', 'http://x').searchParams.get('name') ?? 'report';
-    if (!/^[\w.-]{1,64}$/.test(name) || name.startsWith('.')) return reply(res, 400);
+    const name = new URL(req.url ?? '', 'http://x').searchParams.get('name');
+    if (name !== null && !isReportName(name)) return reply(res, 400);
     readBody(req)
       .then(async (text) => {
         const report: unknown = JSON.parse(text);
@@ -112,7 +112,7 @@ export const rdxReportMiddleware = (root = process.cwd(), { dir = '.rdx', allowe
         // 임시 파일에 쓰고 이름을 바꾼다. 탭 여러 개가 동시에 보내거나 AI 가 읽는 도중이어도 잘린 JSON 을 보지 않는다.
         const temp = join(folder, `report.json.${process.pid}.${writeSeq++}.tmp`);
         await writeFile(temp, `${JSON.stringify(report, null, 2)}\n`);
-        await rename(temp, join(folder, `${name}.json`));
+        await rename(temp, join(folder, `${name ?? DEFAULT_REPORT_NAME}.json`));
         reply(res, 204);
       })
       .catch(() => reply(res, 400));

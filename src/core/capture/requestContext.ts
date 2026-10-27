@@ -74,11 +74,20 @@ export const annotateRequest = (record: RequestRecord): RequestRecord => {
 const resolveSourceStack = (record: RequestRecord): void => {
   const stack = record.stack;
   if (!stack || typeof window === 'undefined') return;
-  resolveStack(stack)
+  const job = resolveStack(stack)
     .then((resolved) => {
       if (resolved === stack) return;
       record.sourceStack = resolved;
       touchRecords();
     })
-    .catch(() => undefined);
+    .catch(() => undefined)
+    .finally(() => resolving.delete(job));
+  resolving.add(job);
 };
+
+const resolving = new Set<Promise<void>>();
+const RESOLVE_WAIT_MS = 2000;
+
+/** 진행 중인 소스맵 변환이 끝날 때까지(길어도 2초) 기다린다. 보고서를 저장하기 직전에 부른다. */
+export const whenSourcesResolved = (): Promise<unknown> =>
+  Promise.race([Promise.allSettled(resolving), new Promise((resolve) => setTimeout(resolve, RESOLVE_WAIT_MS))]);
