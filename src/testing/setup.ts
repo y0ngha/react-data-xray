@@ -8,11 +8,17 @@ import { installCapture } from '../core/capture/install.js';
 import { clearRecords } from '../core/requests/store.js';
 import { mockFetch, resetMockFetch } from './fetchMock.js';
 
+// dev 서버 미들웨어 테스트는 node 환경에서 돈다. 브라우저 준비는 jsdom 에서만 한다.
+const isBrowser = typeof window !== 'undefined';
+
 // jsdom 에는 fetch 가 없어서, 가로채기를 설치하기 전에 가짜 fetch 를 둔다.
-window.fetch = mockFetch;
-installCapture();
+if (isBrowser) {
+  window.fetch = mockFetch;
+  installCapture();
+}
 
 beforeEach(() => {
+  if (!isBrowser) return;
   clearRecords();
   resetMockFetch();
   localStorage.clear();

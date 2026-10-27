@@ -8,10 +8,14 @@ const MAX_RESPONSE_TEXT = 100_000;
 const records: RequestRecord[] = [];
 const listeners = new Set<() => void>();
 let nextId = 1;
-// 응답 본문이 새로 등록될 때마다 오른다. 파생 매칭 색인을 다시 만들지 판단할 때 쓴다.
-let bodyVersion = 0;
 
-const notify = () => listeners.forEach((listener) => listener());
+// 기록이 바뀔 때마다 오른다. 기록에서 계산한 값을 다시 계산할지 판단할 때 쓴다.
+let version = 0;
+
+const notify = () => {
+  version++;
+  listeners.forEach((listener) => listener());
+};
 
 export const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener);
@@ -20,7 +24,7 @@ export const subscribe = (listener: () => void): (() => void) => {
 
 export const getRecords = (): readonly RequestRecord[] => records;
 
-export const getBodyVersion = (): number => bodyVersion;
+export const getStoreVersion = (): number => version;
 
 /** 요청이 나갈 때 만든다. requestBody 가 null 이면 본문이 있지만 읽을 수 없다는 뜻이다. */
 export const createRecord = (kind: RequestRecord['kind'], method: string, url: string, requestBody?: string | null): RequestRecord => {
@@ -62,7 +66,6 @@ export const registerBody = (record: RequestRecord, body: unknown): void => {
   // 폴리필의 json() 이 내부에서 text() + JSON.parse 를 거치면 같은 응답이 두 번 들어온다.
   if (record.body !== undefined) return;
   record.body = body;
-  bodyVersion++;
   registerOrigins(record, body);
   notify();
 };

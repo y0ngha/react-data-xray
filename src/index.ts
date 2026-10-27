@@ -1,6 +1,7 @@
 // 순서가 중요하다: 렌더 감시는 react-dom 보다 먼저 평가돼야 React 의 commit 을 받을 수 있다.
 import { ignoreComponent } from './core/render/monitor.js';
 import { installCapture } from './core/capture/install.js';
+import { installReportApi } from './core/report/reportApi.js';
 import { RdxDevtools as Devtools, type RdxDevtoolsProps } from './ui/RdxDevtools.js';
 
 export type { RdxDevtoolsProps } from './ui/RdxDevtools.js';
@@ -9,6 +10,8 @@ export type { RdxDevtoolsProps } from './ui/RdxDevtools.js';
 if (process.env.NODE_ENV !== 'production') {
   // 컴포넌트 mount 보다 먼저 요청이 나가므로(자식 effect 가 먼저 돈다) import 시점에 설치한다.
   installCapture();
+  // AI 가 결과를 읽는 창구: window.__RDX__.report(), dev 서버 플러그인이 있으면 .rdx/report.json
+  installReportApi();
   // 패널 자신의 렌더는 렌더 감시에서 뺀다.
   ignoreComponent(Devtools);
 }

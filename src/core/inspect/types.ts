@@ -30,6 +30,8 @@ export interface Box {
   /** 트리 탐색 순번(화면 key) */
   id: number;
   rect: DOMRect;
+  /** 컴포넌트가 그린 가장 바깥 DOM 요소들. 스크롤할 때 위치를 다시 잴 때 쓴다. */
+  nodes: Element[];
   name: string;
   hit: Hit;
   /** 렌더 횟수를 찾을 때 쓰는 컴포넌트 fiber */

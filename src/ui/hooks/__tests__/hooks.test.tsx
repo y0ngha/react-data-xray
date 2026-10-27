@@ -62,6 +62,13 @@ describe('useDraggable', () => {
     fireEvent.pointerMove(button, { clientX: 500, clientY: 500, pointerId: 1 });
     expect(onClick).toHaveBeenCalledTimes(1);
   });
+
+  it('큰 창에서 저장한 위치가 지금 창 밖이면 창 안으로 당겨서 그린다', () => {
+    localStorage.setItem('react-data-xray:button', JSON.stringify({ x: 5000, y: 5000 }));
+    render(<Draggable onClick={() => undefined} />);
+    const button = screen.getByRole('button');
+    expect([Number(button.dataset.x), Number(button.dataset.y)]).toEqual([window.innerWidth - 40, window.innerHeight - 40]);
+  });
 });
 
 describe('useHotkey', () => {

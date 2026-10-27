@@ -41,6 +41,29 @@ rdx가 보여 주는 요청은 어디서든 클릭하면 **요청 상세**(Query
 
 매칭은 `[정확]`(같은 참조), `[파생]`(가공된 객체지만 필드 값이 일치), `[추정]`(화면 글자만 일치) 세 단계로 표시합니다.
 
+### AI 에게 결과 넘기기
+
+rdx 가 모은 결과(엔드포인트별 낭비 요청과 보낸 코드 위치, 줄일 수 있는 렌더와 그 이유)를 AI 가 읽을 수 있게 내보냅니다. 응답 본문과 헤더는 넣지 않습니다.
+
+- **파일**: dev 서버에 플러그인을 붙이면 5초마다 바뀐 내용을 `.rdx/report.json` 에 씁니다(dev 명령을 실행한 폴더 기준, `.rdx/.gitignore` 도 함께 만듭니다). 플러그인을 확인하면 렌더 감시를 계속 켜 둡니다.
+
+  ```ts
+  // vite.config.ts
+  import { rdx } from 'react-data-xray/vite';
+  export default defineConfig({ plugins: [react(), rdx()] });
+  ```
+
+  ```js
+  // webpack devServer
+  import { rdxReportMiddleware } from 'react-data-xray/middleware';
+  devServer: { setupMiddlewares: (middlewares, server) => { server.app.use(rdxReportMiddleware()); return middlewares; } }
+  ```
+
+  AI 가 이 파일을 읽게 하려면 `CLAUDE.md` 같은 지침 파일에 "화면 성능·요청 문제를 고치기 전에 `.rdx/report.json` 을 읽는다" 한 줄을 둡니다.
+- **브라우저**: 브라우저 도구를 쓰는 AI 는 `window.__RDX__.report()` 를 부릅니다. 처음 부를 때 렌더 감시가 꺼져 있었다면 켜고 `renders.monitoring: false` 를 돌려주니, 화면을 조작한 뒤 다시 부릅니다.
+
+보고서의 호출 위치 줄 번호는 dev 서버가 변환한 코드 기준이라 원본과 어긋날 수 있습니다. 함수 이름으로 찾습니다.
+
 ## 문서
 
 - [CONTEXT.md](./docs/CONTEXT.md): 목표, 방법과 그 이유, 한계
@@ -55,6 +78,13 @@ pnpm test           # 테스트만
 pnpm fmt            # 포맷 적용
 pnpm sync <앱 경로>  # 빌드해서 file: 로 연결한 앱의 node_modules 에 반영하고 Vite 캐시 파일을 지운다
 ```
+
+- `file:` 로 연결한 Vite 앱에서 고치며 볼 때는 앱의 `vite.config` 에 아래 두 줄을 둡니다. Vite 가 rdx 를 사전 번들하면 `pnpm sync` 할 때마다 dev 서버를 `--force` 로 다시 띄워야 하고, import URL 의 `?v=` 해시가 그대로라 브라우저도 이전 모듈을 씁니다. 사전 번들에서 빼고 감시하면 `pnpm sync` 만으로 페이지가 새 코드로 다시 열립니다.
+
+  ```ts
+  server: { watch: { ignored: ['!**/node_modules/react-data-xray/**'] } },
+  optimizeDeps: { exclude: ['react-data-xray'] },
+  ```
 
 - 테스트는 각 폴더의 `__tests__` 에 둡니다. 테스트 안에서 시나리오용 컴포넌트를 그 자리에서 정의하는 것은 의도된 패턴이라, 테스트 폴더에서만 `unicorn/consistent-function-scoping` 을 끕니다(`.oxlintrc.json`). 테스트 픽스처는 rdx 가 관찰할 `useEffect + fetch` 패턴을 일부러 재현하므로 react-doctor 의 `no-fetch-in-effect` 도 테스트 폴더에서만 끕니다(`react-doctor.config.json`).
 - react-doctor 는 공급망 검사(의존성 목록을 외부로 보냄)와 사용 통계 전송을 끄고 실행합니다.

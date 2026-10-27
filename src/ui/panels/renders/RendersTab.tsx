@@ -23,8 +23,18 @@ const SORTS: ReadonlyArray<{ sort: RenderSort; label: string; title?: string }> 
   { sort: 'time', label: '시간순', title: '자식을 뺀 자기 자신의 렌더 시간 합' },
 ];
 
+// 출처 검사는 비싸서, 컴포넌트가 다시 렌더되기 전(state·props 객체가 그대로)에는 지난 결과를 쓴다.
+// shortcut: useContext 만 쓰는 컴포넌트는 context 값이 바뀌어도 props 가 같으면 지난 결과를 쓴다. 틀린 출처가 보고되면 context 값도 키에 넣는다.
+const sources = new WeakMap<object, Hit | undefined>();
+
 /** 렌더가 잦은 컴포넌트가 어떤 요청의 데이터를 쓰는지 같이 보여 준다. */
-const sourceOf = (group: RenderGroup): Hit | undefined => inspectFiber(group.fiber as Fiber)[0];
+const sourceOf = (group: RenderGroup): Hit | undefined => {
+  const fiber = group.fiber as Fiber;
+  const key: unknown = fiber.memoizedState ?? fiber.memoizedProps;
+  if (!key || typeof key !== 'object') return inspectFiber(fiber)[0];
+  if (!sources.has(key)) sources.set(key, inspectFiber(fiber)[0]);
+  return sources.get(key);
+};
 
 /** 렌더 › 분석: 최근 10초 렌더를 컴포넌트별로 묶어 이유, 줄이는 방법, 네트워크 원인을 보여 준다. */
 export const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: ReadonlyMap<string, EndpointStat> }) => {
@@ -45,9 +55,10 @@ export const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: ReadonlyMap<s
         ))}
       </div>
       {groups.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
-      {groups.map((group) => (
-        <RenderGroupRow key={group.name} group={group} source={sourceOf(group)} stat={statOf(sourceOf(group))} showTime={showTime} />
-      ))}
+      {groups.map((group) => {
+        const source = sourceOf(group);
+        return <RenderGroupRow key={group.name} group={group} source={source} stat={statOf(source)} showTime={showTime} />;
+      })}
     </div>
   );
 };

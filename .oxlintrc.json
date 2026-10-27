@@ -23,7 +23,16 @@
     "import/no-cycle": "error",
     "import/no-unassigned-import": "off",
     "unicorn/no-array-sort": "off",
-    "unicorn/no-array-reverse": "off"
+    "unicorn/no-array-reverse": "off",
+    "no-underscore-dangle": [
+      "warn",
+      {
+        "allow": [
+          "__RDX__",
+          "__REACT_DEVTOOLS_GLOBAL_HOOK__"
+        ]
+      }
+    ]
   },
   "ignorePatterns": [
     "dist",

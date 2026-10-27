@@ -139,10 +139,55 @@ describe('전체 표시 박스', () => {
   it('응답 객체를 props 로 받는 컴포넌트마다 박스를 만들고, 레이아웃이 없으면 그리지 않는다', async () => {
     render(<EffectList />);
     await screen.findByText('메모리 경고');
-    expect(collectBoxes(() => false)).toEqual([]);
-    expect(withLayout(() => collectBoxes(() => false)).map((b) => [b.name, b.hit.path])).toEqual([
+    expect(collectBoxes(() => false).boxes).toEqual([]);
+    expect(withLayout(() => collectBoxes(() => false).boxes).map((b) => [b.name, b.hit.path])).toEqual([
       ['Row', '$.data.list[0]'],
       ['Row', '$.data.list[1]'],
+    ]);
+  });
+
+  it('파생 조회 시간을 넘기면 미뤘다고 알리고, 다음 수집에서 이어서 찾는다', async () => {
+    const pickDerived = (json: typeof DEFAULT_BODY) => ({ ...json.data.list[0], label: '가공' });
+    const Derived = () => {
+      const item = useFetched<Item | null>('/api/derived-box', pickDerived, null);
+      return item ? <Row item={item} /> : null;
+    };
+    render(<Derived />);
+    await screen.findByText('CPU 경고');
+    const first = withLayout(() => collectBoxes(() => false, -1));
+    expect(first).toEqual({ boxes: [], deferred: true });
+    const next = withLayout(() => collectBoxes(() => false, Infinity));
+    expect(next.deferred).toBe(false);
+    expect(next.boxes.map((b) => [b.name, b.hit.match])).toEqual([['Row', 'derived']]);
+  });
+
+  it('카드마다 항목 단위로 한 번, 다른 응답의 복사본은 그 안에서 한 번만 그린다', async () => {
+    type Project = { id: number; status: { up: number }; region: { name: string } };
+    mockFetch.mockImplementationOnce(async () =>
+      jsonResponse({ data: { projects: [{ id: 1, status: { up: 1 }, region: { name: 'kr' } }] } }),
+    );
+    const project: Project = await fetch('/api/projects')
+      .then((r) => r.json())
+      .then((json) => json.data.projects[0]);
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ total: 3, normal: 2, paused: 0 }));
+    const summary = await fetch('/api/summary').then((r) => r.json());
+    const stat = { ...summary, before: {} };
+    const Total = ({ stat: s }: { stat: { total: number } }) => <b>{s.total}</b>;
+    const Body = ({ item, stat: s }: { item: Project; stat: { total: number } }) => (
+      <div>
+        {item.id} <Total stat={s} />
+      </div>
+    );
+    const Region = ({ region }: { region: Project['region'] }) => <i>{region.name}</i>;
+    const Card = ({ status, item }: { status: Project['status']; item: Project }) => (
+      <section>
+        {status.up} <Region region={item.region} /> <Body item={item} stat={stat} />
+      </section>
+    );
+    render(<Card status={project.status} item={project} />);
+    expect(withLayout(() => collectBoxes(() => false).boxes).map((b) => [b.name, b.hit.record.url, b.hit.match])).toEqual([
+      ['Card', '/api/projects', 'exact'],
+      ['Body', '/api/summary', 'derived'],
     ]);
   });
 
@@ -157,11 +202,11 @@ describe('전체 표시 박스', () => {
       </ul>
     );
     const view = render(<List count={2} />);
-    expect(withLayout(() => collectBoxes(() => false))).toHaveLength(2);
+    expect(withLayout(() => collectBoxes(() => false).boxes)).toHaveLength(2);
     view.rerender(<List count={1} />);
-    expect(withLayout(() => collectBoxes(() => false))).toHaveLength(1);
+    expect(withLayout(() => collectBoxes(() => false).boxes)).toHaveLength(1);
     view.rerender(<List count={2} />);
-    expect(withLayout(() => collectBoxes(() => false))).toHaveLength(2);
+    expect(withLayout(() => collectBoxes(() => false).boxes)).toHaveLength(2);
   });
 });
 

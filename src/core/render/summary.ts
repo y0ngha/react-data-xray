@@ -1,7 +1,7 @@
 import { endpointOf } from '../requests/requestKey.js';
 import { RENDER_REASONS, type NetworkCauseCount, type RenderEntry, type RenderReason, type RenderSummary } from './types.js';
 
-const WINDOW_MS = 10_000;
+export const WINDOW_MS = 10_000;
 
 const countReasons = (reasons: readonly RenderReason[]): Record<RenderReason, number> =>
   Object.fromEntries(RENDER_REASONS.map((r) => [r, reasons.filter((x) => x === r).length])) as Record<RenderReason, number>;

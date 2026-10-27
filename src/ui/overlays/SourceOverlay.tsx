@@ -1,39 +1,138 @@
-import { pathOf } from '../../core/requests/requestKey.js';
+import { memo, useCallback, useEffect, useRef } from 'react';
+
+import { unionRect } from '../../core/fiber/tree.js';
 import type { Box } from '../../core/inspect/types.js';
-import { getRenderInfo } from '../../core/render/monitor.js';
+import { getRenderInfo, subscribeCommits } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
+import type { RequestRecord } from '../../core/requests/types.js';
 import { isWaste } from '../../core/requests/classify.js';
+import { pathOf } from '../../core/requests/requestKey.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
-import { useNow } from '../hooks/useNow.js';
 import { useOverlayBoxes } from '../hooks/useOverlayBoxes.js';
 import { useRenderMonitoring } from '../hooks/useRenderMonitoring.js';
 import { color, MATCH_COLOR, SMALL_FONT, Z_OVERLAY } from '../theme.js';
 
 // 렌더 직후 박스를 이만큼 보라색으로 강조한다(React DevTools 의 Highlight updates 처럼).
 const FLASH_MS = 600;
-// 깜빡임과 렌더 횟수만 갱신하는 짧은 주기(박스 위치는 따로 계산한다)
-const FLASH_TICK_MS = 150;
+// 최근 10초 렌더 횟수가 시간이 지나며 줄어드는 것을 반영하는 주기
+const COUNT_TICK_MS = 1000;
 
-const SourceBox = ({ box, now }: { box: Box; now: number }) => {
-  const { open, classOf } = useRequestActions();
-  // 같은 엔드포인트의 다른 호출이 아니라, 이 데이터를 준 요청 자체가 낭비였을 때만 빨갛게 그린다.
-  const boxColor = isWaste(classOf(box.hit.record)) ? color.warn : MATCH_COLOR[box.hit.match];
+interface BoxElements {
+  box: Box;
+  root: HTMLDivElement;
+  label: HTMLButtonElement;
+  count: HTMLElement;
+}
+
+const paintPosition = ({ box, root }: BoxElements): void => {
+  const rect = unionRect(box.nodes);
+  root.style.display = rect ? '' : 'none';
+  if (!rect) return;
+  root.style.left = `${rect.left}px`;
+  root.style.top = `${rect.top}px`;
+  root.style.width = `${rect.width}px`;
+  root.style.height = `${rect.height}px`;
+};
+
+const paintRenders = ({ box, root, label, count }: BoxElements, now: number): void => {
   const render = getRenderInfo(box.fiber, now);
   const flashing = !!render && now - render.last < FLASH_MS;
+  const base = root.dataset.color ?? '';
+  root.style.outline = flashing ? `2px solid ${color.render}` : `1px solid ${base}`;
+  root.style.background = flashing ? `${color.render}33` : `${base}14`;
+  const recent = render?.recent ?? 0;
+  count.style.display = recent > 0 ? '' : 'none';
+  count.style.color = recent >= RENDER_STORM ? '#7f1d1d' : '#000';
+  count.textContent = recent > 0 ? `↻${recent}${render!.avoidable > 0 ? `(불필요 ${render!.avoidable})` : ''}` : '';
+  label.title = `클릭하면 요청 상세를 봅니다${render ? ` · 최근 10초 렌더 ${render.recent}회, 줄일 수 있는 렌더 ${render.avoidable}회` : ''}`;
+};
+
+/**
+ * 박스 위치와 렌더 표시를 React 렌더 없이 DOM 에 직접 쓴다. 박스가 수백 개라 150ms 마다 React 로
+ * 다시 그리면 메인 스레드를 다 쓴다. 스크롤은 위치만, commit 은 렌더 표시만 한 프레임에 한 번 고친다.
+ */
+const useBoxPainter = () => {
+  const elements = useRef(new Map<number, BoxElements>());
+  const register = useCallback((box: Box, el: HTMLDivElement | null) => {
+    const label = el?.querySelector('button');
+    const count = el?.querySelector('b');
+    if (!el || !label || !count) {
+      elements.current.delete(box.id);
+      return;
+    }
+    const els = { box, root: el, label, count };
+    elements.current.set(box.id, els);
+    paintRenders(els, Date.now());
+  }, []);
+
+  useEffect(() => {
+    const pending = { position: false, renders: false };
+    let frame = 0;
+    let flashEnd = 0;
+    const paint = () => {
+      frame = 0;
+      const now = Date.now();
+      elements.current.forEach((els) => {
+        if (pending.position) paintPosition(els);
+        if (pending.renders) paintRenders(els, now);
+      });
+      Object.assign(pending, { position: false, renders: false });
+    };
+    const schedule = (kind: keyof typeof pending) => () => {
+      pending[kind] = true;
+      if (!frame) frame = requestAnimationFrame(paint);
+    };
+    const repaintPosition = schedule('position');
+    const repaintRenders = schedule('renders');
+    const onCommit = () => {
+      repaintRenders();
+      // 깜빡임을 끄는 다시 그리기
+      window.clearTimeout(flashEnd);
+      flashEnd = window.setTimeout(repaintRenders, FLASH_MS);
+      // 렌더로 레이아웃이 바뀌었을 수 있다.
+      repaintPosition();
+    };
+    const timer = window.setInterval(repaintRenders, COUNT_TICK_MS);
+    const unsubscribe = subscribeCommits(onCommit);
+    window.addEventListener('scroll', repaintPosition, true);
+    window.addEventListener('resize', repaintPosition);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(flashEnd);
+      window.clearInterval(timer);
+      unsubscribe();
+      window.removeEventListener('scroll', repaintPosition, true);
+      window.removeEventListener('resize', repaintPosition);
+    };
+  }, []);
+
+  return register;
+};
+
+interface SourceBoxProps {
+  box: Box;
+  waste: boolean;
+  onOpen: (record: RequestRecord) => void;
+  register: (box: Box, el: HTMLDivElement | null) => void;
+}
+
+/** 박스 하나. 처음 모양만 React 로 그리고, 위치·렌더 표시는 useBoxPainter 가 고친다. */
+const SourceBox = memo(function SourceBox({ box, waste, onOpen, register }: SourceBoxProps) {
+  // 같은 엔드포인트의 다른 호출이 아니라, 이 데이터를 준 요청 자체가 낭비였을 때만 빨갛게 그린다.
+  const boxColor = waste ? color.warn : MATCH_COLOR[box.hit.match];
+  const ref = useCallback((el: HTMLDivElement | null) => register(box, el), [box, register]);
   return (
     <FixedRect
+      ref={ref}
       rect={box.rect}
-      style={{
-        outline: flashing ? `2px solid ${color.render}` : `1px solid ${boxColor}`,
-        background: flashing ? `${color.render}33` : `${boxColor}14`,
-        zIndex: Z_OVERLAY,
-      }}
+      data-color={boxColor}
+      style={{ outline: `1px solid ${boxColor}`, background: `${boxColor}14`, zIndex: Z_OVERLAY }}
     >
       <button
         type="button"
-        title={`클릭하면 요청 상세를 봅니다${render ? ` · 최근 10초 렌더 ${render.recent}회, 줄일 수 있는 렌더 ${render.avoidable}회` : ''}`}
-        onClick={() => open(box.hit.record)}
+        title="클릭하면 요청 상세를 봅니다"
+        onClick={() => onOpen(box.hit.record)}
         style={{
           position: 'absolute',
           left: 0,
@@ -50,27 +149,23 @@ const SourceBox = ({ box, now }: { box: Box; now: number }) => {
           overflow: 'hidden',
         }}
       >
-        {render && render.recent > 0 && (
-          <b style={{ color: render.recent >= RENDER_STORM ? '#7f1d1d' : '#000', marginRight: 4 }}>
-            ↻{render.recent}
-            {render.avoidable > 0 && `(불필요 ${render.avoidable})`}
-          </b>
-        )}
+        <b style={{ display: 'none', marginRight: 4 }} />
         {pathOf(box.hit.record.url)}
       </button>
     </FixedRect>
   );
-};
+});
 
 /** ▦ 전체 표시: 데이터 출처가 있는 컴포넌트마다 박스, URL, 렌더 횟수를 그리고 렌더될 때마다 깜빡인다. */
 export const SourceOverlay = () => {
   useRenderMonitoring();
   const boxes = useOverlayBoxes();
-  const now = useNow(FLASH_TICK_MS);
+  const register = useBoxPainter();
+  const { open, classOf } = useRequestActions();
   return (
     <>
       {boxes.map((box) => (
-        <SourceBox key={box.id} box={box} now={now} />
+        <SourceBox key={box.id} box={box} waste={isWaste(classOf(box.hit.record))} onOpen={open} register={register} />
       ))}
     </>
   );

@@ -1,16 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { getOrigin } from '../origins.js';
-import {
-  clearRecords,
-  createRecord,
-  finishRecord,
-  getBodyVersion,
-  getRecords,
-  keepResponseText,
-  registerBody,
-  subscribe,
-} from '../store.js';
+import { clearRecords, createRecord, finishRecord, getRecords, keepResponseText, registerBody, subscribe } from '../store.js';
 
 describe('store', () => {
   it('2초 안의 같은 요청은 앞선 요청의 중복으로 표시하고, 2초가 지나면 아니다', () => {
@@ -55,10 +46,8 @@ describe('store', () => {
   it('응답 본문의 객체를 출처와 함께 등록하고, 같은 응답이 두 번 들어와도 한 번만 등록한다', () => {
     const r = createRecord('fetch', 'GET', '/api/b');
     const body = { list: [{ id: 1 }] };
-    const before = getBodyVersion();
     registerBody(r, body);
     registerBody(r, { other: true });
-    expect(getBodyVersion()).toBe(before + 1);
     expect(r.body).toBe(body);
     expect(getOrigin(body.list[0])).toEqual({ record: r, path: '$.list[0]' });
   });

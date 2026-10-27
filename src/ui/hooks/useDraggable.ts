@@ -1,4 +1,4 @@
-import { useRef, type PointerEvent } from 'react';
+import { useRef, useSyncExternalStore, type PointerEvent } from 'react';
 
 import { clamp } from '../../shared/format.js';
 import { useStoredState } from './useStoredState.js';
@@ -17,6 +17,11 @@ const parse = (raw: unknown): Position | undefined => {
   return typeof p?.x === 'number' && typeof p?.y === 'number' ? { x: p.x, y: p.y } : undefined;
 };
 
+const subscribeResize = (onChange: () => void) => {
+  window.addEventListener('resize', onChange);
+  return () => window.removeEventListener('resize', onChange);
+};
+
 interface Drag {
   dx: number;
   dy: number;
@@ -29,10 +34,14 @@ interface Drag {
  * onClick 은 끌지 않고 눌렀다 뗐을 때만 부른다.
  */
 export const useDraggable = (size: number, onClick: () => void) => {
-  const [position, setPosition, savePosition] = useStoredState(POSITION_KEY, parse, () => ({
+  const [stored, setPosition, savePosition] = useStoredState(POSITION_KEY, parse, () => ({
     x: window.innerWidth - size - 20,
     y: window.innerHeight - size - 20,
   }));
+  // 큰 창에서 옮겨 둔 위치를 작은 창에서 열면 화면 밖으로 나가므로, 지금 창 안으로 당겨서 그린다.
+  const width = useSyncExternalStore(subscribeResize, () => window.innerWidth);
+  const height = useSyncExternalStore(subscribeResize, () => window.innerHeight);
+  const position = { x: clamp(stored.x, 0, Math.max(0, width - size)), y: clamp(stored.y, 0, Math.max(0, height - size)) };
   const drag = useRef<Drag | null>(null);
 
   const onPointerDown = (e: PointerEvent) => {

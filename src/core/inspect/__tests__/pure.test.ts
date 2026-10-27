@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createRecord, finishRecord, registerBody } from '../../requests/store.js';
+import { clearRecords, createRecord, finishRecord, registerBody } from '../../requests/store.js';
 import type { RequestRecord } from '../../requests/types.js';
 
 /** 응답을 받은 요청처럼 목록에 넣고 본문을 등록한다. */
@@ -42,6 +42,23 @@ describe('derivedMatch', () => {
     expect(findDerivedOrigin({ id: 1001, name: 'kim', extra: true })?.record).toBe(latest);
     expect(findDerivedOrigin({ id: 1001, name: 'kim', team: 'ops' })?.record).toBe(old);
     expect(findDerivedOrigin({ id: 1, flag: true })).toBeNull();
+  });
+
+  it('작은 숫자뿐인 응답을 펼쳐 복사하고 필드를 덧붙여도, 원시값 필드 묶음과 값이 모두 같으면 찾는다', () => {
+    const summary = respond('/api/summary', { total: 3, normal: 2, paused: 0, os: { linux: 3 } });
+    const copy = { ...(summary.body as object), before: { total: 2 } };
+    expect(findDerivedOrigin(copy)).toEqual({ record: summary, path: '$' });
+    expect(findDerivedOrigin({ total: 3, normal: 1, paused: 0 })).toBeNull();
+    expect(findDerivedOrigin({ total: 3, normal: 2 })).toBeNull();
+  });
+
+  it('새 응답은 색인에 더하고, 목록에서 빠진 응답은 찾지 않는다', () => {
+    respond('/api/gone', { user: { id: 2002, name: 'lee' } });
+    expect(findDerivedOrigin({ id: 2002, name: 'lee' })).not.toBeNull();
+    clearRecords();
+    expect(findDerivedOrigin({ id: 2002, name: 'lee' })).toBeNull();
+    const added = respond('/api/added', { user: { id: 3003, name: 'park' } });
+    expect(findDerivedOrigin({ id: 3003, name: 'park' })?.record).toBe(added);
   });
 });
 

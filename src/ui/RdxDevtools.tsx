@@ -73,16 +73,17 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
     }, []),
   );
 
+  // 요청이 들어올 때마다 classOf 가 바뀌어도 open 은 그대로라야 오버레이 박스가 다시 렌더되지 않는다.
+  const openRequest = useCallback<RequestActions['open']>(
+    (record, focus) => {
+      show();
+      setSelected({ record, focus });
+    },
+    [show],
+  );
   const actions = useMemo<RequestActions>(
-    () => ({
-      open: (record, focus) => {
-        show();
-        setSelected({ record, focus });
-      },
-      hover: setHovered,
-      classOf: analysis.classOf,
-    }),
-    [analysis.classOf, show],
+    () => ({ open: openRequest, hover: setHovered, classOf: analysis.classOf }),
+    [analysis.classOf, openRequest],
   );
 
   const panel = (

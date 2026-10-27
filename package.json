@@ -9,6 +9,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./vite": {
+      "types": "./dist/server/vite.d.ts",
+      "import": "./dist/server/vite.js"
+    },
+    "./middleware": {
+      "types": "./dist/server/middleware.d.ts",
+      "import": "./dist/server/middleware.js"
     }
   },
   "files": [

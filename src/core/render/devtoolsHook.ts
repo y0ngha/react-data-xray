@@ -35,8 +35,7 @@ const createHook = (): DevtoolsHook => {
 export const listenToCommits = (onCommit: (root: { current: Fiber }) => void): void => {
   if (typeof window === 'undefined') return;
   const w = window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: DevtoolsHook };
-  // React DevTools 와 react-dom 이 약속한 전역 이름이라 바꿀 수 없다.
-  // oxlint-disable-next-line no-underscore-dangle
+  // React DevTools 와 react-dom 이 약속한 전역 이름이라 바꿀 수 없다(.oxlintrc 에서 허용).
   const hook = (w.__REACT_DEVTOOLS_GLOBAL_HOOK__ ??= createHook());
   const original = hook.onCommitFiberRoot.bind(hook);
   hook.onCommitFiberRoot = (id, root, ...rest) => {
