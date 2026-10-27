@@ -13,6 +13,9 @@ const MAX_REPORT_WINDOW_MS = 120_000;
 let measuredFrom = 0;
 const MAX_COMMITS = 500;
 
+/** React 19 의 React Compiler 는 컴포넌트마다 메모 캐시를 updateQueue.memoCache 에 둔다. */
+const isCompiled = (fiber: Fiber): boolean => !!(fiber.updateQueue as { memoCache?: unknown } | null | undefined)?.memoCache;
+
 /** 자식에게 물려주는 것: 네트워크 원인과, 이 렌더를 시작한 조상 */
 interface Inherited {
   cause?: NetworkCause;
@@ -36,6 +39,7 @@ const entryOf = (fiber: Fiber): RenderEntry => {
     fiber,
     memoized: isMemoized(fiber),
     location: jsxLocationOf(fiber),
+    compiled: isCompiled(fiber),
   };
   entries.set(fiber, entry);
   if (fiber.alternate) entries.set(fiber.alternate, entry);
@@ -55,6 +59,7 @@ const recordRender = (fiber: Fiber, now: number, inherited: Inherited): RenderEv
     ms: typeof fiber.selfBaseDuration === 'number' ? fiber.selfBaseDuration : undefined,
     reason: result.reason,
     keys: result.keys,
+    hooks: result.hooks,
     cause: causeOf(result, inherited.cause, now),
     origin: startsRender ? undefined : inherited.origin,
   };

@@ -32,6 +32,29 @@ const Origins = ({ group }: { group: RenderGroup }) =>
     <Muted>렌더 시작: {group.origins.map((o) => `<${o.name}>(${REASON_LABEL[o.reason]}) ${o.count}회`).join(' · ')}</Muted>
   ) : null;
 
+/** state 때문에 렌더됐다면 값이 바뀐 훅: 어느 훅이, 몇 번, 어떤 간격으로, 무엇에서 무엇으로 */
+const StateHooks = ({ group }: { group: RenderGroup }) =>
+  group.stateHooks.length > 0 ? (
+    <Muted>
+      바뀐 state:{' '}
+      {group.stateHooks
+        .map(
+          (h) =>
+            `${h.label} ${h.count}회${h.intervalMs ? ` (${(h.intervalMs / 1000).toFixed(1)}초마다)` : ''} · 최근 ${h.last.from} → ${h.last.to}`,
+        )
+        .join(' / ')}
+    </Muted>
+  ) : null;
+
+/** 이 컴포넌트가 시작한 렌더가 하위에 미친 영향 */
+const Impact = ({ group }: { group: RenderGroup }) =>
+  group.impact ? (
+    <Muted>
+      이 컴포넌트가 일으킨 하위 렌더 {group.impact.renders}회 · 그중 값이 그대로 {group.impact.unchanged}회
+      {group.impact.changedProps.length > 0 && ` · 값이 바뀐 props: ${group.impact.changedProps.join(' → ')}`}
+    </Muted>
+  ) : null;
+
 /** 렌더는 네트워크와 무관할 수 있다. 응답 객체로 근거가 확인된 것만 네트워크 원인으로 보여 준다. */
 const NetworkCauses = ({ group }: { group: RenderGroup }) => (
   <>
@@ -72,6 +95,8 @@ export const RenderGroupRow = ({ group, source, stat, showTime }: RenderGroupRow
   <div style={rowStyle}>
     <Headline group={group} showTime={showTime} />
     <Muted>{reasonSummary(group)}</Muted>
+    <StateHooks group={group} />
+    <Impact group={group} />
     <Origins group={group} />
     {renderAdvice(group).map((text) => (
       <div key={text} style={{ color: color.review }}>

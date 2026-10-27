@@ -29,7 +29,8 @@
       {
         "allow": [
           "__RDX__",
-          "__REACT_DEVTOOLS_GLOBAL_HOOK__"
+          "__REACT_DEVTOOLS_GLOBAL_HOOK__",
+          "_debugHookTypes"
         ]
       }
     ]

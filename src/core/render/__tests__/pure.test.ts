@@ -113,6 +113,8 @@ describe('summary, groups, advice', () => {
       network: 0,
       causes: [],
       origins: [],
+      stateHooks: [],
+      compiled: false,
     };
     const group: RenderGroup = { ...base, name: 'X', instances: 1, fiber: {} };
     const advice = renderAdvice(group);
@@ -124,5 +126,70 @@ describe('summary, groups, advice', () => {
     expect(renderAdvice({ ...group, reasons: { ...group.reasons, 'same-content': 0, 'new-callback': 0, parent: 0, context: 0 } })).toEqual(
       [],
     );
+  });
+
+  it('일정한 간격으로 바뀌는 state 는 타이머를 의심하라고 하고, React Compiler 컴포넌트에는 React.memo 대신 시작점을 고치라고 한다', () => {
+    const base: RenderSummary = {
+      recent: 3,
+      last: 0,
+      ms: 0,
+      reasons: { mount: 0, state: 0, context: 0, props: 0, 'same-content': 0, 'new-callback': 0, parent: 3 },
+      avoidable: 3,
+      sameContentKeys: [],
+      callbackKeys: [],
+      contextKeys: [],
+      memoized: false,
+      network: 0,
+      causes: [],
+      origins: [{ name: 'ChartContent', reason: 'state', count: 3 }],
+      stateHooks: [{ label: 'useState #4', count: 3, intervalMs: 1000, last: { from: '3000', to: '2000' } }],
+      compiled: true,
+    };
+    const advice = renderAdvice({ ...base, name: 'Leaf', instances: 1, fiber: {} }).join('\n');
+    expect(advice).toContain('useState #4 이(가) 1.0초마다 바뀝니다');
+    expect(advice).toContain('React Compiler');
+    expect(advice).not.toContain('React.memo 로 감싸면');
+    expect(advice).toContain('<ChartContent>');
+  });
+
+  it('시작점이 하위를 대부분 헛렌더시켰으면 바뀐 props 만 짚어 state 를 내리라고 하고, 그렇지 않으면 말하지 않는다', () => {
+    const base: RenderSummary = {
+      recent: 3,
+      last: 0,
+      ms: 0,
+      reasons: { mount: 0, state: 3, context: 0, props: 0, 'same-content': 0, 'new-callback': 0, parent: 0 },
+      avoidable: 0,
+      sameContentKeys: [],
+      callbackKeys: [],
+      contextKeys: [],
+      memoized: false,
+      network: 0,
+      causes: [],
+      origins: [],
+      stateHooks: [{ label: 'useState #4', count: 3, intervalMs: 1000, last: { from: '3000', to: '2000' } }],
+      compiled: false,
+    };
+    const group: RenderGroup = {
+      ...base,
+      name: 'ChartContent',
+      instances: 1,
+      fiber: {},
+      impact: {
+        renders: 24,
+        unchanged: 18,
+        unchangedComponents: 6,
+        changedProps: ['AnalysisPanel.cooldownMs', 'ReanalyzeButton.cooldownMs'],
+      },
+    };
+    const first = renderAdvice(group)[0];
+    expect(first).toContain('state(useState #4, 1.0초마다)');
+    expect(first).toContain('AnalysisPanel.cooldownMs → ReanalyzeButton.cooldownMs');
+    expect(first).toContain('18회가 사라집니다');
+    expect(sortRenderGroups([{ ...group, name: 'Leaf', impact: undefined, avoidable: 3 }, group], 'avoidable')[0].name).toBe(
+      'ChartContent',
+    );
+    // 하위 대부분이 실제로 값을 받아 렌더됐다면 시작점 조언을 하지 않는다.
+    const busy = { ...group, impact: { renders: 24, unchanged: 4, unchangedComponents: 2, changedProps: ['A.x'] } };
+    expect(renderAdvice(busy).some((a) => a.includes('state colocation'))).toBe(false);
   });
 });

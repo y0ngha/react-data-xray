@@ -144,6 +144,8 @@ describe('RenderGroupRow', () => {
       network: 3,
       causes: [{ record, direct: 1, parent: 2, sameResponse: 2 }],
       origins: [{ name: 'Page', reason: 'state', count: 4 }],
+      stateHooks: [],
+      compiled: false,
       location: 'src/Page.tsx:12',
     };
     const stat = { endpoint: 'GET /api/src', count: 5, duplicates: 2, sameResponses: 1, review: 0, explained: 0, avgMs: 10 };

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { createContext, memo, useContext, useDeferredValue, useEffect, useState, type ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createContext, memo, useContext, useDeferredValue, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_BODY, flush } from '../../../testing/fetchMock.js';
 import {
@@ -13,6 +13,7 @@ import {
   setRenderMonitoring,
   subscribeCommits,
 } from '../monitor.js';
+import { groupRenders } from '../groups.js';
 
 const byName = () => Object.fromEntries(getTopRenders(200).map((e) => [e.name, e]));
 
@@ -262,5 +263,78 @@ describe('측정 구간', () => {
     expect(getTopRenders(50, later)).toEqual([]);
     expect(reportWindowMs(later)).toBeGreaterThanOrEqual(30_000);
     expect(getTopRenders(50, later, undefined, reportWindowMs(later)).find((e) => e.name === 'Counter')?.recent).toBe(2);
+  });
+});
+
+describe('바뀐 state 와 렌더 시작점의 영향', () => {
+  it('state 로 렌더되면 바뀐 훅의 종류·순서·값을 남기고, 일정한 간격이면 그 간격을 알린다', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(1_000_000);
+      function Ticker() {
+        useEffect(() => undefined, []);
+        const [left, setLeft] = useState(3000);
+        return <button onClick={() => setLeft((v) => v - 1000)}>tick {left}</button>;
+      }
+      render(<Ticker />);
+      [1, 2, 3].forEach(() => {
+        vi.setSystemTime(Date.now() + 1000);
+        fireEvent.click(screen.getByText(/^tick/));
+      });
+      const ticker = getTopRenders(200).find((e) => e.name === 'Ticker')!;
+      expect(ticker.stateHooks).toEqual([{ label: 'useState #2', count: 3, intervalMs: 1000, last: { from: '1000', to: '0' } }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('useSyncExternalStore 처럼 훅 칸을 둘 만드는 훅이 있어도, 코드에서 부른 순서로 훅을 가리킨다', () => {
+    const noop = () => () => undefined;
+    const Mode = createContext('dark');
+    function Store() {
+      useSyncExternalStore(noop, () => 1);
+      const theme = useContext(Mode);
+      const [n, setN] = useState(0);
+      return (
+        <button onClick={() => setN((v) => v + 1)}>
+          store {n} {theme}
+        </button>
+      );
+    }
+    render(<Store />);
+    fireEvent.click(screen.getByText(/^store/));
+    const store = getTopRenders(200).find((e) => e.name === 'Store')!;
+    expect(store.stateHooks.map((h) => h.label)).toEqual(['useState #3']);
+  });
+
+  it('렌더를 시작한 컴포넌트마다 하위가 값 그대로 따라 렌더된 수와, 값이 실제로 바뀐 props 를 위에서 아래 순서로 모은다', () => {
+    function Badge({ left }: { left: number }) {
+      return <i>{left}</i>;
+    }
+    function Panel({ left }: { left: number }) {
+      return <Badge left={left} />;
+    }
+    function Facts() {
+      return <p>facts</p>;
+    }
+    function Trend() {
+      return <p>trend</p>;
+    }
+    function Page() {
+      const [left, setLeft] = useState(3);
+      return (
+        <div>
+          <button onClick={() => setLeft((v) => v - 1)}>count</button>
+          <Facts />
+          <Trend />
+          <Panel left={left} />
+        </div>
+      );
+    }
+    render(<Page />);
+    fireEvent.click(screen.getByText('count'));
+    fireEvent.click(screen.getByText('count'));
+    const page = groupRenders(getTopRenders(200), 0).find((g) => g.name === 'Page')!;
+    expect(page.impact).toEqual({ renders: 8, unchanged: 4, unchangedComponents: 2, changedProps: ['Panel.left', 'Badge.left'] });
   });
 });

@@ -62,6 +62,8 @@ export interface RdxReport {
       renderedAt?: string;
       /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상(이름·이유). 고칠 곳은 대개 이 조상이다 */
       causedBy: Array<{ name: string; reason: string; count: number }>;
+      stateChanges: Array<{ label: string; count: number; intervalMs?: number; last: { from: string; to: string } }>;
+      startedRenders?: { renders: number; unchanged: number; unchangedComponents: number; changedProps: string[] };
       networkCauses: Array<{ endpoint: string; direct: number; viaParent: number; fromSameResponse: number }>;
       advice: string[];
     }>;
@@ -80,6 +82,8 @@ const HOW_TO_READ = [
   'networkCauses 의 viaParent 는 조상이 응답으로 렌더돼서 따라 렌더된 횟수다. 고칠 곳은 대개 그 조상의 setState 다.',
   'networkCauses 의 fromSameResponse 는 직전과 똑같은 응답인데도 렌더된 횟수다. 같은 응답이면 setState 를 건너뛰거나 구조적 공유를 쓴다.',
   'causedBy 는 그 렌더를 시작한 조상(이름·이유)이다. renderedAt 은 이 컴포넌트를 그리는 JSX 위치다.',
+  'stateChanges 는 state 때문에 렌더됐을 때 값이 바뀐 훅(종류 #순서)과 횟수, 일정한 간격(intervalMs, 타이머 신호), 최근 변경이다.',
+  'startedRenders 는 이 컴포넌트가 시작한 렌더가 하위에 미친 영향이다. unchanged 가 크고 changedProps 가 적으면, 바뀌는 state 를 changedProps 의 마지막 컴포넌트 가까이로 내리는 것이 해법이다(advice 첫 줄).',
 ];
 
 // 첫 줄은 대개 앱의 공통 fetch 함수라 그것만으로는 어디서 보냈는지 모른다. 바깥으로 몇 줄 더 본다.
@@ -119,7 +123,10 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
   const byEndpoint = groupBy(records, endpointOf);
   const windowMs = reportWindowMs(now);
   const clients = findQueryClients();
-  const groups = sortRenderGroups(groupRenders(getTopRenders(500, now, undefined, windowMs)), 'avoidable').slice(0, MAX_RENDER_GROUPS);
+  const groups = sortRenderGroups(groupRenders(getTopRenders(500, now, undefined, windowMs), now - windowMs), 'avoidable').slice(
+    0,
+    MAX_RENDER_GROUPS,
+  );
   return {
     generatedAt: new Date(now).toISOString(),
     page: typeof location === 'undefined' ? '' : location.pathname,
@@ -162,6 +169,8 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
         changedProps: { sameContent: g.sameContentKeys, newCallback: g.callbackKeys, context: g.contextKeys },
         renderedAt: g.location,
         causedBy: g.origins,
+        stateChanges: g.stateHooks,
+        startedRenders: g.impact,
         networkCauses: g.causes.map((c) => ({
           endpoint: endpointOf(c.record),
           direct: c.direct,

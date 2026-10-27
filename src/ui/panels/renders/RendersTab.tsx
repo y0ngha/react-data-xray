@@ -5,6 +5,7 @@ import type { Hit } from '../../../core/inspect/types.js';
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import { getTopRenders } from '../../../core/render/monitor.js';
+import { WINDOW_MS } from '../../../core/render/summary.js';
 import { isIndexPending } from '../../../core/inspect/derivedMatch.js';
 import { getRecords } from '../../../core/requests/store.js';
 import { inspectFiber } from '../../../core/inspect/inspect.js';
@@ -57,7 +58,7 @@ export const RendersTab = ({
   const now = useNow(REFRESH_MS);
   const [sort, setSort] = useState<RenderSort>('avoidable');
   const renders = getTopRenders(MAX_RENDERS, now, (e) => !scope || isWithin(e.fiber as Fiber, scope));
-  const groups = sortRenderGroups(groupRenders(renders), sort).slice(0, MAX_GROUPS);
+  const groups = sortRenderGroups(groupRenders(renders, now - WINDOW_MS), sort).slice(0, MAX_GROUPS);
   const showTime = groups.some((g) => g.ms > 0);
   const statOf = (source: Hit | undefined) => (source ? statsByEndpoint.get(endpointOf(source.record)) : undefined);
   return (

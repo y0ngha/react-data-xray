@@ -32,9 +32,25 @@ export interface RenderOrigin {
   reason: RenderReason;
 }
 
+/** state 때문에 렌더됐을 때, 값이 바뀐 훅 하나 */
+export interface HookChange {
+  /**
+   * 이 컴포넌트가 이 훅을 부른 순서(1부터, useContext·useEffect 도 센다). 코드를 위에서부터 읽으며 세는 번호다.
+   * dev 빌드의 훅 목록과 맞추지 못하면 내부 훅 칸의 순서다(type 이 없다).
+   */
+  index: number;
+  /** useState·useReducer 등. dev 빌드의 훅 목록과 맞출 수 있을 때만 */
+  type?: string;
+  /** 바뀌기 전·후 값의 짧은 미리보기 */
+  from: string;
+  to: string;
+}
+
 export interface RenderEvent {
   time: number;
   reason: RenderReason;
+  /** reason 이 state 이면 값이 바뀐 훅들 */
+  hooks?: HookChange[];
   cause?: NetworkCause;
   /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상. 스스로 시작한 렌더면 없다. */
   origin?: RenderOrigin;
@@ -54,6 +70,34 @@ export interface RenderEntry {
   memoized: boolean;
   /** 이 컴포넌트를 그리는 JSX 위치(dev 빌드가 기록할 때만) */
   location?: string;
+  /** React Compiler 가 메모하는 컴포넌트인지. 그러면 React.memo 대신 구조를 바꾸라고 권한다. */
+  compiled?: boolean;
+}
+
+/** 최근 구간에 값이 바뀐 상태 훅 하나의 요약 */
+export interface StateHookSummary {
+  /** 화면 표시: "useState #3" */
+  label: string;
+  count: number;
+  /** 일정한 간격으로 바뀌었다면 그 간격(ms). 타이머(setInterval) 신호다. */
+  intervalMs?: number;
+  /** 가장 최근 변경 */
+  last: { from: string; to: string };
+}
+
+/**
+ * 이 컴포넌트가 스스로 시작한 렌더(state·context 변경)가 하위에 미친 영향.
+ * 하위 대부분이 값이 그대로인데 따라 렌더됐다면, 바뀌는 값을 그것을 쓰는 곳 가까이로 내리라는 신호다.
+ */
+export interface OriginImpact {
+  /** 이 컴포넌트를 따라 렌더된 하위 렌더 수 */
+  renders: number;
+  /** 그중 props·state·context 값이 그대로였던 렌더 수 */
+  unchanged: number;
+  /** 값이 그대로인데 렌더된 하위 컴포넌트 수(이름 기준) */
+  unchangedComponents: number;
+  /** 값이 실제로 바뀐 props: "AnalysisPanel.reanalyzeCooldownMs" (위에서 아래 순서) */
+  changedProps: string[];
 }
 
 export interface NetworkCauseCount {
@@ -86,6 +130,9 @@ export interface RenderSummary {
   causes: NetworkCauseCount[];
   /** 조상 때문에 렌더됐을 때 그 렌더를 시작한 조상(많은 순) */
   origins: OriginCount[];
+  /** state 때문에 렌더됐다면 값이 바뀐 훅들(많은 순) */
+  stateHooks: StateHookSummary[];
+  compiled: boolean;
 }
 
 export interface Commit {
