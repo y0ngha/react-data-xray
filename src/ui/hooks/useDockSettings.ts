@@ -22,7 +22,10 @@ const parse = (raw: unknown): DockSettings | undefined => {
 
 /** 패널을 어떻게 보여 줄지(도킹 방식과 크기). 고른 설정을 기억한다. */
 export const useDockSettings = () => {
-  const [settings, setSettings] = useStoredState(DOCK_KEY, parse, () => DEFAULT);
-  const update = useCallback((patch: Partial<DockSettings>) => setSettings((prev) => ({ ...prev, ...patch })), [setSettings]);
-  return { settings, update };
+  const [settings, setSettings, save] = useStoredState(DOCK_KEY, parse, () => DEFAULT);
+  const update = useCallback(
+    (patch: Partial<DockSettings>, options?: { persist?: boolean }) => setSettings((prev) => ({ ...prev, ...patch }), options),
+    [setSettings],
+  );
+  return { settings, update, save };
 };

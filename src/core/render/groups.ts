@@ -50,4 +50,4 @@ const sortKey: Record<RenderSort, (g: RenderGroup) => number> = {
 };
 
 export const sortRenderGroups = (groups: readonly RenderGroup[], sort: RenderSort): RenderGroup[] =>
-  groups.toSorted((a, b) => sortKey[sort](b) - sortKey[sort](a));
+  [...groups].sort((a, b) => sortKey[sort](b) - sortKey[sort](a));

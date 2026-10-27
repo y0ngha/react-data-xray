@@ -41,7 +41,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
-  const { settings, update: updateDock } = useDockSettings();
+  const { settings, update: updateDock, save: saveDock } = useDockSettings();
   // 별도 창이 막히거나 닫히면 작게 보기로 돌아온다.
   const popupWindow = usePopupWindow(useCallback(() => updateDock({ dock: 'float' }), [updateDock]));
   const { open: openPopup, close: closePopup, popup } = popupWindow;
@@ -89,7 +89,8 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
     <Panel
       settings={settings}
       buttonPosition={position}
-      onResize={updateDock}
+      onResize={(patch) => updateDock(patch, { persist: false })}
+      onResizeEnd={saveDock}
       toolbar={
         <PanelToolbar
           activeTab={selected ? null : tab}

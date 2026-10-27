@@ -1,6 +1,9 @@
 import { useState } from 'react';
 
-import { groupRenders, sortRenderGroups, type RenderSort } from '../../../core/render/groups.js';
+import { groupRenders, sortRenderGroups, type RenderGroup, type RenderSort } from '../../../core/render/groups.js';
+import type { Hit } from '../../../core/inspect/types.js';
+import type { EndpointStat } from '../../../core/requests/endpointStats.js';
+import { endpointOf } from '../../../core/requests/requestKey.js';
 import { getTopRenders } from '../../../core/render/monitor.js';
 import { inspectFiber } from '../../../core/inspect/inspect.js';
 import type { Fiber } from '../../../core/fiber/types.js';
@@ -20,13 +23,17 @@ const SORTS: ReadonlyArray<{ sort: RenderSort; label: string; title?: string }> 
   { sort: 'time', label: '시간순', title: '자식을 뺀 자기 자신의 렌더 시간 합' },
 ];
 
+/** 렌더가 잦은 컴포넌트가 어떤 요청의 데이터를 쓰는지 같이 보여 준다. */
+const sourceOf = (group: RenderGroup): Hit | undefined => inspectFiber(group.fiber as Fiber)[0];
+
 /** 렌더 › 분석: 최근 10초 렌더를 컴포넌트별로 묶어 이유, 줄이는 방법, 네트워크 원인을 보여 준다. */
-export const RendersTab = () => {
+export const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: ReadonlyMap<string, EndpointStat> }) => {
   useRenderMonitoring();
   const now = useNow(REFRESH_MS);
   const [sort, setSort] = useState<RenderSort>('avoidable');
   const groups = sortRenderGroups(groupRenders(getTopRenders(MAX_RENDERS, now)), sort).slice(0, MAX_GROUPS);
   const showTime = groups.some((g) => g.ms > 0);
+  const statOf = (source: Hit | undefined) => (source ? statsByEndpoint.get(endpointOf(source.record)) : undefined);
   return (
     <div>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
@@ -39,7 +46,7 @@ export const RendersTab = () => {
       </div>
       {groups.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
       {groups.map((group) => (
-        <RenderGroupRow key={group.name} group={group} source={inspectFiber(group.fiber as Fiber)[0]} showTime={showTime} />
+        <RenderGroupRow key={group.name} group={group} source={sourceOf(group)} stat={statOf(sourceOf(group))} showTime={showTime} />
       ))}
     </div>
   );

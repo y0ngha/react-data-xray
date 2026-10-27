@@ -11,6 +11,9 @@ import type { RequestRecord } from '../requests/types.js';
  */
 export type RenderReason = 'mount' | 'state' | 'context' | 'props' | 'same-content' | 'new-callback' | 'parent';
 
+/** 최근 10초에 컴포넌트 하나가 이만큼 넘게 렌더되면 렌더 폭주로 본다. */
+export const RENDER_STORM = 10;
+
 export const RENDER_REASONS: readonly RenderReason[] = ['mount', 'state', 'context', 'props', 'same-content', 'new-callback', 'parent'];
 
 /**
@@ -68,6 +71,8 @@ export interface RenderSummary {
 }
 
 export interface Commit {
+  /** 화면 key 로 쓰는 순번(같은 밀리초에 여러 commit 이 있을 수 있다) */
+  id: number;
   time: number;
   /** 이 commit 에서 렌더된 컴포넌트 수 */
   count: number;

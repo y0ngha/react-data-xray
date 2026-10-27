@@ -32,7 +32,7 @@ export const collectBoxes = (isOwnUi: (el: Element) => boolean): Box[] => {
       // 부모와 같은 객체를 그대로 넘겨받은 래퍼 컴포넌트는 박스를 또 그리지 않는다.
       const isNew = own && !sameHit(parentHit, own);
       const rect = isNew ? componentRect(f, isOwnUi) : null;
-      if (own && rect) boxes.push({ rect, name: getComponentName(f), hit: own, fiber: f });
+      if (own && rect) boxes.push({ id: boxes.length, rect, name: getComponentName(f), hit: own, fiber: f });
       visit(f.child, isNew ? own : parentHit);
       return false;
     });

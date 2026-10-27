@@ -1,8 +1,8 @@
+import { MAX_NODES_PER_BODY } from '../../shared/limits.js';
 import { getRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
 import type { Hit } from './types.js';
 
-const MAX_NODES_PER_BODY = 50_000;
 const MAX_TEXT_LENGTH = 200;
 
 const findInBody = (record: RequestRecord, needle: string, limit: number): Hit[] => {
@@ -26,7 +26,7 @@ export const guessByText = (text: string, limit = 5): Hit[] => {
   const needle = text.trim();
   if (!needle || needle.length > MAX_TEXT_LENGTH) return [];
   const hits: Hit[] = [];
-  for (const record of getRecords().toReversed()) {
+  for (const record of [...getRecords()].reverse()) {
     if (hits.length >= limit) break;
     hits.push(...findInBody(record, needle, limit - hits.length));
   }

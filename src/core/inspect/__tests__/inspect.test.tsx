@@ -111,6 +111,24 @@ describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => 
     ]);
   });
 
+  it('이름이 같은 조상 컴포넌트가 여러 개여도 깊이로 구분한다', async () => {
+    const Wrap = ({ item, children }: { item: object; children: React.ReactNode }) => <div data-x={String(!!item)}>{children}</div>;
+    const pickPair = (json: typeof DEFAULT_BODY) => json.data.list;
+    const Nested = () => {
+      const list = useFetched<Item[]>('/api/pair', pickPair, []);
+      return list.length ? (
+        <Wrap item={list[0]}>
+          <Wrap item={list[1]}>
+            <span>inner</span>
+          </Wrap>
+        </Wrap>
+      ) : null;
+    };
+    render(<Nested />);
+    const result = inspect(await screen.findByText('inner'));
+    expect(result.components.filter((c) => c.name === 'Wrap').map((c) => c.depth)).toEqual([0, 1]);
+  });
+
   it('출처가 없는 요소는 빈 결과를 돌려준다', () => {
     render(<p>static text that is long enough</p>);
     expect(inspect(screen.getByText('static text that is long enough'))).toEqual({ components: [], guesses: [] });

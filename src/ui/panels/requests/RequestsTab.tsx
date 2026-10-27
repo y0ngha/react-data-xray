@@ -21,7 +21,7 @@ interface RequestsTabProps {
 export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: RequestsTabProps) => {
   const [view, setView] = useState<View>('endpoints');
   const [filter, setFilter] = useState<string | null>(null);
-  const logs = records.toReversed().filter((r) => !filter || endpointOf(r) === filter);
+  const logs = [...records].reverse().filter((r) => !filter || endpointOf(r) === filter);
   const showEndpoint = (endpoint: string) => {
     setFilter(endpoint);
     setView('log');

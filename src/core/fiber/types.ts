@@ -1,6 +1,6 @@
 // React 내부 구조(fiber)는 공개 API 가 아니다. React 18, 19 에서 같은 필드를 쓴다.
 
-export interface ContextDependency {
+interface ContextDependency {
   context: { displayName?: string } | null;
   memoizedValue: unknown;
   next: ContextDependency | null;

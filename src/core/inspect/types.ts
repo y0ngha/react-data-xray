@@ -14,6 +14,8 @@ export interface Hit {
 }
 
 export interface ComponentResult {
+  /** 클릭한 요소에서 몇 번째 조상 컴포넌트인지(화면 key) */
+  depth: number;
   name: string;
   hits: Hit[];
 }
@@ -25,6 +27,8 @@ export interface InspectResult {
 
 /** 전체 표시에 그릴 박스: 응답 객체를 props 로 받는 컴포넌트 */
 export interface Box {
+  /** 트리 탐색 순번(화면 key) */
+  id: number;
   rect: DOMRect;
   name: string;
   hit: Hit;
@@ -34,6 +38,8 @@ export interface Box {
 
 /** 요청의 응답 데이터를 쓰는 컴포넌트 */
 export interface Consumer {
+  /** 트리 탐색 순번(화면 key) */
+  id: number;
   name: string;
   rect: DOMRect | null;
   /** 컴포넌트 안에서 데이터가 있던 곳. 예: props.item, useQuery */

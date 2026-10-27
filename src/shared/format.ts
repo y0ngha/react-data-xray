@@ -29,7 +29,8 @@ export const valueAt = (body: unknown, path: string): unknown => {
   return keys.reduce<unknown>((acc, k) => (acc as Record<string, unknown> | null | undefined)?.[k], body);
 };
 
-const parseUrl = (url: string): URL | null => {
+/** 현재 페이지 기준으로 URL 을 해석한다. 잘못된 URL 이면 null */
+export const parseUrl = (url: string): URL | null => {
   try {
     return new URL(url, location.href);
   } catch {

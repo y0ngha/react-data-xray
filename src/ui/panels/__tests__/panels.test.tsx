@@ -7,6 +7,8 @@ import { createRecord, finishRecord } from '../../../core/requests/store.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { renderWithActions } from '../../../testing/withActions.js';
 import { DockPicker } from '../DockPicker.js';
+import { RenderGroupRow } from '../renders/RenderGroupRow.js';
+import type { RenderGroup } from '../../../core/render/groups.js';
 import { InspectTab } from '../inspect/InspectTab.js';
 import { panelPlacement } from '../panelLayout.js';
 import { RequestsTab } from '../requests/RequestsTab.js';
@@ -44,7 +46,7 @@ describe('InspectTab', () => {
   it('검사 전, 결과 없음, 글자로 추정한 결과를 구분해 보여 준다', () => {
     const { rerender } = renderWithActions(<InspectTab result={null} stats={new Map()} />);
     expect(screen.getByText(/요소 선택\]을 누르고/)).toBeTruthy();
-    rerender(<InspectTab result={{ components: [{ name: 'A', hits: [] }], guesses: [] }} stats={new Map()} />);
+    rerender(<InspectTab result={{ components: [{ depth: 0, name: 'A', hits: [] }], guesses: [] }} stats={new Map()} />);
     expect(screen.getByText('연결된 API 응답을 찾지 못했습니다.')).toBeTruthy();
     const record = finished('/api/g');
     record.body = { v: 'x' };
@@ -65,8 +67,8 @@ describe('타임라인', () => {
     const layout = layoutTimeline(
       [...records, old],
       [
-        { time: now - 1000, count: 4 },
-        { time: now - 50_000, count: 1 },
+        { id: 1, time: now - 1000, count: 4 },
+        { id: 2, time: now - 50_000, count: 1 },
       ],
       now,
       400,
@@ -119,5 +121,36 @@ describe('패널 배치', () => {
     renderWithActions(<DockPicker dock="float" onChange={onChange} />);
     fireEvent.click(screen.getByTitle('오른쪽에 도킹'));
     expect(onChange).toHaveBeenCalledWith('right');
+  });
+});
+
+describe('RenderGroupRow', () => {
+  it('데이터 출처 줄에 그 엔드포인트의 중복·같은 응답 수를 함께 보여 준다', () => {
+    const record = finished('/api/src');
+    const group: RenderGroup = {
+      name: 'Card',
+      instances: 2,
+      fiber: {},
+      recent: 4,
+      last: 0,
+      ms: 1.5,
+      reasons: { mount: 0, state: 0, context: 0, props: 0, 'same-content': 0, 'new-callback': 0, parent: 4 },
+      avoidable: 4,
+      sameContentKeys: [],
+      callbackKeys: [],
+      contextKeys: [],
+      memoized: false,
+      network: 3,
+      causes: [{ record, direct: 1, parent: 2 }],
+    };
+    const stat = { endpoint: 'GET /api/src', count: 5, duplicates: 2, sameResponses: 1, review: 0, explained: 0, avgMs: 10 };
+    renderWithActions(
+      <RenderGroupRow group={group} source={{ record, path: '$', via: 'props.item', match: 'exact' }} stat={stat} showTime />,
+    );
+    expect(screen.getByText('중복 2')).toBeTruthy();
+    expect(screen.getByText('같은 응답 1')).toBeTruthy();
+    expect(screen.getByText(/네트워크 응답으로 3회 · 네트워크와 무관 1회/)).toBeTruthy();
+    expect(screen.getByText(/그중 부모를 따라 2회/)).toBeTruthy();
+    expect(screen.getByText(/React.memo 로 감싸면/)).toBeTruthy();
   });
 });

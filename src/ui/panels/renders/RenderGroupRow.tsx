@@ -1,7 +1,8 @@
 import { renderAdvice } from '../../../core/render/advice.js';
 import type { RenderGroup } from '../../../core/render/groups.js';
-import { RENDER_REASONS } from '../../../core/render/types.js';
+import { RENDER_REASONS, RENDER_STORM } from '../../../core/render/types.js';
 import type { Hit } from '../../../core/inspect/types.js';
+import type { EndpointStat } from '../../../core/requests/endpointStats.js';
 import { Badge } from '../../components/Badge.js';
 import { Muted } from '../../components/Muted.js';
 import { ClassBadge } from '../../request/ClassBadge.js';
@@ -9,9 +10,6 @@ import { RequestLink } from '../../request/RequestLink.js';
 import { RequestTitle } from '../../request/RequestSummary.js';
 import { color, rowStyle } from '../../theme.js';
 import { REASON_LABEL } from './reasonLabels.js';
-
-// 최근 10초에 인스턴스 하나가 이만큼 넘게 렌더되면 렌더 폭주로 본다.
-const RENDER_STORM = 10;
 
 const reasonSummary = (g: RenderGroup): string =>
   RENDER_REASONS.filter((r) => g.reasons[r] > 0)
@@ -44,8 +42,26 @@ const NetworkCauses = ({ group }: { group: RenderGroup }) => (
   </>
 );
 
+/** 데이터 출처 요청과, 그 엔드포인트의 낭비 지표(같은 엔드포인트가 반복 호출돼 렌더가 잦을 수 있다) */
+const DataSource = ({ source, stat }: { source: Hit; stat?: EndpointStat }) => (
+  <RequestLink record={source.record}>
+    <Muted>
+      데이터 출처 ← <RequestTitle record={source.record} /> <ClassBadge record={source.record} />
+      {stat && stat.duplicates > 0 && <Badge color={color.warn}>중복 {stat.duplicates}</Badge>}
+      {stat && stat.sameResponses > 0 && <Badge color={color.warn}>같은 응답 {stat.sameResponses}</Badge>}
+    </Muted>
+  </RequestLink>
+);
+
+interface RenderGroupRowProps {
+  group: RenderGroup;
+  source?: Hit;
+  stat?: EndpointStat;
+  showTime: boolean;
+}
+
 /** 렌더 분석 한 줄: 횟수·시간·이유, 줄이는 방법, 네트워크 원인, 데이터 출처 */
-export const RenderGroupRow = ({ group, source, showTime }: { group: RenderGroup; source?: Hit; showTime: boolean }) => (
+export const RenderGroupRow = ({ group, source, stat, showTime }: RenderGroupRowProps) => (
   <div style={rowStyle}>
     <Headline group={group} showTime={showTime} />
     <Muted>{reasonSummary(group)}</Muted>
@@ -55,12 +71,6 @@ export const RenderGroupRow = ({ group, source, showTime }: { group: RenderGroup
       </div>
     ))}
     <NetworkCauses group={group} />
-    {source && (
-      <RequestLink record={source.record}>
-        <Muted>
-          데이터 출처 ← <RequestTitle record={source.record} /> <ClassBadge record={source.record} />
-        </Muted>
-      </RequestLink>
-    )}
+    {source && <DataSource source={source} stat={stat} />}
   </div>
 );

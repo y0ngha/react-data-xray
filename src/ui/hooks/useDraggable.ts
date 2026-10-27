@@ -29,7 +29,7 @@ interface Drag {
  * onClick 은 끌지 않고 눌렀다 뗐을 때만 부른다.
  */
 export const useDraggable = (size: number, onClick: () => void) => {
-  const [position, setPosition] = useStoredState(POSITION_KEY, parse, () => ({
+  const [position, setPosition, savePosition] = useStoredState(POSITION_KEY, parse, () => ({
     x: window.innerWidth - size - 20,
     y: window.innerHeight - size - 20,
   }));
@@ -45,13 +45,15 @@ export const useDraggable = (size: number, onClick: () => void) => {
     if (!d) return;
     const next = { x: clamp(e.clientX - d.dx, 0, window.innerWidth - size), y: clamp(e.clientY - d.dy, 0, window.innerHeight - size) };
     d.moved ||= Math.abs(next.x - d.start.x) + Math.abs(next.y - d.start.y) > DRAG_THRESHOLD;
-    if (d.moved) setPosition(next);
+    if (d.moved) setPosition(next, { persist: false });
   };
 
   const onPointerUp = () => {
     const moved = drag.current?.moved;
     drag.current = null;
-    if (!moved) onClick();
+    // 끄는 동안에는 저장을 미루고, 다 끌었을 때 한 번만 저장한다.
+    if (moved) savePosition();
+    else onClick();
   };
 
   return { position, handlers: { onPointerDown, onPointerMove, onPointerUp } };

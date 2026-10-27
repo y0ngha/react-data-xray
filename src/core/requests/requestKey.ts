@@ -1,12 +1,5 @@
+import { parseUrl } from '../../shared/format.js';
 import type { RequestRecord } from './types.js';
-
-const parseUrl = (url: string): URL | null => {
-  try {
-    return new URL(url, location.href);
-  } catch {
-    return null;
-  }
-};
 
 /** 같은 API 를 상대·절대 경로로 부른 것을 한데 모은다. 같은 출처면 경로만, 다른 출처면 호스트를 붙인다. */
 export const pathOf = (url: string): string => {

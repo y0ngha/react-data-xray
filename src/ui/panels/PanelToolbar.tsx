@@ -5,7 +5,7 @@ import { color } from '../theme.js';
 import { DockPicker } from './DockPicker.js';
 import { TAB_GROUPS, type Tab } from './tabs.js';
 
-export interface PanelToolbarProps {
+interface PanelToolbarProps {
   /** 지금 보이는 탭. 요청 상세를 보는 중이면 null */
   activeTab: Tab | null;
   onTab: (tab: Tab) => void;

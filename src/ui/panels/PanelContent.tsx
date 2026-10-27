@@ -25,15 +25,17 @@ interface PanelContentProps {
 export const PanelContent = ({ tab, picking, selected, onBack, result, analysis, ignored, onToggleIgnore }: PanelContentProps) => (
   <>
     {picking && <div style={{ color: color.accent, marginBottom: 8 }}>화면의 요소를 클릭하세요. (Esc 취소)</div>}
-    {selected && <RequestDetail record={selected.record} focus={selected.focus} onBack={onBack} />}
-    {/* 상세를 여는 동안에도 탭 상태(필터, 타임라인 멈춤 등)를 잃지 않도록 숨기기만 한다. */}
-    <div hidden={!!selected}>
+    {/* 요청마다 새로 만들어, 이전 요청 상세의 상태(화면에서 강조 등)가 남지 않게 한다. */}
+    {selected && <RequestDetail key={selected.record.id} record={selected.record} focus={selected.focus} onBack={onBack} />}
+    {/* 상세를 여는 동안에도 탭 상태(필터, 타임라인 멈춤 등)를 잃지 않도록 숨기기만 한다.
+        hidden 속성은 앱의 전역 CSS 에 질 수 있어 인라인 style 로 숨긴다. */}
+    <div style={{ display: selected ? 'none' : undefined }}>
       {tab === 'inspect' && <InspectTab result={result} stats={analysis.statsByEndpoint} />}
       {tab === 'requests' && (
         <RequestsTab records={analysis.records} stats={analysis.stats} ignored={ignored} onToggleIgnore={onToggleIgnore} />
       )}
       {tab === 'timeline' && <TimelineTab records={analysis.records} />}
-      {tab === 'renders' && <RendersTab />}
+      {tab === 'renders' && <RendersTab statsByEndpoint={analysis.statsByEndpoint} />}
     </div>
   </>
 );

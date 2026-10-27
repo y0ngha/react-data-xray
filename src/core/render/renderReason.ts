@@ -34,7 +34,7 @@ export const changedState = (fiber: Fiber, prev: Fiber): unknown[] => {
 };
 
 /** 값이 바뀐 context 들의 이름과 새 값 */
-export const changedContexts = (fiber: Fiber, prev: Fiber): Array<{ name: string; value: unknown }> => {
+const changedContexts = (fiber: Fiber, prev: Fiber): Array<{ name: string; value: unknown }> => {
   const changed: Array<{ name: string; value: unknown }> = [];
   let b = prev.dependencies?.firstContext ?? null;
   for (let a = fiber.dependencies?.firstContext ?? null; a; a = a.next, b = b?.next ?? null) {

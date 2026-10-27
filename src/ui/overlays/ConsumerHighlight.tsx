@@ -15,7 +15,7 @@ export const ConsumerHighlight = ({ record }: { record: RequestRecord }) => {
         (c) =>
           c.rect && (
             <FixedRect
-              key={`${c.name}|${c.rect.left}|${c.rect.top}`}
+              key={c.id}
               rect={c.rect}
               style={{ outline: `2px dashed ${color.consumer}`, background: `${color.consumer}1f`, zIndex: Z_HIGHLIGHT }}
             >

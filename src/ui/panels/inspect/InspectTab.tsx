@@ -28,7 +28,7 @@ export const InspectTab = ({ result, stats }: { result: InspectResult | null; st
           .join(' ← ')}
       </Muted>
       {withHits.map((c) => (
-        <div key={c.name} style={{ marginTop: 8 }}>
+        <div key={c.depth} style={{ marginTop: 8 }}>
           <div style={{ color: color.heading }}>&lt;{c.name}&gt;</div>
           <HitList hits={c.hits} stats={stats} />
         </div>

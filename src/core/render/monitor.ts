@@ -14,6 +14,7 @@ const entries = new WeakMap<Fiber, RenderEntry>();
 const active = new Set<RenderEntry>();
 const ignoredTypes = new Set<unknown>();
 const commitListeners = new Set<() => void>();
+let commitSeq = 0;
 // 렌더 탭, 타임라인, 전체 표시가 동시에 켤 수 있어 사용 수를 센다.
 let users = 0;
 
@@ -37,7 +38,9 @@ const recordRender = (fiber: Fiber, now: number, inherited: NetworkCause | undef
     cause: causeOf(result, inherited, now),
   };
   entry.fiber = fiber;
-  entry.events = [...entry.events, event].slice(-MAX_EVENTS_PER_COMPONENT);
+  // React commit 안에서 도는 코드라 배열을 복사하지 않는다.
+  entry.events.push(event);
+  if (entry.events.length > MAX_EVENTS_PER_COMPONENT) entry.events.shift();
   active.add(entry);
   return event;
 };
@@ -62,7 +65,7 @@ const onCommit = (root: { current: Fiber }): void => {
   };
   if (wasRecreated(root.current)) visit(root.current.child, undefined);
   if (count === 0) return;
-  commits.push({ time: now, count });
+  commits.push({ id: ++commitSeq, time: now, count });
   if (commits.length > MAX_COMMITS) commits.shift();
   commitListeners.forEach((listener) => listener());
 };
@@ -101,5 +104,5 @@ export const getRenderInfo = (fiber: unknown, now = Date.now()): RenderSummary |
 export const getTopRenders = (limit = 20, now = Date.now()): Array<RenderEntry & RenderSummary> =>
   Array.from(active, (e) => Object.assign(summarize(e, now), e))
     .filter((e) => e.recent > 0)
-    .toSorted((a, b) => b.recent - a.recent)
+    .sort((a, b) => b.recent - a.recent)
     .slice(0, limit);

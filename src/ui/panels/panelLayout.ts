@@ -3,10 +3,10 @@ import type { CSSProperties } from 'react';
 import { clamp } from '../../shared/format.js';
 import type { DockSettings } from '../hooks/useDockSettings.js';
 import type { Position } from '../hooks/useDraggable.js';
+import { BUTTON_SIZE } from '../FloatingButton.js';
 import { color } from '../theme.js';
 
 const FLOAT_WIDTH = 480;
-const BUTTON_SIZE = 44;
 const GAP = 8;
 
 /** 작게 보기: 버튼 위쪽(공간이 없으면 아래쪽)에, 화면 밖으로 나가지 않게 둔다. */

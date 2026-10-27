@@ -2,7 +2,7 @@ import { findBursts, isInitialLoad } from '../../../core/requests/bursts.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import type { Commit } from '../../../core/render/types.js';
 
-export const TIMELINE_MS = 20_000;
+const TIMELINE_MS = 20_000;
 const LANE_H = 6;
 const LANE_GAP = 2;
 const MAX_LANES = 14;
@@ -18,7 +18,7 @@ export interface BarLayout {
   width: number;
 }
 
-export interface BurstLayout {
+interface BurstLayout {
   key: number;
   x: number;
   width: number;
@@ -27,7 +27,7 @@ export interface BurstLayout {
   initial: boolean;
 }
 
-export interface CommitLayout {
+interface CommitLayout {
   key: number;
   x: number;
   height: number;
@@ -95,7 +95,7 @@ export const layoutTimeline = (
       initial: isInitialLoad(b.from),
     })),
     commits: recentCommits.map((c) => ({
-      key: c.time,
+      key: c.id,
       x: x(c.time),
       height: Math.max(2, (c.count / maxCount) * COMMIT_H),
       time: c.time,

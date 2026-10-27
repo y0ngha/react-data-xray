@@ -49,5 +49,5 @@ export const getEndpointStats = (records: readonly RequestRecord[], classes: Rea
   }, new Map<string, EndpointStat & { totalMs: number }>());
   return Array.from(byEndpoint.values(), ({ totalMs, ...stat }): EndpointStat =>
     Object.assign(stat, { avgMs: Math.round(totalMs / stat.count) }),
-  ).toSorted((a, b) => wasteCount(b) - wasteCount(a) || b.count - a.count);
+  ).sort((a, b) => wasteCount(b) - wasteCount(a) || b.count - a.count);
 };

@@ -38,12 +38,12 @@ const PERIODIC_MIN_INTERVAL_MS = 1000;
 // 간격이 중앙값에서 이만큼 안쪽이면 일정한 주기로 본다.
 const PERIODIC_TOLERANCE = 0.25;
 
-const median = (values: readonly number[]): number => values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)];
+const median = (values: readonly number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
 /** 같은 요청이 일정한 간격으로 3번 이상 반복됐는지. 대시보드 polling 같은 의도된 반복이다. */
 export const isPeriodic = (starts: number[]): boolean => {
   if (starts.length < PERIODIC_MIN_COUNT) return false;
-  const sorted = starts.toSorted((a, b) => a - b);
+  const sorted = [...starts].sort((a, b) => a - b);
   const intervals = sorted.slice(1).map((t, i) => t - sorted[i]);
   const typical = median(intervals);
   return typical >= PERIODIC_MIN_INTERVAL_MS && intervals.every((d) => Math.abs(d - typical) <= typical * PERIODIC_TOLERANCE);

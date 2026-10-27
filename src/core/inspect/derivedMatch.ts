@@ -1,3 +1,4 @@
+import { MAX_NODES_PER_BODY } from '../../shared/limits.js';
 import { getBodyVersion, getRecords } from '../requests/store.js';
 import type { Origin } from '../requests/types.js';
 
@@ -5,7 +6,6 @@ import type { Origin } from '../requests/types.js';
 const MIN_DERIVED_FIELDS = 2;
 // 폴링 화면에서는 응답이 계속 들어오므로, 색인을 다시 만드는 것은 2초에 한 번으로 줄인다.
 const INDEX_MIN_AGE_MS = 2000;
-const MAX_NODES_PER_BODY = 50_000;
 
 /** 우연히 같기 어려운 값만 쓴다(짧은 문자열, 작은 숫자, boolean 은 뺀다). */
 const isDistinctive = (v: unknown): v is string | number =>
@@ -28,7 +28,10 @@ const buildFieldIndex = (): Map<string, Origin[]> => {
       Object.entries(value).forEach(([k, v]) => {
         if (!isDistinctive(v)) return walk(v, `${path}.${k}`);
         const key = fieldKey(k, v);
-        index.set(key, [...(index.get(key) ?? []), origin]);
+        const list = index.get(key);
+        // 같은 값이 수천 번 나오므로 목록을 복사하지 않고 붙인다.
+        if (list) list.push(origin);
+        else index.set(key, [origin]);
       });
     };
     walk(record.body, '$');

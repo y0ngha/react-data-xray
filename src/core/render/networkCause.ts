@@ -1,4 +1,4 @@
-import { childEntries, isOpaque } from '../inspect/objectWalk.js';
+import { childEntries, isOpaque } from '../../shared/objectWalk.js';
 import { getOrigin } from '../requests/origins.js';
 import type { RequestRecord } from '../requests/types.js';
 import type { ReasonResult } from './renderReason.js';

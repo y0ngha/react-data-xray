@@ -12,13 +12,20 @@ const MAX_COMPONENTS = 60;
 const MAX_COMPONENTS_WITH_HITS = 3;
 const MAX_DERIVED_HITS = 10;
 
-const derivedHits = (candidates: readonly Candidate[]): Hit[] =>
-  candidates
-    .map(({ value, where }) => ({ origin: findDerivedOrigin(value), where }))
-    .filter((c): c is { origin: NonNullable<ReturnType<typeof findDerivedOrigin>>; where: string } => c.origin !== null)
-    .filter(({ origin }, i, all) => all.findIndex((x) => x.origin.record === origin.record && x.origin.path === origin.path) === i)
-    .slice(0, MAX_DERIVED_HITS)
-    .map(({ origin, where }) => ({ record: origin.record, path: origin.path, via: where, match: 'derived' as const }));
+// 파생 매칭은 색인 조회라 비싸다. 컴포넌트 하나에서 후보는 30개까지만 보고, 결과 10개를 찾으면 멈춘다.
+const MAX_DERIVED_CANDIDATES = 30;
+
+const derivedHits = (candidates: readonly Candidate[]): Hit[] => {
+  const hits: Hit[] = [];
+  for (const { value, where } of candidates.slice(0, MAX_DERIVED_CANDIDATES)) {
+    if (hits.length >= MAX_DERIVED_HITS) break;
+    const origin = findDerivedOrigin(value);
+    if (origin && !hits.some((h) => h.record === origin.record && h.path === origin.path)) {
+      hits.push({ record: origin.record, path: origin.path, via: where, match: 'derived' });
+    }
+  }
+  return hits;
+};
 
 const MAX_EXACT_HITS = 10;
 
@@ -42,7 +49,7 @@ export const inspect = (el: Element): InspectResult => {
   const components: ComponentResult[] = [];
   for (const fiber of ancestorsOf(getFiber(el)).filter(isComposite).slice(0, MAX_COMPONENTS)) {
     if (components.filter((c) => c.hits.length > 0).length >= MAX_COMPONENTS_WITH_HITS) break;
-    components.push({ name: getComponentName(fiber), hits: inspectFiber(fiber) });
+    components.push({ depth: components.length, name: getComponentName(fiber), hits: inspectFiber(fiber) });
   }
   const found = components.some((c) => c.hits.length > 0);
   const text = el.childElementCount === 0 ? (el.textContent ?? '') : '';

@@ -16,7 +16,7 @@ const countCauses = (events: RenderEntry['events']): NetworkCauseCount[] => {
     const prev = acc.get(key) ?? { record: cause.record, direct: 0, parent: 0 };
     return acc.set(key, { ...prev, record: cause.record, [cause.via]: prev[cause.via] + 1 });
   }, new Map<string, NetworkCauseCount>());
-  return Array.from(byEndpoint.values()).toSorted((a, b) => b.direct + b.parent - (a.direct + a.parent));
+  return Array.from(byEndpoint.values()).sort((a, b) => b.direct + b.parent - (a.direct + a.parent));
 };
 
 /** 최근 10초 렌더 요약 */

@@ -3,7 +3,7 @@ const BURST_MIN = 5;
 // 페이지에 들어온 직후에는 화면 전체가 동시에 데이터를 불러오는 것이 흔하다.
 const INITIAL_LOAD_MS = 3000;
 
-export interface Burst {
+interface Burst {
   from: number;
   to: number;
   count: number;
@@ -11,7 +11,7 @@ export interface Burst {
 
 /** 500ms 안에 요청이 5건 이상 몰린 구간. 겹치는 구간은 합친다. */
 export const findBursts = (starts: readonly number[]): Burst[] => {
-  const sorted = starts.toSorted((a, b) => a - b);
+  const sorted = [...starts].sort((a, b) => a - b);
   // 각 요청을 끝으로 하는 500ms 창 가운데 5건 이상인 것
   const windows = sorted
     .map((to, i) => ({ first: sorted.findIndex((s) => to - s <= BURST_WINDOW_MS), to, i }))

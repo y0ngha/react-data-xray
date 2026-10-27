@@ -1,6 +1,7 @@
 import { pathOf } from '../../core/requests/requestKey.js';
 import type { Box } from '../../core/inspect/types.js';
 import { getRenderInfo } from '../../core/render/monitor.js';
+import { RENDER_STORM } from '../../core/render/types.js';
 import { isWaste } from '../../core/requests/classify.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
@@ -13,8 +14,6 @@ import { color, MATCH_COLOR, SMALL_FONT, Z_OVERLAY } from '../theme.js';
 const FLASH_MS = 600;
 // 깜빡임과 렌더 횟수만 갱신하는 짧은 주기(박스 위치는 따로 계산한다)
 const FLASH_TICK_MS = 150;
-// 최근 10초에 이만큼 넘게 렌더되면 렌더 폭주로 보고 숫자를 진하게 표시한다.
-const RENDER_STORM = 10;
 
 const SourceBox = ({ box, now }: { box: Box; now: number }) => {
   const { open, classOf } = useRequestActions();
@@ -71,7 +70,7 @@ export const SourceOverlay = () => {
   return (
     <>
       {boxes.map((box) => (
-        <SourceBox key={`${box.name}|${box.rect.left}|${box.rect.top}|${box.hit.path}`} box={box} now={now} />
+        <SourceBox key={box.id} box={box} now={now} />
       ))}
     </>
   );

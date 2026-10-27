@@ -1,7 +1,5 @@
+import { MAX_NODES_PER_BODY } from '../../shared/limits.js';
 import type { Origin, RequestRecord } from './types.js';
-
-// 응답 하나가 아주 클 때 등록에 걸리는 시간을 막는다.
-const MAX_NODES_PER_BODY = 50_000;
 
 const origins = new WeakMap<object, Origin>();
 

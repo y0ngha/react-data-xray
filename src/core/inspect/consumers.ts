@@ -4,7 +4,7 @@ import { isComposite } from '../fiber/types.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
 import type { RequestRecord } from '../requests/types.js';
-import { childEntries, isOpaque } from './objectWalk.js';
+import { childEntries, isOpaque } from '../../shared/objectWalk.js';
 import type { Consumer } from './types.js';
 
 const MAX_CONSUMERS = 300;
@@ -37,7 +37,7 @@ export const findConsumers = (record: RequestRecord, isOwnUi: (el: Element) => b
       if (consumers.length >= MAX_CONSUMERS) return false;
       const found = isComposite(f) ? collectValues(f).find(({ value }) => holdsResponseOf(value, key)) : undefined;
       if (found && hostNodesOf(f).some((n) => !isOwnUi(n)))
-        consumers.push({ name: getComponentName(f), rect: componentRect(f, isOwnUi), via: found.via });
+        consumers.push({ id: consumers.length, name: getComponentName(f), rect: componentRect(f, isOwnUi), via: found.via });
       return true;
     }),
   );
