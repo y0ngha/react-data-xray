@@ -11,6 +11,8 @@ import { useIgnoredEndpoints } from './hooks/useIgnoredEndpoints.js';
 import { useStoredState } from './hooks/useStoredState.js';
 import { BOXES_KEY, parseBool, parseTab, TAB_KEY } from './viewState.js';
 import { usePanelVisibility } from './hooks/usePanelVisibility.js';
+import { useCollapseForAppModal } from './hooks/useAppModalOpen.js';
+import { useOwnLayerPortal } from './hooks/useOwnLayer.js';
 import { useOverlayBoxes } from './hooks/useOverlayBoxes.js';
 import { useProblemSignal } from './hooks/useProblemSignal.js';
 import { useRequestAnalysis } from './hooks/useRequestAnalysis.js';
@@ -53,6 +55,9 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.wasteCount);
   const { open, show, hide, popup, settings, updateDock, saveDock, changeDock } = usePanelVisibility();
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
+  const portal = useOwnLayerPortal();
+  // 앱 모달이 열리면 패널을 접는다(모달의 버튼을 가리지 않게).
+  const { collapsed, expand } = useCollapseForAppModal(open, settings.dock);
 
   const startPicking = useCallback(() => {
     show();
@@ -100,6 +105,8 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
       buttonPosition={position}
       onResize={(patch) => updateDock(patch, { persist: false })}
       onResizeEnd={saveDock}
+      collapsed={collapsed}
+      onExpand={expand}
       toolbar={
         <PanelToolbar
           activeTab={selected ? null : tab}
@@ -136,7 +143,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
     </Panel>
   );
 
-  return createPortal(
+  return portal(
     <RequestActionsProvider value={actions}>
       <div {...ownUiProps}>
         {boxesVisible && <SourceOverlay boxes={boxes} records={scopedAnalysis.records} classes={scopedAnalysis.classes} />}
@@ -147,6 +154,5 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
         <FloatingButton position={position} issues={signal.issues} alert={signal.alert} handlers={handlers} />
       </div>
     </RequestActionsProvider>,
-    document.body,
   );
 };

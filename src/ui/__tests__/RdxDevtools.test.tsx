@@ -55,6 +55,56 @@ describe('RdxDevtools', () => {
     target.remove();
   });
 
+  it('rdx 를 눌러도 앱의 "바깥 클릭"·포커스 처리가 깨지 않고, 앱 입력칸의 포커스도 빼앗지 않는다', () => {
+    const appInput = document.createElement('input');
+    document.body.append(appInput);
+    appInput.focus();
+    const outside = vi.fn<() => void>();
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('focusin', outside);
+    render(<RdxDevtools />);
+    const panel = openPanel();
+    const tab = within(panel).getByRole('button', { name: '렌더' });
+    expect(fireEvent.mouseDown(tab)).toBe(false); // 기본 동작(포커스 이동)을 막았다
+    fireEvent.pointerDown(tab);
+    fireEvent.click(tab);
+    expect(within(panel).getByText(/렌더 분석 · 최근 10초/)).toBeTruthy(); // rdx 자신의 처리는 그대로
+    expect(outside).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(appInput);
+    fireEvent.pointerDown(document.body);
+    expect(outside).toHaveBeenCalledTimes(1);
+    document.removeEventListener('pointerdown', outside);
+    document.removeEventListener('focusin', outside);
+    appInput.remove();
+  });
+
+  it('앱 모달이 열리면 도킹 패널을 접고, 펼칠 수 있으며, 모달이 닫히면 다시 원래대로 둔다', async () => {
+    // jsdom 은 배치를 계산하지 않아, 보이는 요소로 치려면 사각형을 준다.
+    vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 10, 10)] as unknown as DOMRectList);
+    // 변경 알림이 다음 프레임에 오므로 두 프레임을 기다린다.
+    const frames = async (run: () => void) =>
+      act(async () => {
+        run();
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      });
+    render(<RdxDevtools />);
+    const panel = openPanel();
+    fireEvent.click(within(panel).getByTitle('하단에 도킹 (넓게 보기)'));
+    const modal = document.createElement('div');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    await frames(() => document.body.append(modal));
+    const docked = screen.getByRole('complementary', { name: 'React Data X-ray' });
+    expect(within(docked).getByText(/앱 대화상자가 열려 있어/)).toBeTruthy();
+    fireEvent.click(within(docked).getByRole('button', { name: '펼치기' }));
+    expect(within(docked).queryByText(/앱 대화상자가 열려 있어/)).toBeNull();
+    await frames(() => modal.remove());
+    // 다시 열리면 또 접는다(펼침은 그 모달이 닫힐 때까지만).
+    await frames(() => document.body.append(modal));
+    expect(within(docked).getByText(/앱 대화상자가 열려 있어/)).toBeTruthy();
+    modal.remove();
+  });
+
   it('도킹 방식을 바꾸면 기억하고, 하단 도킹에서는 끌어서 높이를 바꾼다', () => {
     render(<RdxDevtools />);
     const panel = openPanel();
