@@ -14,6 +14,17 @@ const toUrl = (input: RequestInfo | URL): string => (typeof input === 'string' ?
 const requestBodyOf = (input: RequestInfo | URL, init?: RequestInit): string | null | undefined =>
   init && 'body' in init ? serializeBody(init.body) : input instanceof Request && input.body ? null : undefined;
 
+// 프레임워크 dev 서버의 자체 요청(Next.js dev overlay 가 오류 위치를 묻는 /__nextjs_original-stack-frames 등). 앱 요청이 아니다.
+const FRAMEWORK_INTERNAL_PATH = /^\/__nextjs_/;
+
+const isFrameworkInternal = (url: string): boolean => {
+  try {
+    return FRAMEWORK_INTERNAL_PATH.test(new URL(url, location.href).pathname);
+  } catch {
+    return false;
+  }
+};
+
 const describeError = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
 
 /** fetch 를 감싸 요청을 기록하고, 응답 객체(Response)와 기록을 잇는다. */
@@ -35,9 +46,12 @@ export const interceptFetch = (): void => {
   };
 
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
+    if (isFrameworkInternal(toUrl(input))) return originalFetch.call(this, input, init);
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-    const record = annotateRequest(createRecord('fetch', method, toUrl(input), requestBodyOf(input, init)));
-    record.requestHeaders = headersToObject(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    const requestHeaders = headersToObject(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    const action = requestHeaders?.['next-action'];
+    const record = annotateRequest(createRecord('fetch', method, toUrl(input), requestBodyOf(input, init), action));
+    record.requestHeaders = requestHeaders;
     const res = await originalFetch.call(this, input, init).catch((e: unknown) => {
       // 실패·취소된 요청도 목록에 남기고, 앱에는 원래 에러를 그대로 던진다.
       finishRecord(record, 0, describeError(e));

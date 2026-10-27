@@ -8,6 +8,11 @@ export interface RequestRecord {
   /** Blob·스트림처럼 본문을 바로 읽을 수 없어 중복·같은 응답 판정에서 뺀 요청 */
   bodyUnreadable?: boolean;
   requestHeaders?: Record<string, string>;
+  /**
+   * Next.js Server Action id(`Next-Action` 헤더). Server Action 은 모두 페이지 경로로 POST 하므로, 이 값이 없으면
+   * 같은 페이지의 서로 다른 함수 호출이 한 엔드포인트·같은 요청으로 묶여 중복으로 잘못 세진다.
+   */
+  action?: string;
   responseHeaders?: Record<string, string>;
   /** 응답 원문(텍스트 응답만, 최대 100KB). 상세 화면에서 보여 준다. */
   responseText?: string;

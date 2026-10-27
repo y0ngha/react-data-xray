@@ -23,7 +23,23 @@ export const ownFramePattern = (moduleUrl: string): RegExp => {
     : new RegExp(`${escapeRegExp(file)}(\\?[^:]*)?:\\d+`);
 };
 
-const OWN_FRAME = ownFramePattern(import.meta.url);
+/**
+ * 이 모듈이 실제로 실행되는 파일. 보통은 import.meta.url 이지만, Turbopack·webpack 은 import.meta.url 을 원본 경로로 두고
+ * 코드는 청크(…/_next/static/chunks/node_modules_react-data-xray_dist_….js)에서 실행해 스택과 맞지 않는다.
+ * 그때는 지금 스택의 첫 프레임(이 모듈) 파일을 쓴다.
+ */
+export const runtimeModuleUrl = (declared: string, stack: string | undefined): string => {
+  const declaredPath = declared.split('?')[0].replace(/^file:\/\//, '');
+  if (!stack || stack.includes(declaredPath)) return declared;
+  const frame = stack
+    .split('\n')
+    .slice(1)
+    .map((line) => /((?:https?|file):\/\/[^\s()]+?)(?::\d+){1,2}\)?\s*$/.exec(line)?.[1])
+    .find((url): url is string => !!url);
+  return frame ?? declared;
+};
+
+const OWN_FRAME = ownFramePattern(runtimeModuleUrl(import.meta.url, new Error().stack));
 
 const lastAt = { focus: 0, reconnect: 0 };
 

@@ -24,6 +24,22 @@ describe('fetch 가로채기', () => {
     expect(getOrigin(body.data.list[1])).toEqual({ record, path: '$.data.list[1]' });
   });
 
+  it('Next-Action 헤더(Server Action)는 action 으로 남겨, 같은 경로의 다른 함수 호출을 중복으로 세지 않는다', async () => {
+    const callAction = (id: string) => fetch('/MSFT/news', { method: 'POST', headers: { 'Next-Action': id }, body: '["MSFT"]' });
+    await callAction('601f13b65c219414');
+    await callAction('40828a5a92cb004a18');
+    await flush();
+    const [first, second] = getRecords();
+    expect([first.action, second.action]).toEqual(['601f13b65c219414', '40828a5a92cb004a18']);
+    expect(second.duplicateOf).toBeUndefined();
+  });
+
+  it('프레임워크 dev 서버의 자체 요청(Next.js dev overlay)은 기록하지 않는다', async () => {
+    await fetch('/__nextjs_original-stack-frames', { method: 'POST', body: '{}' });
+    await flush();
+    expect(getRecords()).toEqual([]);
+  });
+
   it('res.text() 뒤 JSON.parse 해도(axios 방식) 파싱 결과를 출처로 등록하고, 상관없는 JSON.parse 는 건드리지 않는다', async () => {
     const text = await fetch('/api/text').then((r) => r.text());
     const parsed = JSON.parse(text);

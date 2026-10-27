@@ -3,8 +3,8 @@ import { HOST_COMPONENT, HOST_ROOT, MEMO_COMPONENT, SIMPLE_MEMO_COMPONENT, type 
 const FIBER_KEY_PREFIX = '__reactFiber$';
 const CONTAINER_KEY_PREFIX = '__reactContainer$';
 
-const findKey = (el: Element, prefix: string): string | undefined => Object.keys(el).find((k) => k.startsWith(prefix));
-const readKey = <T>(el: Element, key: string): T => (el as unknown as Record<string, T>)[key];
+const findKey = (el: Node, prefix: string): string | undefined => Object.keys(el).find((k) => k.startsWith(prefix));
+const readKey = <T>(el: Node, key: string): T => (el as unknown as Record<string, T>)[key];
 
 const hostRootOf = (fiber: Fiber): Fiber => (fiber.return ? hostRootOf(fiber.return) : fiber);
 
@@ -56,7 +56,29 @@ export const isMemoized = (fiber: Fiber): boolean =>
   fiber.tag === SIMPLE_MEMO_COMPONENT || fiber.tag === MEMO_COMPONENT || fiber.return?.tag === MEMO_COMPONENT;
 
 // React 루트 컨테이너는 거의 바뀌지 않으므로 찾은 것을 기억해 두고, 없을 때만 페이지를 훑는다.
-let rootContainers: Element[] = [];
+/**
+ * React 루트의 컨테이너. 보통 요소지만, Next.js App Router 는 hydrateRoot(document) 로 문서 자체를 쓴다.
+ * 문서를 빼면 그 앱의 화면 전체를 못 본다(박스·데이터를 쓰는 컴포넌트·React Query 점검이 비었다).
+ */
+type RootContainer = Element | Document;
+
+const isRootContainer = (value: unknown): value is RootContainer => value instanceof Element || value instanceof Document;
+
+let rootContainers: RootContainer[] = [];
+
+// 프레임워크가 dev 에서 띄우는 자체 개발 도구의 shadow DOM 호스트(Next.js dev overlay). 앱이 아니라 측정에서 뺀다.
+const FRAMEWORK_DEVTOOLS_HOSTS = new Set(['NEXTJS-PORTAL']);
+
+/**
+ * 프레임워크 개발 도구(Next.js dev overlay 등)가 따로 만든 React 루트인지. 그 렌더는 축약된 이름(e0, tn…)으로 섞여 들어온다.
+ * Next.js 16 은 <nextjs-portal> 요소 자체를, 이전 버전은 그 shadow DOM 안의 요소를 컨테이너로 쓴다.
+ */
+export const isFrameworkDevtoolsRoot = (container: unknown): boolean => {
+  if (!(container instanceof Node)) return false;
+  if (container instanceof Element && FRAMEWORK_DEVTOOLS_HOSTS.has(container.tagName)) return true;
+  const host = (container.getRootNode() as Partial<ShadowRoot>).host;
+  return !!host && FRAMEWORK_DEVTOOLS_HOSTS.has(host.tagName);
+};
 
 /**
  * commit 이 일어난 루트의 컨테이너를 기억한다. 앱이 나중에 모달·위젯용 createRoot 를 만들어도 찾을 수 있다.
@@ -64,11 +86,11 @@ let rootContainers: Element[] = [];
  */
 export const rememberRootContainer = (root: { containerInfo?: unknown }): void => {
   const el = root.containerInfo;
-  if (el instanceof Element && !rootContainers.includes(el)) rootContainers = [...rootContainers, el];
+  if (isRootContainer(el) && !isFrameworkDevtoolsRoot(el) && !rootContainers.includes(el)) rootContainers = [...rootContainers, el];
 };
 
 /** 컨테이너에 붙은 HostRoot fiber. 루트를 unmount 하면 키는 남고 값이 null 이 된다. */
-const hostRootOfContainer = (el: Element): Fiber | null => {
+const hostRootOfContainer = (el: RootContainer): Fiber | null => {
   const key = findKey(el, CONTAINER_KEY_PREFIX);
   return key ? readKey<Fiber | null>(el, key) : null;
 };
@@ -76,7 +98,11 @@ const hostRootOfContainer = (el: Element): Fiber | null => {
 /** 페이지의 모든(살아 있는) React 루트의 현재 HostRoot fiber */
 export const findRootFibers = (): Fiber[] => {
   rootContainers = rootContainers.filter((el) => el.isConnected && hostRootOfContainer(el));
-  if (rootContainers.length === 0) rootContainers = Array.from(document.querySelectorAll('*')).filter((el) => hostRootOfContainer(el));
+  if (rootContainers.length === 0) {
+    rootContainers = [document, ...Array.from(document.querySelectorAll('*'))].filter(
+      (el) => hostRootOfContainer(el) && !isFrameworkDevtoolsRoot(el),
+    );
+  }
   // 컨테이너에 붙은 HostRoot fiber 는 처음 만든 것이라 commit 마다 current/alternate 가 바뀐다. root.current 로 따라간다.
   return rootContainers
     .map(hostRootOfContainer)

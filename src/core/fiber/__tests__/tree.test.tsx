@@ -3,7 +3,17 @@ import { forwardRef, memo, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { collectValues } from '../componentValues.js';
-import { componentRect, findRootFibers, getComponentName, getFiber, hostNodesOf, isMemoized, toCurrent, unionRect } from '../tree.js';
+import {
+  componentRect,
+  findRootFibers,
+  getComponentName,
+  getFiber,
+  hostNodesOf,
+  isFrameworkDevtoolsRoot,
+  isMemoized,
+  toCurrent,
+  unionRect,
+} from '../tree.js';
 import type { Fiber } from '../types.js';
 
 const Plain = () => <span>plain</span>;
@@ -86,6 +96,37 @@ describe('fiber tree', () => {
     expect(findRootFibers().length).toBeGreaterThan(0);
     view.unmount();
     expect(() => findRootFibers()).not.toThrow();
+  });
+
+  it('문서 자체를 컨테이너로 쓰는 루트(Next.js App Router 의 hydrateRoot(document))도 찾는다', () => {
+    const view = render(<Plain />);
+    // render 가 만든 루트를 문서에 붙은 것처럼 옮긴다.
+    const key = Object.keys(view.container).find((k) => k.startsWith('__reactContainer$'))!;
+    const docKeys = document as unknown as Record<string, unknown>;
+    const hostRoot = (view.container as unknown as Record<string, unknown>)[key];
+    delete (view.container as unknown as Record<string, unknown>)[key];
+    docKeys[key] = hostRoot;
+    try {
+      const plain = findRootFibers().find((root) => root.child && getComponentName(root.child) === 'Plain');
+      expect(plain).toBeDefined();
+    } finally {
+      delete docKeys[key];
+      (view.container as unknown as Record<string, unknown>)[key] = hostRoot;
+      view.unmount();
+    }
+  });
+
+  it('Next.js dev overlay(<nextjs-portal> 자체나 그 shadow DOM 안)의 루트는 프레임워크 도구로 본다', () => {
+    const host = document.createElement('nextjs-portal');
+    expect(isFrameworkDevtoolsRoot(host)).toBe(true);
+    document.body.appendChild(host);
+    const inside = document.createElement('div');
+    host.attachShadow({ mode: 'open' }).appendChild(inside);
+    expect(isFrameworkDevtoolsRoot(inside)).toBe(true);
+    expect(isFrameworkDevtoolsRoot(document.body)).toBe(false);
+    expect(isFrameworkDevtoolsRoot(document)).toBe(false);
+    expect(isFrameworkDevtoolsRoot(null)).toBe(false);
+    host.remove();
   });
 
   it('컴포넌트가 들고 있는 props, 훅 state, 클래스 state 를 모은다', () => {

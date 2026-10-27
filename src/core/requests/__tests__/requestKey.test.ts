@@ -21,4 +21,11 @@ describe('requestKey', () => {
     expect(key('/a', '{"q":1}')).not.toBe(key('/a', '{"q":2}'));
     expect(key('http://[bad')).toBe('GET http://[bad ');
   });
+
+  it('Next.js Server Action 은 같은 페이지 경로·payload 여도 action id 로 나눈다', () => {
+    const call = (action: string) => ({ method: 'POST', url: '/MSFT/news', requestBody: '["MSFT"]', action });
+    expect(endpointOf(call('40828a5a92cb004a18'))).toBe('POST /MSFT/news (action 40828a5a)');
+    expect(endpointOf(call('40828a5a92cb004a18'))).not.toBe(endpointOf(call('601f13b65c219414')));
+    expect(requestKeyOf(call('40828a5a92cb004a18'))).not.toBe(requestKeyOf(call('601f13b65c219414')));
+  });
 });

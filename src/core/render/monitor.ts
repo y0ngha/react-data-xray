@@ -1,4 +1,4 @@
-import { getComponentName, isMemoized, jsxLocationOf, rememberRootContainer } from '../fiber/tree.js';
+import { getComponentName, isFrameworkDevtoolsRoot, isMemoized, jsxLocationOf, rememberRootContainer } from '../fiber/tree.js';
 import { isComposite, PERFORMED_WORK, type Fiber } from '../fiber/types.js';
 import { listenToCommits } from './devtoolsHook.js';
 import { causeOf } from './networkCause.js';
@@ -71,6 +71,7 @@ const recordRender = (fiber: Fiber, now: number, inherited: Inherited): RenderEv
 const wasRecreated = (fiber: Fiber): boolean => !fiber.alternate || fiber.child !== fiber.alternate.child;
 
 const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
+  if (isFrameworkDevtoolsRoot(root.containerInfo)) return;
   rememberRootContainer(root);
   if (users === 0) return;
   const now = Date.now();

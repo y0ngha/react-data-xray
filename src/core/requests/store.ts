@@ -43,7 +43,13 @@ export const getStoreVersion = (): number => version;
 export const touchRecords = (): void => notify();
 
 /** 요청이 나갈 때 만든다. requestBody 가 null 이면 본문이 있지만 읽을 수 없다는 뜻이다. */
-export const createRecord = (kind: RequestRecord['kind'], method: string, url: string, requestBody?: string | null): RequestRecord => {
+export const createRecord = (
+  kind: RequestRecord['kind'],
+  method: string,
+  url: string,
+  requestBody?: string | null,
+  action?: string,
+): RequestRecord => {
   const record: RequestRecord = {
     id: nextId++,
     load: currentLoad,
@@ -51,6 +57,7 @@ export const createRecord = (kind: RequestRecord['kind'], method: string, url: s
     method: method.toUpperCase(),
     url,
     requestBody: requestBody ?? undefined,
+    action,
     bodyUnreadable: requestBody === null || undefined,
     status: 0,
     startedAt: Date.now(),

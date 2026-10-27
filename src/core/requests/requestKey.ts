@@ -8,15 +8,22 @@ export const pathOf = (url: string): string => {
   return u.origin === location.origin ? u.pathname : `${u.host}${u.pathname}`;
 };
 
+// 화면에 보일 Server Action id 길이(전체는 40자 남짓)
+const ACTION_ID_LENGTH = 8;
+
+/** Server Action 이면 어느 함수인지 붙인다. 같은 페이지 경로의 서로 다른 함수를 나눠 센다. */
+const actionSuffix = (action: string | undefined): string => (action ? ` (action ${action.slice(0, ACTION_ID_LENGTH)})` : '');
+
 /** 쿼리스트링을 뺀 "메서드 경로". 엔드포인트별 집계 단위다. */
-export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url'>): string => `${record.method} ${pathOf(record.url)}`;
+export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url' | 'action'>): string =>
+  `${record.method} ${pathOf(record.url)}${actionSuffix(record.action)}`;
 
 /**
  * 쿼리스트링과 payload 까지 포함한 요청 단위. 중복·같은 응답 판정은 같은 요청끼리만 한다.
  * 파라미터 순서만 다른 URL 은 같은 요청으로 본다.
  */
-export const requestKeyOf = (record: Pick<RequestRecord, 'method' | 'url' | 'requestBody'>): string => {
+export const requestKeyOf = (record: Pick<RequestRecord, 'method' | 'url' | 'requestBody' | 'action'>): string => {
   const u = parseUrl(record.url);
   u?.searchParams.sort();
-  return `${record.method} ${u?.href ?? record.url} ${record.requestBody ?? ''}`;
+  return `${record.method} ${u?.href ?? record.url}${actionSuffix(record.action)} ${record.requestBody ?? ''}`;
 };
