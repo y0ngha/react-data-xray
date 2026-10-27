@@ -7,6 +7,7 @@ export const DEFAULT_REPORT_NAME = 'report';
 
 /**
  * snapshot 보고서 이름으로 쓸 수 있는지. 파일 이름이 되므로 경로를 만들 수 있는 글자와 . 으로 시작하는 이름은 받지 않고,
- * 5초마다 덮어쓰는 자동 보고서 이름도 받지 않는다.
+ * 5초마다 덮어쓰는 자동 보고서 이름도 받지 않는다
+ * (대소문자를 가리지 않는 파일 시스템에서는 Report.json 도 같은 파일이다).
  */
-export const isReportName = (name: string): boolean => /^[\w-][\w.-]{0,63}$/.test(name) && name !== DEFAULT_REPORT_NAME;
+export const isReportName = (name: string): boolean => /^[\w-][\w.-]{0,63}$/.test(name) && name.toLowerCase() !== DEFAULT_REPORT_NAME;

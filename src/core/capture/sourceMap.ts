@@ -64,7 +64,7 @@ export const parseMappings = (mappings: string): Segment[][] => {
   });
 };
 
-// 이보다 큰 모듈은 앱과 라이브러리를 한 파일에 묶은 번들(webpack 등)이라 소스맵이 수십 MB 다. 메인 스레드를 멈추지 않게 건너뛴다.
+// 이보다 큰 모듈(인라인 소스맵 제외)은 앱과 라이브러리를 한 파일에 묶은 번들(webpack 등)이라 소스맵이 수십 MB 다. 메인 스레드를 멈추지 않게 건너뛴다.
 const MAX_MODULE_BYTES = 1_000_000;
 
 const MAP_COMMENT = /\/[/*][#@]\s*sourceMappingURL=([^\s*]+)\s*(?:\*\/\s*)?$/;
@@ -91,19 +91,19 @@ const parseMapJson = (text: string | null): unknown => {
   }
 };
 
+/** 실패 응답(dev 서버 재시작 중의 502 등)은 거부해서, 캐시에 남지 않고 다음에 다시 받게 한다. */
+const textOf = (r: Response): Promise<string> => (r.ok ? r.text() : Promise.reject(new Error(String(r.status))));
+
 const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   const send = getNativeFetch();
   if (!send) return null;
-  const code = await send(scriptUrl, { credentials: 'same-origin' }).then((r) => (r.ok ? r.text() : ''));
-  if (code.length > MAX_MODULE_BYTES) return null;
+  const code = await send(scriptUrl, { credentials: 'same-origin' }).then(textOf);
   const ref = MAP_COMMENT.exec(code.trimEnd())?.[1];
-  if (!ref) return null;
+  if (!ref || code.length - ref.length > MAX_MODULE_BYTES) return null;
   const mapUrl = new URL(ref, scriptUrl).href;
   const json = mapUrl.startsWith('data:')
     ? parseMapJson(dataUrlText(mapUrl))
-    : await send(mapUrl, { credentials: 'same-origin' })
-        .then((r) => (r.ok ? r.text() : null))
-        .then(parseMapJson);
+    : parseMapJson(await send(mapUrl, { credentials: 'same-origin' }).then(textOf));
   const map = json as { sources?: string[]; sourceRoot?: string; mappings?: string } | null;
   if (!map?.mappings || !map.sources) return null;
   const root = map.sourceRoot ? map.sourceRoot.replace(/\/?$/, '/') : '';
@@ -120,8 +120,9 @@ const maps = new Map<string, Promise<ParsedMap | null>>();
 const mapOf = (scriptUrl: string): Promise<ParsedMap | null> => {
   const cached = maps.get(scriptUrl);
   if (cached) return cached;
-  const loading = loadMap(scriptUrl).catch(() => {
-    maps.delete(scriptUrl);
+  const loading: Promise<ParsedMap | null> = loadMap(scriptUrl).catch(() => {
+    // 그 사이 캐시에서 밀려났다가 다시 받은 항목은 지우지 않는다.
+    if (maps.get(scriptUrl) === loading) maps.delete(scriptUrl);
     return null;
   });
   maps.set(scriptUrl, loading);
@@ -140,14 +141,23 @@ const entryBase = (): string => {
 };
 
 /**
+ * 파일 시스템 절대 경로를 프로젝트 기준으로: 마지막 src/ 와 그 앞 폴더 하나(모노레포에서 패키지를 가리게),
+ * src/ 가 없으면 마지막 두 단계만(홈 폴더 경로를 보고서에 남기지 않게).
+ */
+const projectPath = (absolute: string): string => {
+  const path = absolute.replace(/^\/?\.\//, '');
+  if (path.startsWith('src/')) return path;
+  const at = path.lastIndexOf('/src/');
+  if (at >= 0) return path.slice(path.lastIndexOf('/', at - 1) + 1);
+  return path.split('/').slice(-2).join('/');
+};
+
+/**
  * 소스맵의 source 를 사람이 찾을 수 있는 경로로.
- * 파일 시스템 절대 경로(/Users/…/app/src/x.ts, webpack:///…)는 마지막 src/ 부터, 모듈 주소 기준 상대 경로는 base 를 뗀 서버 경로 그대로.
+ * 파일 시스템 절대 경로(/Users/…, webpack:///…)는 프로젝트 기준으로 줄이고, 모듈 주소 기준 상대 경로는 base 를 뗀 서버 경로 그대로.
  */
 const sourcePath = (source: string, scriptUrl: string, base: string): string => {
-  if (/^(\/|[a-z]+:)/i.test(source) && !source.startsWith('http')) {
-    const path = source.replace(/^[a-z]+:\/\/\/?/i, '/');
-    return path.replace(/^.*\/(?=src\/)/, '');
-  }
+  if (/^(\/|[a-z]+:)/i.test(source) && !source.startsWith('http')) return projectPath(source.replace(/^[a-z]+:\/\/\/?/i, '/'));
   const path = new URL(source, scriptUrl).pathname;
   return path.startsWith(base) ? path.slice(base.length) : path.replace(/^\//, '');
 };

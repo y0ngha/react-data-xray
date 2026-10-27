@@ -167,8 +167,8 @@ AI 가 이 파일을 읽게 하려면 `CLAUDE.md` 같은 지침 파일에 한 �
 | 함수 | 하는 일 |
 |---|---|
 | `report()` | 지금까지 모은 보고서를 돌려줍니다. 처음 부를 때 렌더 감시가 꺼져 있었다면 켜고 `renders.monitoring: false` 를 돌려주니, 화면을 조작한 뒤 다시 부릅니다. |
-| `reset()` | 측정을 새로 시작합니다. 요청 기록과 렌더 통계를 비웁니다. |
-| `snapshot(name)` | 보고서를 `.rdx/<name>.json` 으로 저장하고 돌려줍니다. 고치기 전후 비교에 씁니다. 플러그인이 없거나 쓰지 못하면 거부됩니다. 이름은 영문·숫자·`. _ -` 64자까지이고 `report` 는 쓸 수 없습니다. |
+| `reset()` | 측정을 새로 시작합니다. 요청 기록, 렌더 통계, React Query 점검 기록을 비우고 렌더 감시를 켭니다. reset 전에 나간 요청은 늦게 끝나도 넣지 않습니다. |
+| `snapshot(name)` | 보고서를 `.rdx/<name>.json` 으로 저장하고 돌려줍니다. 고치기 전후 비교에 씁니다. 플러그인이 없거나 쓰지 못하면 거부됩니다. 이름은 영문·숫자·`. _ -` 64자까지이고 `report`(대소문자 무관)는 쓸 수 없습니다. 플러그인이 Host 를 막았다면 `allowedHosts` 안내와 함께 거부됩니다. |
 
 ```js
 await window.__RDX__.reset();
@@ -180,8 +180,10 @@ await window.__RDX__.snapshot('before-filter');
 
 | 필드 | 내용 |
 |---|---|
+| `requests.total`·`dropped` | 기록한 요청 수, 기록 상한(200건)을 넘어 빠진 수. `dropped` 가 있으면 시나리오를 짧게 나눕니다 |
 | `requests.endpoints[]` | 엔드포인트별 `count`·`duplicates`·`sameResponses`·`review`(주기·포커스 재요청)·`ignored`, 낭비 URL 예, `callers`(요청을 보낸 코드, 소스맵으로 원본 위치) |
 | `reactQuery.findings[]` | 캐시키 점검 지적과 `fix` |
+| `renders.windowSeconds` | 렌더를 센 구간. `reset()` 했으면 그 뒤 전부(최대 2분), 아니면 최근 10초 |
 | `renders.components[]` | `renders`·`avoidable`, 이유별 횟수, `causedBy`(렌더를 시작한 조상), `renderedAt`(JSX 위치), `networkCauses`(그 렌더를 일으킨 응답, 같은 응답으로 일어난 렌더 수), `changedProps`, `advice` |
 | `howToRead` | 위 필드를 읽는 법(AI 가 따로 문서를 찾지 않아도 되게) |
 
@@ -231,6 +233,6 @@ pnpm sync <앱 경로>  # 빌드해서 file: 로 연결한 앱의 node_modules �
   ```
 
   서버 쪽 코드(미들웨어)를 고쳐 dev 서버를 다시 띄웠다면, 띄운 **뒤에** `pnpm sync` 를 한 번 더 합니다.
-- 테스트는 각 폴더의 `__tests__` 에 둡니다. 테스트 안에서 시나리오용 컴포넌트를 그 자리에서 정의하는 것은 의도된 패턴이라, 테스트 폴더에서만 `unicorn/consistent-function-scoping` 을 끕니다(`.oxlintrc.json`). 테스트 픽스처는 rdx 가 관찰할 `useEffect + fetch` 패턴을 일부러 재현하므로 react-doctor 의 `no-fetch-in-effect` 도 테스트 폴더에서만 끕니다(`react-doctor.config.json`).
+- 테스트는 각 폴더의 `__tests__` 에 둡니다. 테스트 안에서 시나리오용 컴포넌트를 그 자리에서 정의하는 것은 의도된 패턴이라, 테스트 폴더에서만 `unicorn/consistent-function-scoping` 을 끕니다(`.oxlintrc.json`). 테스트 픽스처는 rdx 가 관찰할 `useEffect + fetch` 패턴을 일부러 재현하므로 react-doctor 의 `no-fetch-in-effect` 도 테스트 폴더에서만 끕니다(`doctor.config.json`).
 - react-doctor 는 공급망 검사(의존성 목록을 외부로 보냄)와 사용 통계 전송을 끄고 실행합니다.
 - 컴파일 대상은 ES2020 입니다. `toSorted`·`toReversed` 같은 ES2023 메서드는 폴리필 없이 오래된 브라우저에서 깨지므로 쓰지 않고, 이를 권하는 `unicorn/no-array-sort`·`no-array-reverse` 는 끕니다. 대신 복사한 배열에서만 `sort`·`reverse` 합니다.

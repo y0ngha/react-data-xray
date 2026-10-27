@@ -1,12 +1,12 @@
 import { auditQueryCache, CACHE_FINDING_TEXT, findQueryClients, type CacheFinding } from '../reactQuery/cacheAudit.js';
 import { renderAdvice } from '../render/advice.js';
 import { groupRenders, sortRenderGroups } from '../render/groups.js';
-import { getTopRenders } from '../render/monitor.js';
+import { getTopRenders, reportWindowMs } from '../render/monitor.js';
 import { RENDER_REASONS } from '../render/types.js';
 import { classifyRecords, isWaste } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
 import { endpointOf } from '../requests/requestKey.js';
-import { getRecords } from '../requests/store.js';
+import { getDroppedCount, getRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
 import { groupBy } from '../../shared/collections.js';
 import { readIgnoredEndpoints } from '../../shared/ignoredEndpoints.js';
@@ -22,6 +22,8 @@ export interface RdxReport {
   howToRead: string[];
   requests: {
     total: number;
+    /** 기록 상한(200건)을 넘어 빠진 요청 수(reset 뒤부터) */
+    dropped: number;
     endpoints: Array<{
       endpoint: string;
       /** 사용자가 의도된 반복으로 지정해 낭비로 세지 않은 엔드포인트 */
@@ -46,6 +48,8 @@ export interface RdxReport {
   };
   renders: {
     monitoring: boolean;
+    /** renders.components 가 센 구간(초) */
+    windowSeconds: number;
     components: Array<{
       name: string;
       instances: number;
@@ -70,7 +74,8 @@ const HOW_TO_READ = [
   'ignored: true 인 엔드포인트는 사용자가 의도된 반복으로 지정한 것이라 고치지 않는다.',
   '요청 집계에는 같은 탭에서 새로고침하기 전의 요청도 들어 있다. 새로고침 전후를 가르려면 restoredCount 를 본다.',
   'callers 는 소스맵으로 원본 위치(src/…:줄:열)로 바꾼 것이다. http 주소로 남은 줄은 소스맵이 없어 변환된 코드 기준이라 줄 번호가 어긋날 수 있으니 함수 이름으로 찾는다.',
-  'renders.components 는 최근 10초 렌더를 컴포넌트 이름별로 합친 것이고, 줄일 수 있는 렌더 많은 순이다.',
+  'renders.components 는 renders.windowSeconds 동안(reset 했으면 그 뒤 최대 2분, 아니면 최근 10초)의 렌더를 컴포넌트 이름별로 합친 것이고, 줄일 수 있는 렌더 많은 순이다. 컴포넌트마다 최근 200회까지만 센다.',
+  'requests.dropped 가 0 보다 크면 기록 상한(200건)을 넘어 오래된 요청이 빠진 것이다. 전후 비교는 시나리오를 짧게 나눠 다시 잰다.',
   'reactQuery.findings 는 queryKey 설계 문제다(중복 캐시, 키에 빠진 파라미터, 빗나간 무효화, staleTime 0). fix 를 따른다.',
   'networkCauses 의 viaParent 는 조상이 응답으로 렌더돼서 따라 렌더된 횟수다. 고칠 곳은 대개 그 조상의 setState 다.',
   'networkCauses 의 fromSameResponse 는 직전과 똑같은 응답인데도 렌더된 횟수다. 같은 응답이면 setState 를 건너뛰거나 구조적 공유를 쓴다.',
@@ -112,13 +117,16 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
   const ignored = readIgnoredEndpoints();
   const classes = classifyRecords(records, ignored);
   const byEndpoint = groupBy(records, endpointOf);
-  const groups = sortRenderGroups(groupRenders(getTopRenders(500, now)), 'avoidable').slice(0, MAX_RENDER_GROUPS);
+  const windowMs = reportWindowMs(now);
+  const clients = findQueryClients();
+  const groups = sortRenderGroups(groupRenders(getTopRenders(500, now, undefined, windowMs)), 'avoidable').slice(0, MAX_RENDER_GROUPS);
   return {
     generatedAt: new Date(now).toISOString(),
     page: typeof location === 'undefined' ? '' : location.pathname,
     howToRead: HOW_TO_READ,
     requests: {
       total: records.length,
+      dropped: getDroppedCount(),
       endpoints: getEndpointStats(records, classes).map((s) => {
         const own = byEndpoint.get(s.endpoint) ?? [];
         return {
@@ -136,11 +144,14 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
       }),
     },
     reactQuery: {
-      found: findQueryClients().length > 0,
-      findings: auditQueryCache((r) => classes.get(r.id) ?? 'ok', records).map((f) => Object.assign({}, f, CACHE_FINDING_TEXT[f.kind])),
+      found: clients.length > 0,
+      findings: auditQueryCache((r) => classes.get(r.id) ?? 'ok', records, clients).map((f) =>
+        Object.assign({}, f, CACHE_FINDING_TEXT[f.kind]),
+      ),
     },
     renders: {
       monitoring,
+      windowSeconds: Math.round(windowMs / 1000),
       components: groups.map((g) => ({
         name: g.name,
         instances: g.instances,

@@ -7,6 +7,10 @@ import { summarize, WINDOW_MS } from './summary.js';
 import type { Commit, NetworkCause, RenderEntry, RenderEvent, RenderOrigin, RenderReason, RenderSummary } from './types.js';
 
 const MAX_EVENTS_PER_COMPONENT = 200;
+// 보고서가 측정 시작(reset) 뒤 구간을 볼 수 있게, 렌더가 멈춘 컴포넌트도 이만큼은 남긴다.
+const MAX_REPORT_WINDOW_MS = 120_000;
+// 마지막 reset 시각(한 번도 안 했으면 0)
+let measuredFrom = 0;
 const MAX_COMMITS = 500;
 
 /** 자식에게 물려주는 것: 네트워크 원인과, 이 렌더를 시작한 조상 */
@@ -111,6 +115,7 @@ export const isRenderMonitoring = (): boolean => users > 0;
 
 /** 지금까지의 렌더 통계를 비운다(측정 시나리오를 새로 시작할 때). 감시는 켜 둔 채로 둔다. */
 export const resetRenderStats = (): void => {
+  measuredFrom = Date.now();
   active.forEach((entry) => {
     entry.events.length = 0;
   });
@@ -132,20 +137,26 @@ export const getRenderInfo = (fiber: unknown, now = Date.now()): RenderSummary |
   return entry ? summarize(entry, now) : null;
 };
 
-/** 최근 10초 렌더가 있는 컴포넌트들(렌더 많은 순) */
+/** 보고서가 볼 구간: reset 했으면 그 뒤 전부(10초~2분), 아니면 최근 10초 */
+export const reportWindowMs = (now = Date.now()): number =>
+  measuredFrom ? Math.min(MAX_REPORT_WINDOW_MS, Math.max(WINDOW_MS, now - measuredFrom)) : WINDOW_MS;
+
+/** 최근 windowMs(기본 10초) 렌더가 있는 컴포넌트들(렌더 많은 순) */
 export const getTopRenders = (
   limit = 20,
   now = Date.now(),
   /** 자르기 전에 거른다(분석 대상 안의 렌더만 볼 때). 자른 뒤에 거르면 대상 안의 렌더가 빠질 수 있다. */
   keep: (entry: RenderEntry) => boolean = () => true,
+  windowMs = WINDOW_MS,
 ): Array<RenderEntry & RenderSummary> => {
-  // 10초 넘게 렌더되지 않은 컴포넌트는 빼 둔다. 안 그러면 한 번이라도 렌더된 컴포넌트를 매번 다 요약한다.
+  // 오래 렌더되지 않은 컴포넌트는 빼 둔다. 안 그러면 한 번이라도 렌더된 컴포넌트를 매번 다 요약한다.
+  const keepFor = measuredFrom ? MAX_REPORT_WINDOW_MS : Math.max(WINDOW_MS, windowMs);
   active.forEach((e) => {
-    if ((e.events[e.events.length - 1]?.time ?? 0) < now - WINDOW_MS) active.delete(e);
+    if ((e.events[e.events.length - 1]?.time ?? 0) < now - keepFor) active.delete(e);
   });
   return Array.from(active)
     .filter(keep)
-    .map((e) => Object.assign(summarize(e, now), e))
+    .map((e) => Object.assign(summarize(e, now, windowMs), e))
     .filter((e) => e.recent > 0)
     .sort((a, b) => b.recent - a.recent)
     .slice(0, limit);

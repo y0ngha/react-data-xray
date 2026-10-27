@@ -41,9 +41,9 @@ const countOrigins = (events: RenderEntry['events']): OriginCount[] => {
   return [...byOrigin.values()].sort((a, b) => b.count - a.count).slice(0, MAX_ORIGINS);
 };
 
-/** 최근 10초 렌더 요약 */
-export const summarize = (entry: RenderEntry, now: number): RenderSummary => {
-  const recent = entry.events.filter((e) => e.time >= now - WINDOW_MS);
+/** 최근 windowMs(기본 10초) 렌더 요약 */
+export const summarize = (entry: RenderEntry, now: number, windowMs = WINDOW_MS): RenderSummary => {
+  const recent = entry.events.filter((e) => e.time >= now - windowMs);
   const reasons = countReasons(recent.map((e) => e.reason));
   // 이미 React.memo 인데 부모 때문에 렌더됐다면(forceUpdate 등) memo 로는 줄일 수 없으니 세지 않는다.
   const avoidable = reasons['same-content'] + reasons['new-callback'] + (entry.memoized ? 0 : reasons.parent);

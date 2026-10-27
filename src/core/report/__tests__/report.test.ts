@@ -37,6 +37,15 @@ describe('보고서', () => {
     expect(endpoint?.callers[0].frame).toBe('loadUsers@http://localhost:5173/src/api.ts:12:3 <- App@http://localhost:5173/src/App.tsx:5:1');
   });
 
+  it('소스맵으로 바꾼 호출 위치가 있으면 그것으로 집계한다', () => {
+    const record = createRecord('fetch', 'GET', '/api/mapped');
+    record.stack = 'at load (http://localhost:5173/src/api.ts?t=1:3:5)';
+    record.sourceStack = 'at load (src/api.ts:10:3)';
+    finishRecord(record, 200);
+    const endpoint = buildReport(false).requests.endpoints.find((e) => e.endpoint === 'GET /api/mapped');
+    expect(endpoint?.callers[0].frame).toBe('at load (src/api.ts:10:3)');
+  });
+
   it('dev 서버 미들웨어가 있다고 답할 때만 보고서를 보내고 렌더 감시를 켠다', async () => {
     // 1) 프록시·SPA 폴백처럼 200 을 주지만 표시 헤더가 없으면 아무것도 보내지 않는다.
     mockFetch.mockImplementation(async () => new Response('<html></html>', { status: 200 }));

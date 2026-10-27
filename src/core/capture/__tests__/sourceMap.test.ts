@@ -35,7 +35,7 @@ describe('소스맵', () => {
     expect(mockFetch.mock.calls.map(([u]) => String(u)).some((u) => u.includes('node_modules'))).toBe(false);
   });
 
-  it('원본 경로는 프로젝트 기준으로 남긴다: 상대 경로는 서버 경로 그대로, 파일 시스템 절대 경로는 마지막 src/ 부터', async () => {
+  it('원본 경로는 프로젝트 기준으로 남긴다: 상대 경로는 서버 경로 그대로, 파일 시스템 절대 경로는 마지막 src/ 와 그 앞 폴더부터', async () => {
     const moduleWith = (sources: string[]) =>
       `a\nb\nload()\n//# sourceMappingURL=${inlineMap({ version: 3, sources, mappings: MAPPINGS })}`;
     mockFetch.mockImplementation(
@@ -43,7 +43,7 @@ describe('소스맵', () => {
         new Response(String(input).includes('Button') ? moduleWith(['Button.tsx']) : moduleWith(['/Users/me/app/web/src/pages/Home.tsx'])),
     );
     expect(await resolveStack('at B (http://localhost:3000/src/components/Button.tsx:3:1)')).toBe('at B (src/components/Button.tsx:10:3)');
-    expect(await resolveStack('at H (http://localhost:3000/src/pages/Home.tsx:3:1)')).toBe('at H (src/pages/Home.tsx:10:3)');
+    expect(await resolveStack('at H (http://localhost:3000/src/pages/Home.tsx:3:1)')).toBe('at H (web/src/pages/Home.tsx:10:3)');
   });
 
   it('앱과 라이브러리를 묶은 큰 번들은 소스맵을 받지 않는다', async () => {

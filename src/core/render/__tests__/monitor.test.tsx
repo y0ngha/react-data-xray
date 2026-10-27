@@ -3,7 +3,16 @@ import { createContext, memo, useContext, useDeferredValue, useEffect, useState,
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DEFAULT_BODY, flush } from '../../../testing/fetchMock.js';
-import { getCommits, getRenderInfo, getTopRenders, ignoreComponent, setRenderMonitoring, subscribeCommits } from '../monitor.js';
+import {
+  getCommits,
+  getRenderInfo,
+  getTopRenders,
+  ignoreComponent,
+  reportWindowMs,
+  resetRenderStats,
+  setRenderMonitoring,
+  subscribeCommits,
+} from '../monitor.js';
 
 const byName = () => Object.fromEntries(getTopRenders(200).map((e) => [e.name, e]));
 
@@ -240,5 +249,18 @@ describe('렌더의 네트워크 원인', () => {
     const leaf = getTopRenders(200).find((e) => e.name === 'Leaf')!;
     expect(leaf.origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
     expect(leaf.location).toMatch(/monitor\.test\.tsx:\d+$/);
+  });
+});
+
+describe('측정 구간', () => {
+  it('reset 뒤에는 보고서 구간이 reset 부터라, 10초가 지난 시나리오 렌더도 센다', () => {
+    render(<Counter>{() => null}</Counter>);
+    bump();
+    resetRenderStats();
+    bump(2);
+    const later = Date.now() + 30_000;
+    expect(getTopRenders(50, later)).toEqual([]);
+    expect(reportWindowMs(later)).toBeGreaterThanOrEqual(30_000);
+    expect(getTopRenders(50, later, undefined, reportWindowMs(later)).find((e) => e.name === 'Counter')?.recent).toBe(2);
   });
 });

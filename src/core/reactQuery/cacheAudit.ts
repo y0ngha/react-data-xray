@@ -98,6 +98,13 @@ interface ClientHistory {
 const MAX_KEYS = 2000;
 
 const histories = new WeakMap<QueryClientLike, ClientHistory>();
+// 측정을 새로 시작한 시각. 그 전 기록은 점검에 쓰지 않는다(고치기 전 지적이 고친 뒤 보고서에 남지 않게).
+let auditFrom = 0;
+
+/** 측정을 새로 시작한다(window.__RDX__.reset) */
+export const resetCacheAudit = (): void => {
+  auditFrom = Date.now();
+};
 
 const describeRequest = (r: RequestRecord): string => `${r.method} ${r.url}`;
 
@@ -270,17 +277,22 @@ const staleFindings = (queries: readonly QueryLike[], sameResponse: ReadonlySet<
   });
 
 /** 지금 점검한다. classOf 는 같은 응답 재요청 판정에 쓴다. */
-export const auditQueryCache = (classOf: (r: RequestRecord) => RequestClass, records: readonly RequestRecord[]): CacheFinding[] => {
+export const auditQueryCache = (
+  classOf: (r: RequestRecord) => RequestClass,
+  records: readonly RequestRecord[],
+  clients: readonly QueryClientLike[] = findQueryClients(),
+): CacheFinding[] => {
   const now = Date.now();
   const sameResponse = new Set(records.filter((r) => classOf(r) === 'same-response').map(requestKeyOf));
   const fetched: Fetched[] = [];
   const others: CacheFinding[] = [];
   // 여러 QueryClient 를 쓰면 client 사이의 중복 캐시도 보도록 함께 판정한다.
-  findQueryClients().forEach((client) => {
+  clients.forEach((client) => {
     const history = histories.get(client)!;
     resolvePending(history);
-    history.fetched = history.fetched.filter((f) => now - f.at <= HISTORY_MS);
-    history.misses = history.misses.filter((m) => now - m.at <= HISTORY_MS);
+    const from = Math.max(now - HISTORY_MS, auditFrom);
+    history.fetched = history.fetched.filter((f) => f.at >= from);
+    history.misses = history.misses.filter((m) => m.at >= from);
     const queries = client.getQueryCache().getAll();
     fetched.push(...history.fetched, ...currentFetched(queries, now));
     others.push(...staleFindings(queries, sameResponse), ...history.misses.map((m) => m.finding));

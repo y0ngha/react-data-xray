@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { getOrigin } from '../origins.js';
-import { clearRecords, createRecord, finishRecord, getRecords, keepResponseText, registerBody, subscribe } from '../store.js';
+import {
+  clearRecords,
+  createRecord,
+  finishRecord,
+  getDroppedCount,
+  getRecords,
+  keepResponseText,
+  registerBody,
+  subscribe,
+} from '../store.js';
 
 describe('store', () => {
   it('2초 안의 같은 요청은 앞선 요청의 중복으로 표시하고, 2초가 지나면 아니다', () => {
@@ -71,6 +80,26 @@ describe('store', () => {
     const fresh = createRecord('fetch', 'GET', '/api/poll');
     finishRecord(fresh, 200);
     expect(getRecords()).toEqual([fresh]);
+  });
+
+  it('측정 전 요청의 늦은 응답은 같은 응답 판정과 출처 등록에도 쓰지 않는다', () => {
+    const inFlight = createRecord('fetch', 'GET', '/api/late');
+    clearRecords();
+    keepResponseText(inFlight, '{"a":1}', { compare: true });
+    const body = { a: 1 };
+    registerBody(inFlight, body);
+    expect(getOrigin(body)).toBeUndefined();
+    const fresh = createRecord('fetch', 'GET', '/api/late');
+    keepResponseText(fresh, '{"a":1}', { compare: true });
+    expect(fresh.sameResponseAs).toBeUndefined();
+  });
+
+  it('기록 상한을 넘어 버린 요청 수를 세고, 측정을 새로 시작하면 0 으로 돌린다', () => {
+    clearRecords();
+    Array.from({ length: 205 }, (_, i) => finishRecord(createRecord('fetch', 'GET', `/api/n${i}`), 200));
+    expect(getDroppedCount()).toBe(5);
+    clearRecords();
+    expect(getDroppedCount()).toBe(0);
   });
 
   it('실패한 요청은 상태 0 과 에러로 기록한다', () => {

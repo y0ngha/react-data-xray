@@ -2,6 +2,7 @@ import { isReportName, REPORT_HEADER, REPORT_PATH } from '../../shared/reportPat
 import { getNativeFetch } from '../capture/nativeFetch.js';
 import { whenSourcesResolved } from '../capture/requestContext.js';
 import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../render/monitor.js';
+import { resetCacheAudit } from '../reactQuery/cacheAudit.js';
 import { clearRecords } from '../requests/store.js';
 import { buildReport, type RdxReport } from './buildReport.js';
 
@@ -42,12 +43,16 @@ const HANDSHAKE_RETRY_MS = 3000;
 // dev 서버가 꺼지면 계속 실패하므로 이만큼 연속 실패하면 멈춘다. 서버가 돌아오면 Vite 가 페이지를 다시 열어 처음부터 확인한다.
 const MAX_UPLOAD_FAILURES = 3;
 
+type Endpoint = 'ready' | 'forbidden-host' | 'missing';
 // dev 서버 미들웨어가 있는지 확인한 결과. snapshot 이 확인이 끝나기 전에 불려도 기다린다.
-let endpointReady: Promise<boolean> = Promise.resolve(false);
+let endpoint: Promise<Endpoint> = Promise.resolve('missing');
 
 const reset = (): void => {
+  // 시나리오 동안의 렌더를 잡도록 감시부터 켠다(플러그인 확인 전이거나 플러그인이 없어도).
+  keepRenderMonitoring();
   clearRecords();
   resetRenderStats();
+  resetCacheAudit();
 };
 
 const snapshot = async (name: string): Promise<RdxReport> => {
@@ -57,7 +62,13 @@ const snapshot = async (name: string): Promise<RdxReport> => {
     );
   }
   const send = getNativeFetch();
-  if (!send || !(await endpointReady)) {
+  const state = send ? await endpoint : 'missing';
+  if (state === 'forbidden-host') {
+    throw new Error(
+      `[react-data-xray] dev 서버가 ${location.host} 에서 온 보고서를 막았습니다. rdx({ allowedHosts: ['${location.hostname}'] }) 로 허용하세요.`,
+    );
+  }
+  if (!send || state === 'missing') {
     throw new Error('[react-data-xray] dev 서버에 rdx 플러그인이 없어 저장하지 못했습니다. window.__RDX__.report() 로 받으세요.');
   }
   // 호출 위치가 원본 위치와 변환 전 위치로 갈리지 않게, 진행 중인 소스맵 변환을 기다린다.
@@ -77,7 +88,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
  * dev 서버에 rdx 미들웨어가 있는지. 본문 없는 GET 으로 묻고, 미들웨어만 붙이는 헤더로 판단한다.
  * 의존성 최적화 리로드 중처럼 응답이 아예 없으면 한 번 더 묻는다. 응답이 왔는데 표시가 없으면 미들웨어가 없는 것이다(프록시·SPA 폴백).
  */
-const hasReportEndpoint = async (send: typeof fetch): Promise<boolean> => {
+const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
   const ask = () => send(REPORT_PATH, { method: 'GET', credentials: 'omit' }).catch(() => null);
   const res = (await ask()) ?? (await new Promise((resolve) => window.setTimeout(resolve, HANDSHAKE_RETRY_MS)).then(ask));
   const mark = res?.headers.get(REPORT_HEADER);
@@ -86,7 +97,7 @@ const hasReportEndpoint = async (send: typeof fetch): Promise<boolean> => {
       `[react-data-xray] dev 서버가 ${location.host} 에서 온 보고서를 막았습니다. rdx({ allowedHosts: ['${location.hostname}'] }) 로 허용하세요.`,
     );
   }
-  return mark === '1';
+  return mark === '1' ? 'ready' : mark === 'forbidden-host' ? 'forbidden-host' : 'missing';
 };
 
 /**
@@ -96,8 +107,8 @@ const hasReportEndpoint = async (send: typeof fetch): Promise<boolean> => {
 const startUpload = async (): Promise<void> => {
   const send = getNativeFetch();
   if (!send) return;
-  endpointReady = hasReportEndpoint(send);
-  if (!(await endpointReady)) return;
+  endpoint = checkEndpoint(send);
+  if ((await endpoint) !== 'ready') return;
   keepRenderMonitoring();
   let last = '';
   let failures = 0;

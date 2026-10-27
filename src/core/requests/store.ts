@@ -10,6 +10,11 @@ const listeners = new Set<() => void>();
 let nextId = 1;
 // 이 id 보다 앞선 요청은 측정을 새로 시작(clearRecords)하기 전에 나간 것이라, 늦게 끝나도 넣지 않는다.
 let firstLiveId = 1;
+// 기록 상한을 넘어 버린 요청 수(측정을 새로 시작하면 0). 보고서가 수치가 잘렸는지 알린다.
+let dropped = 0;
+
+export const getDroppedCount = (): number => dropped;
+const isStale = (record: RequestRecord): boolean => record.id < firstLiveId;
 // 같은 탭에서 몇 번째로 연 페이지인지(세션 유지가 정한다). 기록마다 붙인다.
 let currentLoad = 0;
 
@@ -61,14 +66,18 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
   record.status = status;
   record.error = error;
   record.durationMs = Date.now() - record.startedAt;
-  if (record.id < firstLiveId) return;
+  if (isStale(record)) return;
   records.push(record);
-  if (records.length > MAX_RECORDS) records.shift();
+  if (records.length > MAX_RECORDS) {
+    records.shift();
+    dropped++;
+  }
   notify();
 };
 
 /** 응답 원문을 상세 화면용으로 보관하고, 같은 요청의 직전 응답과 비교한다. */
 export const keepResponseText = (record: RequestRecord, text: string, { compare }: { compare: boolean }): void => {
+  if (isStale(record)) return;
   record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (100KB 이후 생략)` : text;
   if (compare) record.sameResponseAs = detectSameResponse(record, text);
   notify();
@@ -77,7 +86,7 @@ export const keepResponseText = (record: RequestRecord, text: string, { compare 
 /** 파싱된 응답 본문을 보관하고 그 안의 객체들을 출처와 함께 등록한다. */
 export const registerBody = (record: RequestRecord, body: unknown): void => {
   // 폴리필의 json() 이 내부에서 text() + JSON.parse 를 거치면 같은 응답이 두 번 들어온다.
-  if (record.body !== undefined) return;
+  if (record.body !== undefined || isStale(record)) return;
   record.body = body;
   registerOrigins(record, body);
   notify();
@@ -100,6 +109,7 @@ export const mergeRecords = (others: readonly RequestRecord[]): void => {
 export const clearRecords = (): void => {
   records.length = 0;
   firstLiveId = nextId;
+  dropped = 0;
   resetRepeatDetection();
   notify();
 };
