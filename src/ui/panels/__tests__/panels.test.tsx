@@ -9,6 +9,7 @@ import { renderWithActions } from '../../../testing/withActions.js';
 import { DockPicker } from '../DockPicker.js';
 import { RenderGroupRow } from '../renders/RenderGroupRow.js';
 import type { RenderGroup } from '../../../core/render/groups.js';
+import { CacheAuditView } from '../requests/CacheAuditView.js';
 import { InspectTab } from '../inspect/InspectTab.js';
 import { panelPlacement } from '../panelLayout.js';
 import { RequestsTab } from '../requests/RequestsTab.js';
@@ -152,5 +153,12 @@ describe('RenderGroupRow', () => {
     expect(screen.getByText(/네트워크 응답으로 3회 · 네트워크와 무관 1회/)).toBeTruthy();
     expect(screen.getByText(/그중 부모를 따라 2회/)).toBeTruthy();
     expect(screen.getByText(/React.memo 로 감싸면/)).toBeTruthy();
+  });
+});
+
+describe('React Query 보기', () => {
+  it('화면에 QueryClientProvider 가 없으면 찾지 못했다고 알린다', () => {
+    renderWithActions(<CacheAuditView records={[]} />);
+    expect(screen.getByText(/React Query\(QueryClientProvider\)를 찾지 못했습니다/)).toBeTruthy();
   });
 });

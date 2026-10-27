@@ -5,10 +5,11 @@ import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Button } from '../../components/Button.js';
 import { color } from '../../theme.js';
+import { CacheAuditView } from './CacheAuditView.js';
 import { EndpointRow } from './EndpointRow.js';
 import { RequestLogRow } from './RequestLogRow.js';
 
-type View = 'endpoints' | 'log';
+type View = 'endpoints' | 'log' | 'cache';
 
 interface RequestsTabProps {
   records: readonly RequestRecord[];
@@ -35,6 +36,9 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
         <Button active={view === 'log'} onClick={() => setView('log')}>
           전체 기록
         </Button>
+        <Button active={view === 'cache'} onClick={() => setView('cache')} title="React Query 캐시키 설계 점검">
+          React Query
+        </Button>
         {view === 'log' && filter && (
           <Button onClick={() => setFilter(null)} title="필터 해제">
             {filter} ✕
@@ -42,17 +46,18 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
         )}
         <span style={{ color: color.muted, marginLeft: 'auto' }}>최근 {records.length}건</span>
       </div>
-      {view === 'endpoints'
-        ? stats.map((stat) => (
-            <EndpointRow
-              key={stat.endpoint}
-              stat={stat}
-              ignored={ignored.has(stat.endpoint)}
-              onSelect={showEndpoint}
-              onToggleIgnore={onToggleIgnore}
-            />
-          ))
-        : logs.map((record) => <RequestLogRow key={record.id} record={record} />)}
+      {view === 'cache' && <CacheAuditView records={records} />}
+      {view === 'endpoints' &&
+        stats.map((stat) => (
+          <EndpointRow
+            key={stat.endpoint}
+            stat={stat}
+            ignored={ignored.has(stat.endpoint)}
+            onSelect={showEndpoint}
+            onToggleIgnore={onToggleIgnore}
+          />
+        ))}
+      {view === 'log' && logs.map((record) => <RequestLogRow key={record.id} record={record} />)}
     </div>
   );
 };

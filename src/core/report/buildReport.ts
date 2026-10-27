@@ -1,3 +1,4 @@
+import { auditQueryCache, CACHE_FINDING_TEXT, findQueryClients, type CacheFinding } from '../reactQuery/cacheAudit.js';
 import { renderAdvice } from '../render/advice.js';
 import { groupRenders, sortRenderGroups } from '../render/groups.js';
 import { getTopRenders } from '../render/monitor.js';
@@ -38,6 +39,11 @@ export interface RdxReport {
       wasteExamples: string[];
     }>;
   };
+  /** React Query 캐시키 설계 점검. 화면에 QueryClientProvider 가 없으면 found: false */
+  reactQuery: {
+    found: boolean;
+    findings: Array<CacheFinding & { title: string; fix: string }>;
+  };
   renders: {
     monitoring: boolean;
     components: Array<{
@@ -61,6 +67,7 @@ const HOW_TO_READ = [
   '요청 집계에는 같은 탭에서 새로고침하기 전의 요청도 들어 있다. 새로고침 전후를 가르려면 restoredCount 를 본다.',
   'callers 의 줄 번호는 dev 서버가 변환한 코드 기준이라 원본과 몇십 줄 어긋날 수 있다. 함수 이름으로 찾는다.',
   'renders.components 는 최근 10초 렌더를 컴포넌트 이름별로 합친 것이고, 줄일 수 있는 렌더 많은 순이다.',
+  'reactQuery.findings 는 queryKey 설계 문제다(중복 캐시, 키에 빠진 파라미터, 빗나간 무효화, staleTime 0). fix 를 따른다.',
   'networkCauses 의 viaParent 는 조상이 응답으로 렌더돼서 따라 렌더된 횟수다. 고칠 곳은 대개 그 조상의 setState 다.',
 ];
 
@@ -121,6 +128,10 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
           wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => r.url))).slice(0, MAX_EXAMPLES),
         };
       }),
+    },
+    reactQuery: {
+      found: findQueryClients().length > 0,
+      findings: auditQueryCache((r) => classes.get(r.id) ?? 'ok', records).map((f) => Object.assign({}, f, CACHE_FINDING_TEXT[f.kind])),
     },
     renders: {
       monitoring,
