@@ -1,10 +1,13 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isIP } from 'node:net';
 import { join } from 'node:path';
 
 import { REPORT_HEADER, REPORT_PATH } from '../shared/reportPath.js';
 
 const MAX_BYTES = 5 * 1024 * 1024;
+// 동시에 들어온 보고서가 같은 임시 파일 이름을 쓰지 않게 붙이는 순번
+let writeSeq = 0;
 
 export interface RdxReportOptions {
   /** 보고서를 쓸 폴더. 기본: 프로젝트 루트의 .rdx */
@@ -32,20 +35,28 @@ const hostnameOf = (host: string | undefined): string => {
  *   둘 다 공격 도메인이 되어 같은 출처 검사를 통과하고, 이 미들웨어는 Vite 의 Host 검사보다 먼저 돈다.
  * - 같은 출처의 JSON 만 받는다. 다른 출처의 JSON POST 는 preflight 가 필요한데 이 처리기는 CORS 를 허용하지 않는다.
  */
+/**
+ * Vite 와 같은 기준이다. IP 주소(LAN IP, 0.0.0.0)는 DNS 리바인딩으로 만들 수 없는 이름이라 허용한다.
+ * 리바인딩은 공격자가 가진 도메인 이름을 127.0.0.1 로 풀어 쓰는 공격이다.
+ */
 const isAllowedHost = (name: string, allowedHosts: readonly string[] | true): boolean =>
   allowedHosts === true ||
   LOCAL_HOSTS.has(name) ||
   name.endsWith('.localhost') ||
+  isIP(name.replace(/^\[|\]$/g, '')) !== 0 ||
   allowedHosts.some((h) => (h.startsWith('.') ? name === h.slice(1) || name.endsWith(h) : name === h));
 
+/** HTTP/1 은 Host, HTTP/2(https dev 서버)는 :authority 로 온다. */
+const hostOf = (req: IncomingMessage): string | undefined => req.headers.host ?? (req.headers[':authority'] as string | undefined);
+
 const isTrusted = (req: IncomingMessage, allowedHosts: readonly string[] | true): boolean => {
-  const name = hostnameOf(req.headers.host);
-  if (!isAllowedHost(name, allowedHosts)) return false;
+  const host = hostOf(req);
+  if (!isAllowedHost(hostnameOf(host), allowedHosts)) return false;
   const origin = req.headers.origin;
   if (!origin) return true;
   try {
     // 포트까지 비교한다. 같은 PC 의 다른 dev 서버(localhost:3000)는 다른 출처다.
-    return new URL(origin).host === req.headers.host;
+    return new URL(origin).host === host;
   } catch {
     // 샌드박스 iframe 의 "null" 같은 값
     return false;
@@ -93,9 +104,12 @@ export const rdxReportMiddleware = (root = process.cwd(), { dir = '.rdx', allowe
       .then(async (text) => {
         const report: unknown = JSON.parse(text);
         await mkdir(folder, { recursive: true });
-        // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다.
-        await writeFile(join(folder, '.gitignore'), '*\n');
-        await writeFile(join(folder, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
+        // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다. 이미 있으면 그대로 둔다.
+        await writeFile(join(folder, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined);
+        // 임시 파일에 쓰고 이름을 바꾼다. 탭 여러 개가 동시에 보내거나 AI 가 읽는 도중이어도 잘린 JSON 을 보지 않는다.
+        const temp = join(folder, `report.json.${process.pid}.${writeSeq++}.tmp`);
+        await writeFile(temp, `${JSON.stringify(report, null, 2)}\n`);
+        await rename(temp, join(folder, 'report.json'));
         reply(res, 204);
       })
       .catch(() => reply(res, 400));

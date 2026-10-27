@@ -8,6 +8,12 @@ const MAX_RESPONSE_TEXT = 100_000;
 const records: RequestRecord[] = [];
 const listeners = new Set<() => void>();
 let nextId = 1;
+// 같은 탭에서 몇 번째로 연 페이지인지(세션 유지가 정한다). 기록마다 붙인다.
+let currentLoad = 0;
+
+export const setCurrentLoad = (load: number): void => {
+  currentLoad = load;
+};
 
 // 기록이 바뀔 때마다 오른다. 기록에서 계산한 값을 다시 계산할지 판단할 때 쓴다.
 let version = 0;
@@ -30,6 +36,7 @@ export const getStoreVersion = (): number => version;
 export const createRecord = (kind: RequestRecord['kind'], method: string, url: string, requestBody?: string | null): RequestRecord => {
   const record: RequestRecord = {
     id: nextId++,
+    load: currentLoad,
     kind,
     method: method.toUpperCase(),
     url,
@@ -71,14 +78,16 @@ export const registerBody = (record: RequestRecord, body: unknown): void => {
 };
 
 /**
- * 새로고침 전 페이지의 기록을 앞에 되살린다. 앱 요청보다 먼저(설치할 때) 부른다.
- * 새 요청의 id 가 되살린 것보다 크도록 이어서 매긴다(최신 응답을 고르는 규칙이 id 에 기댄다).
+ * 다른 페이지(새로고침 전, 또는 bfcache 로 돌아오기 전에 간 페이지)의 기록을 합친다. 이미 있는 id 는 건너뛴다.
+ * 새 요청의 id 가 합친 것보다 크도록 이어서 매긴다(최신 응답을 고르는 규칙이 id 에 기댄다).
  */
-export const restoreRecords = (restored: readonly RequestRecord[]): void => {
-  if (restored.length === 0) return;
-  records.unshift(...restored.slice(-MAX_RECORDS));
-  records.splice(MAX_RECORDS);
-  nextId = Math.max(nextId, ...restored.map((r) => r.id + 1));
+export const mergeRecords = (others: readonly RequestRecord[]): void => {
+  const known = new Set(records.map((r) => r.id));
+  const added = others.filter((r) => !known.has(r.id));
+  if (added.length === 0) return;
+  const merged = [...records, ...added].sort((a, b) => a.id - b.id).slice(-MAX_RECORDS);
+  records.splice(0, records.length, ...merged);
+  nextId = Math.max(nextId, ...added.map((r) => r.id + 1));
   notify();
 };
 

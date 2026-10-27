@@ -27,6 +27,9 @@ export const findBursts = (starts: readonly number[]): Burst[] => {
   return merged.map(({ from, to }) => ({ from, to, count: sorted.filter((t) => t >= from && t <= to).length }));
 };
 
-/** 페이지 진입(navigation 시작) 후 3초 안인지 */
-export const isInitialLoad = (time: number): boolean =>
-  typeof performance !== 'undefined' && time - performance.timeOrigin < INITIAL_LOAD_MS;
+/** 지금 페이지에 들어온(navigation 시작) 뒤 3초 안인지. 새로고침 전 페이지의 시각(음수)은 아니다. */
+export const isInitialLoad = (time: number): boolean => {
+  if (typeof performance === 'undefined') return false;
+  const sinceLoad = time - performance.timeOrigin;
+  return sinceLoad >= 0 && sinceLoad < INITIAL_LOAD_MS;
+};

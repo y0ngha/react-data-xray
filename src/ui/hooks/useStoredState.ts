@@ -16,8 +16,7 @@ export const useStoredState = <T>(
   key: string,
   parse: (raw: unknown) => T | undefined,
   fallback: () => T,
-  serialize: (value: T) => unknown = asIs,
-  area: StorageArea = 'local',
+  { serialize = asIs, area = 'local' }: { serialize?: (value: T) => unknown; area?: StorageArea } = {},
 ) => {
   const [value, setValue] = useState<T>(() => readStored(key, parse, fallback(), area));
   const latest = useRef(value);

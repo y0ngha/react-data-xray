@@ -51,10 +51,13 @@ export const isPeriodic = (starts: number[]): boolean => {
 
 const isAborted = (record: RequestRecord | undefined): boolean => !!record?.error && /abort/i.test(record.error);
 
+/** 주기 판정은 같은 페이지 로드 안에서만 한다. 새로고침 앞뒤를 한 줄로 보면 그 사이 간격 때문에 주기가 깨진다. */
+const periodicKeyOf = (r: RequestRecord): string => `${r.load ?? 0}|${requestKeyOf(r)}`;
+
 const periodicRequestKeys = (records: readonly RequestRecord[]): Set<string> => {
   const startsByKey = groupBy(
     records.filter((r) => !r.bodyUnreadable),
-    (r) => requestKeyOf(r),
+    periodicKeyOf,
   );
   return new Set(
     Array.from(startsByKey)
@@ -74,7 +77,7 @@ const classifyOne = (r: RequestRecord, { byId, periodicKeys, ignoredEndpoints }:
   const flagged = !!(r.duplicateOf || r.sameResponseAs);
   if (!flagged) return 'ok';
   if (ignoredEndpoints.has(endpointOf(r))) return 'ignored';
-  if (!r.bodyUnreadable && periodicKeys.has(requestKeyOf(r))) return 'periodic';
+  if (!r.bodyUnreadable && periodicKeys.has(periodicKeyOf(r))) return 'periodic';
   // StrictMode 는 dev 에서 effect 를 두 번 실행한다. 정리(cleanup)에서 앞 요청을 취소했거나,
   // 호출 스택에 React 의 재실행 함수가 있을 때만 확실하다고 본다. 같은 위젯 두 개의 동시 요청은 낭비로 남는다.
   if (r.duplicateOf && (isAborted(byId.get(r.duplicateOf)) || r.strictModeReplay)) return 'strict-mode';

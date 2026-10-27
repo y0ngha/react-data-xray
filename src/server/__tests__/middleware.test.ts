@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +36,8 @@ describe('보고서 미들웨어', () => {
     expect((await post('{"requests":{"total":1}}', { origin: base })).status).toBe(204);
     expect(JSON.parse(await readFile(join(root, '.rdx/report.json'), 'utf8'))).toEqual({ requests: { total: 1 } });
     expect(await readFile(join(root, '.rdx/.gitignore'), 'utf8')).toBe('*\n');
+    // 임시 파일에 쓰고 이름을 바꾸므로 남는 임시 파일이 없다.
+    expect((await readdir(join(root, '.rdx'))).sort()).toEqual(['.gitignore', 'report.json']);
   });
 
   it('GET 으로 물으면 미들웨어가 있다는 표시 헤더로 답한다(본문은 쓰지 않는다)', async () => {
@@ -51,8 +53,11 @@ describe('보고서 미들웨어', () => {
         handle({ method: 'GET', url: '/__rdx/report', headers: { host } } as never, res as never, () => resolve(404));
       });
     expect(await asHost('evil.example:5173')).toBe(403);
-    expect(await asHost('192.168.0.10:5173')).toBe(403);
-    expect(await asHost('192.168.0.10:5173', rdxReportMiddleware(root, { allowedHosts: ['192.168.0.10'] }))).toBe(204);
+    expect(await asHost('devbox.internal:5173')).toBe(403);
+    expect(await asHost('devbox.internal:5173', rdxReportMiddleware(root, { allowedHosts: ['devbox.internal'] }))).toBe(204);
+    // IP 주소는 DNS 리바인딩으로 만들 수 없는 이름이라 Vite 처럼 허용한다.
+    expect(await asHost('192.168.0.10:5173')).toBe(204);
+    expect(await asHost('[::1]:5173')).toBe(204);
     expect(await asHost('app.dev.example:5173', rdxReportMiddleware(root, { allowedHosts: ['.dev.example'] }))).toBe(204);
     expect(await asHost('anything:5173', rdxReportMiddleware(root, { allowedHosts: true }))).toBe(204);
   });
@@ -66,14 +71,28 @@ describe('보고서 미들웨어', () => {
     expect((await fetch(`${base}/other`, { method: 'POST' })).status).toBe(404);
   });
 
+  it('HTTP/2(https dev 서버)는 Host 대신 :authority 로 판단한다', async () => {
+    const status = await new Promise<number>((resolve) => {
+      const res = { statusCode: 0, setHeader: () => undefined, end: () => resolve(res.statusCode) };
+      rdxReportMiddleware(root)(
+        { method: 'GET', url: '/__rdx/report', headers: { ':authority': 'localhost:5173' } } as never,
+        res as never,
+        () => resolve(404),
+      );
+    });
+    expect(status).toBe(204);
+  });
+
   it('Vite 플러그인은 dev 서버에만 붙고, Vite 의 allowedHosts 를 그대로 쓴다', async () => {
     const used: Array<ReturnType<typeof rdxReportMiddleware>> = [];
     const plugin = rdx();
-    plugin.configureServer({ config: { server: { allowedHosts: ['192.168.0.10'] } }, middlewares: { use: (h) => used.push(h) } });
+    plugin.configureServer({ config: { server: { allowedHosts: ['devbox.internal'] } }, middlewares: { use: (h) => used.push(h) } });
     expect(plugin.apply).toBe('serve');
     const status = await new Promise<number>((resolve) => {
       const res = { statusCode: 0, setHeader: () => undefined, end: () => resolve(res.statusCode) };
-      used[0]({ method: 'GET', url: '/__rdx/report', headers: { host: '192.168.0.10:5173' } } as never, res as never, () => resolve(404));
+      used[0]({ method: 'GET', url: '/__rdx/report', headers: { host: 'devbox.internal:5173' } } as never, res as never, () =>
+        resolve(404),
+      );
     });
     expect(status).toBe(204);
   });

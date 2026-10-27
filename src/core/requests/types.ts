@@ -29,6 +29,8 @@ export interface RequestRecord {
   sameResponseAs?: number;
   /** 새로고침 전 페이지에서 기록해 되살린 요청. 응답 객체(body)는 없고 원문만 있다. */
   restored?: boolean;
+  /** 같은 탭에서 몇 번째로 연 페이지의 요청인지. 주기 판정은 같은 페이지 안에서만 한다(새로고침 사이 간격은 주기가 아니다). */
+  load?: number;
 }
 
 /** 응답 본문 안의 객체가 어느 요청의 어느 위치에서 왔는지 */

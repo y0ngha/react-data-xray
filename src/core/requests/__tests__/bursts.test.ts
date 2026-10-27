@@ -28,6 +28,8 @@ describe('findBursts', () => {
 describe('isInitialLoad', () => {
   it('페이지 진입 후 3초 안이면 첫 로딩이다', () => {
     expect(isInitialLoad(performance.timeOrigin + 1000)).toBe(true);
+    // 새로고침 전 페이지의 요청(지금 페이지보다 앞선 시각)은 진입 직후가 아니다.
+    expect(isInitialLoad(performance.timeOrigin - 1000)).toBe(false);
     expect(isInitialLoad(performance.timeOrigin + 5000)).toBe(false);
   });
 });

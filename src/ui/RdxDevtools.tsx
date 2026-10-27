@@ -12,6 +12,7 @@ import { useElementPicker } from './hooks/useElementPicker.js';
 import { useHotkey, type Hotkey } from './hooks/useHotkey.js';
 import { useIgnoredEndpoints } from './hooks/useIgnoredEndpoints.js';
 import { useStoredState } from './hooks/useStoredState.js';
+import { OPEN_KEY, parseBool, parseTab, SHOW_ALL_KEY, TAB_KEY } from './viewState.js';
 import { usePopupWindow } from './hooks/usePopupWindow.js';
 import { useRequestAnalysis } from './hooks/useRequestAnalysis.js';
 import { ConsumerHighlight } from './overlays/ConsumerHighlight.js';
@@ -30,24 +31,16 @@ export interface RdxDevtoolsProps {
 
 const DEFAULT_HOTKEY: Hotkey = { key: 'd', shift: true };
 
-// 앱 코드(API 모듈 등)를 고치거나 새로고침하면 페이지가 통째로 다시 열린다. 그때마다 패널이 닫히고 전체 표시가
-// 꺼지지 않게, 탭을 닫을 때까지(sessionStorage) 기억한다. 새 탭은 처음 상태로 시작한다.
-const OPEN_KEY = 'react-data-xray:open';
-const SHOW_ALL_KEY = 'react-data-xray:show-all';
-const TAB_KEY = 'react-data-xray:tab';
-const TABS: readonly Tab[] = ['inspect', 'requests', 'timeline', 'renders'];
-const parseBool = (raw: unknown): boolean | undefined => (typeof raw === 'boolean' ? raw : undefined);
-const parseTab = (raw: unknown): Tab | undefined => TABS.find((t) => t === raw);
 const no = () => false;
 const firstTab = (): Tab => 'inspect';
-const asIs = <T,>(value: T): unknown => value;
+const SESSION = { area: 'session' } as const;
 
 /** rdx 의 조립 지점: 상태를 모아 패널·오버레이·버튼에 나눠 준다. */
 export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
-  const [storedOpen, setOpen] = useStoredState(OPEN_KEY, parseBool, no, asIs, 'session');
-  const [tab, setTab] = useStoredState(TAB_KEY, parseTab, firstTab, asIs, 'session');
+  const [storedOpen, setOpen] = useStoredState(OPEN_KEY, parseBool, no, SESSION);
+  const [tab, setTab] = useStoredState(TAB_KEY, parseTab, firstTab, SESSION);
   const [picking, setPicking] = useState(false);
-  const [showAll, setShowAll] = useStoredState(SHOW_ALL_KEY, parseBool, no, asIs, 'session');
+  const [showAll, setShowAll] = useStoredState(SHOW_ALL_KEY, parseBool, no, SESSION);
   const [result, setResult] = useState<InspectResult | null>(null);
   const [selected, setSelected] = useState<{ record: RequestRecord; focus?: Focus } | null>(null);
   const [hovered, setHovered] = useState<RequestRecord | null>(null);
