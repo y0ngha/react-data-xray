@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RequestClass } from '../classify.js';
-import { getEndpointStats, isWastefulStat, wasteCount } from '../endpointStats.js';
+import { getEndpointStats, isWastefulStat, statSummary, wasteCount } from '../endpointStats.js';
 import type { RequestRecord } from '../types.js';
 
 const rec = (id: number, url: string, durationMs: number): RequestRecord => ({
@@ -31,5 +31,15 @@ describe('getEndpointStats', () => {
     expect(isWastefulStat(first)).toBe(true);
     expect(isWastefulStat(second)).toBe(false);
     expect(isWastefulStat(undefined)).toBe(false);
+  });
+});
+
+describe('statSummary', () => {
+  it('호출 수와 낭비만 짧게 적고, 한 번만 불린 정상 요청은 비운다', () => {
+    const stat = { endpoint: 'GET /a', count: 6, duplicates: 2, sameResponses: 3, review: 0, explained: 0, avgMs: 10 };
+    expect(statSummary(stat)).toBe('×6 · 중복 2 · 같은 응답 3');
+    expect(statSummary({ ...stat, duplicates: 0, sameResponses: 0 })).toBe('×6');
+    expect(statSummary({ ...stat, count: 1, duplicates: 0, sameResponses: 0 })).toBe('');
+    expect(statSummary(undefined)).toBe('');
   });
 });

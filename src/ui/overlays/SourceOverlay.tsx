@@ -6,7 +6,8 @@ import { getRenderInfo, subscribeCommits } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { isWaste } from '../../core/requests/classify.js';
-import { pathOf } from '../../core/requests/requestKey.js';
+import { endpointOf, pathOf } from '../../core/requests/requestKey.js';
+import { statSummary, type EndpointStat } from '../../core/requests/endpointStats.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
 import { color, MATCH_COLOR, SMALL_FONT, Z_OVERLAY } from '../theme.js';
@@ -21,7 +22,11 @@ interface BoxElements {
   root: HTMLDivElement;
   label: HTMLButtonElement;
   count: HTMLElement;
+  /** API 지표(×6 · 중복 2 · 같은 응답 3) */
+  metrics: HTMLElement;
 }
+
+type StatOf = (record: RequestRecord) => EndpointStat | undefined;
 
 const placeBox = (root: HTMLDivElement, rect: DOMRect | null): void => {
   root.style.display = rect ? '' : 'none';
@@ -30,6 +35,11 @@ const placeBox = (root: HTMLDivElement, rect: DOMRect | null): void => {
   root.style.top = `${rect.top}px`;
   root.style.width = `${rect.width}px`;
   root.style.height = `${rect.height}px`;
+};
+
+const paintMetrics = ({ box, metrics }: BoxElements, statOf: StatOf): void => {
+  const text = statSummary(statOf(box.hit.record));
+  metrics.textContent = text ? ` ${text}` : '';
 };
 
 const paintRenders = ({ box, root, label, count }: BoxElements, now: number): void => {
@@ -49,22 +59,29 @@ const paintRenders = ({ box, root, label, count }: BoxElements, now: number): vo
  * 박스 위치와 렌더 표시를 React 렌더 없이 DOM 에 직접 쓴다. 박스가 수백 개라 150ms 마다 React 로
  * 다시 그리면 메인 스레드를 다 쓴다. 스크롤은 위치만, commit 은 렌더 표시와 위치를 한 프레임에 한 번 고친다.
  */
-const useBoxPainter = () => {
+const useBoxPainter = (statOf: StatOf) => {
   const elements = useRef(new Map<number, BoxElements>());
+  // 요청이 들어올 때마다 박스를 React 로 다시 그리지 않도록, 지표는 최신 집계를 읽어 painter 가 쓴다.
+  const latestStatOf = useRef(statOf);
+  useEffect(() => {
+    latestStatOf.current = statOf;
+  }, [statOf]);
   const register = useCallback((box: Box, el: HTMLDivElement | null) => {
     const label = el?.querySelector('button');
     const count = el?.querySelector('b');
-    if (!el || !label || !count) {
+    const metrics = el?.querySelector<HTMLElement>('[data-metrics]');
+    if (!el || !label || !count || !metrics) {
       elements.current.delete(box.id);
       return;
     }
-    const els = { box, root: el, label, count };
+    const els = { box, root: el, label, count, metrics };
     elements.current.set(box.id, els);
     paintRenders(els, Date.now());
+    paintMetrics(els, latestStatOf.current);
   }, []);
 
   useEffect(() => {
-    const pending = { position: false, renders: false };
+    const pending = { position: false, renders: false, metrics: false };
     let frame = 0;
     let flashEnd = 0;
     const paint = () => {
@@ -77,7 +94,8 @@ const useBoxPainter = () => {
         all.forEach((els, i) => placeBox(els.root, rects[i]));
       }
       if (pending.renders) all.forEach((els) => paintRenders(els, now));
-      Object.assign(pending, { position: false, renders: false });
+      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestStatOf.current));
+      Object.assign(pending, { position: false, renders: false, metrics: false });
     };
     const schedule = (kind: keyof typeof pending) => () => {
       pending[kind] = true;
@@ -85,6 +103,7 @@ const useBoxPainter = () => {
     };
     const repaintPosition = schedule('position');
     const repaintRenders = schedule('renders');
+    const repaintMetrics = schedule('metrics');
     const onCommit = () => {
       repaintRenders();
       // 깜빡임을 끄는 다시 그리기
@@ -97,6 +116,7 @@ const useBoxPainter = () => {
     const timer = window.setInterval(() => {
       repaintRenders();
       repaintPosition();
+      repaintMetrics();
     }, TICK_MS);
     const unsubscribe = subscribeCommits(onCommit);
     window.addEventListener('scroll', repaintPosition, true);
@@ -155,14 +175,16 @@ const SourceBox = memo(function SourceBox({ box, waste, onOpen, register }: Sour
       >
         <b style={{ display: 'none', marginRight: 4 }} />
         {pathOf(box.hit.record.url)}
+        <span data-metrics="" />
       </button>
     </FixedRect>
   );
 });
 
-/** 화면 박스: 분석 대상 안에서 데이터 출처가 있는 컴포넌트마다 박스, URL, 렌더 횟수를 그리고 렌더될 때마다 깜빡인다. */
-export const SourceOverlay = ({ boxes }: { boxes: readonly Box[] }) => {
-  const register = useBoxPainter();
+/** 화면 박스: 분석 대상 안에서 데이터 출처가 있는 컴포넌트마다 박스, URL 과 그 API 의 지표, 렌더 횟수를 그리고 렌더될 때마다 깜빡인다. */
+export const SourceOverlay = ({ boxes, stats }: { boxes: readonly Box[]; stats: ReadonlyMap<string, EndpointStat> }) => {
+  const statOf = useCallback((record: RequestRecord) => stats.get(endpointOf(record)), [stats]);
+  const register = useBoxPainter(statOf);
   const { open, classOf } = useRequestActions();
   return (
     <>

@@ -7,10 +7,14 @@ import { getRecords } from '../../../core/requests/store.js';
 import { renderWithActions } from '../../../testing/withActions.js';
 import { ConsumerHighlight } from '../ConsumerHighlight.js';
 import { PickHighlight } from '../PickHighlight.js';
+import type { EndpointStat } from '../../../core/requests/endpointStats.js';
 import { useOverlayBoxes } from '../../hooks/useOverlayBoxes.js';
 import { SourceOverlay } from '../SourceOverlay.js';
 
-const ScreenBoxes = () => <SourceOverlay boxes={useOverlayBoxes(true, null)} />;
+const NO_STATS = new Map<string, EndpointStat>();
+const ScreenBoxes = ({ stats = NO_STATS }: { stats?: ReadonlyMap<string, EndpointStat> }) => (
+  <SourceOverlay boxes={useOverlayBoxes(true, null)} stats={stats} />
+);
 
 type Item = { id: number; title: string };
 const Row = ({ item }: { item: Item }) => <li>{item.title}</li>;
@@ -50,6 +54,15 @@ describe('오버레이', () => {
     expect(labels).toHaveLength(2);
     fireEvent.click(labels[0]);
     expect(actions.open).toHaveBeenCalledWith(getRecords()[0]);
+  });
+
+  it('박스 라벨에 그 API 의 호출 수와 낭비 수를 붙인다', async () => {
+    render(<List />);
+    await act(flush);
+    const stat = { endpoint: 'GET /api/overlay', count: 6, duplicates: 2, sameResponses: 3, review: 0, explained: 0, avgMs: 10 };
+    renderWithActions(<ScreenBoxes stats={new Map([[stat.endpoint, stat]])} />);
+    await act(flush);
+    expect(screen.getAllByRole('button', { name: /\/api\/overlay\s*×6 · 중복 2 · 같은 응답 3/ })).toHaveLength(2);
   });
 
   it('요청 강조는 그 응답을 쓰는 컴포넌트에 이름을 붙인다', async () => {

@@ -12,6 +12,7 @@ import { useStoredState } from './hooks/useStoredState.js';
 import { BOXES_KEY, parseBool, parseTab, TAB_KEY } from './viewState.js';
 import { usePanelVisibility } from './hooks/usePanelVisibility.js';
 import { useOverlayBoxes } from './hooks/useOverlayBoxes.js';
+import { useProblemSignal } from './hooks/useProblemSignal.js';
 import { useRequestAnalysis } from './hooks/useRequestAnalysis.js';
 import { useAnalysisScope, useScopedAnalysis } from './hooks/useAnalysisScope.js';
 import { ConsumerHighlight } from './overlays/ConsumerHighlight.js';
@@ -49,6 +50,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
+  const signal = useProblemSignal(analysis.records, analysis.wasteCount);
   const { open, show, hide, popup, settings, updateDock, saveDock, changeDock } = usePanelVisibility();
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
 
@@ -137,12 +139,12 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   return createPortal(
     <RequestActionsProvider value={actions}>
       <div {...ownUiProps}>
-        {boxesVisible && <SourceOverlay boxes={boxes} />}
+        {boxesVisible && <SourceOverlay boxes={boxes} stats={analysis.statsByEndpoint} />}
         {hovered && <ConsumerHighlight record={hovered} />}
         {pickRect && <PickHighlight rect={pickRect} />}
         {open && settings.dock !== 'window' && panel}
         {open && settings.dock === 'window' && popup && createPortal(panel, popup.document.body)}
-        <FloatingButton position={position} warn={analysis.wasteCount > 0} handlers={handlers} />
+        <FloatingButton position={position} issues={signal.issues} alert={signal.alert} handlers={handlers} />
       </div>
     </RequestActionsProvider>,
     document.body,

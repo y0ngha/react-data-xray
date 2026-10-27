@@ -51,3 +51,11 @@ export const getEndpointStats = (records: readonly RequestRecord[], classes: Rea
     Object.assign(stat, { avgMs: Math.round(totalMs / stat.count) }),
   ).sort((a, b) => wasteCount(b) - wasteCount(a) || b.count - a.count);
 };
+
+/** 박스 라벨에 붙이는 짧은 지표: "×6 · 중복 2 · 같은 응답 3". 한 번만 불렸고 낭비도 없으면 빈 문자열 */
+export const statSummary = (stat: EndpointStat | undefined): string => {
+  if (!stat || (stat.count <= 1 && wasteCount(stat) === 0)) return '';
+  return [`×${stat.count}`, stat.duplicates > 0 && `중복 ${stat.duplicates}`, stat.sameResponses > 0 && `같은 응답 ${stat.sameResponses}`]
+    .filter(Boolean)
+    .join(' · ');
+};

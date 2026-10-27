@@ -33,3 +33,10 @@ export const isInitialLoad = (time: number): boolean => {
   const sinceLoad = time - performance.timeOrigin;
   return sinceLoad >= 0 && sinceLoad < INITIAL_LOAD_MS;
 };
+
+// 버튼을 깜빡이게 할 "방금" 의 범위
+const RECENT_BURST_MS = 2000;
+
+/** 방금(2초 안) 요청 몰림이 있었는지 */
+export const hasRecentBurst = (starts: readonly number[], now: number): boolean =>
+  findBursts(starts.filter((t) => now - t <= RECENT_BURST_MS)).length > 0;

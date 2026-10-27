@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { findBursts, isInitialLoad } from '../bursts.js';
+import { findBursts, hasRecentBurst, isInitialLoad } from '../bursts.js';
 
 describe('findBursts', () => {
   it('500ms 안에 5건 이상이면 몰림 구간으로 묶는다', () => {
@@ -31,5 +31,14 @@ describe('isInitialLoad', () => {
     // 새로고침 전 페이지의 요청(지금 페이지보다 앞선 시각)은 진입 직후가 아니다.
     expect(isInitialLoad(performance.timeOrigin - 1000)).toBe(false);
     expect(isInitialLoad(performance.timeOrigin + 5000)).toBe(false);
+  });
+});
+
+describe('hasRecentBurst', () => {
+  it('2초 안에 몰림이 있을 때만 참이다', () => {
+    const burst = [0, 100, 200, 300, 400];
+    expect(hasRecentBurst(burst, 1000)).toBe(true);
+    expect(hasRecentBurst(burst, 5000)).toBe(false);
+    expect(hasRecentBurst([0, 900, 1800], 1900)).toBe(false);
   });
 });
