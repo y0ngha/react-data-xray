@@ -17,6 +17,8 @@ export interface RequestRecord {
   trigger?: 'focus' | 'reconnect';
   /** 요청을 보낸 코드의 호출 스택(rdx 자신의 프레임은 뺀다) */
   stack?: string;
+  /** stack 을 소스맵으로 원본 위치로 바꾼 것(비동기로 채운다. 못 바꾸면 없다) */
+  sourceStack?: string;
   /** React 가 StrictMode 에서 effect 를 다시 실행하는 도중에 보낸 요청(호출 스택으로 확인) */
   strictModeReplay?: boolean;
   status: number;

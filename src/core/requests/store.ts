@@ -32,6 +32,9 @@ export const getRecords = (): readonly RequestRecord[] => records;
 
 export const getStoreVersion = (): number => version;
 
+/** 기록의 내용을 나중에 채웠을 때(원본 위치 등) 구독자에게 알린다. */
+export const touchRecords = (): void => notify();
+
 /** 요청이 나갈 때 만든다. requestBody 가 null 이면 본문이 있지만 읽을 수 없다는 뜻이다. */
 export const createRecord = (kind: RequestRecord['kind'], method: string, url: string, requestBody?: string | null): RequestRecord => {
   const record: RequestRecord = {

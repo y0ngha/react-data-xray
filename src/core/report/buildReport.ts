@@ -69,7 +69,7 @@ const HOW_TO_READ = [
   'review 는 주기 요청·포커스 재요청처럼 의도일 수 있지만 점검할 반복이다.',
   'ignored: true 인 엔드포인트는 사용자가 의도된 반복으로 지정한 것이라 고치지 않는다.',
   '요청 집계에는 같은 탭에서 새로고침하기 전의 요청도 들어 있다. 새로고침 전후를 가르려면 restoredCount 를 본다.',
-  'callers 의 줄 번호는 dev 서버가 변환한 코드 기준이라 원본과 몇십 줄 어긋날 수 있다. 함수 이름으로 찾는다.',
+  'callers 는 소스맵으로 원본 위치(src/…:줄:열)로 바꾼 것이다. http 주소로 남은 줄은 소스맵이 없어 변환된 코드 기준이라 줄 번호가 어긋날 수 있으니 함수 이름으로 찾는다.',
   'renders.components 는 최근 10초 렌더를 컴포넌트 이름별로 합친 것이고, 줄일 수 있는 렌더 많은 순이다.',
   'reactQuery.findings 는 queryKey 설계 문제다(중복 캐시, 키에 빠진 파라미터, 빗나간 무효화, staleTime 0). fix 를 따른다.',
   'networkCauses 의 viaParent 는 조상이 응답으로 렌더돼서 따라 렌더된 횟수다. 고칠 곳은 대개 그 조상의 setState 다.',
@@ -94,7 +94,7 @@ const callerOf = (stack: string | undefined): string | undefined =>
 
 const callersOf = (records: readonly RequestRecord[]) => {
   const counts = records.reduce((acc, r) => {
-    const frame = callerOf(r.stack);
+    const frame = callerOf(r.sourceStack ?? r.stack);
     return frame ? acc.set(frame, (acc.get(frame) ?? 0) + 1) : acc;
   }, new Map<string, number>());
   return Array.from(counts, ([frame, count]) => ({ frame, count }))

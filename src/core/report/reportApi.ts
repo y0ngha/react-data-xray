@@ -1,14 +1,25 @@
 import { REPORT_HEADER, REPORT_PATH } from '../../shared/reportPath.js';
-import { getNativeFetch } from '../capture/install.js';
-import { isRenderMonitoring, setRenderMonitoring } from '../render/monitor.js';
+import { getNativeFetch } from '../capture/nativeFetch.js';
+import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../render/monitor.js';
+import { clearRecords } from '../requests/store.js';
 import { buildReport, type RdxReport } from './buildReport.js';
 
 const UPLOAD_MS = 5000;
 
+/** 브라우저 도구를 쓰는 AI·개발자가 부르는 창구 */
+export interface RdxApi {
+  /** 지금까지 모은 결과 */
+  report: () => RdxReport;
+  /** 측정을 새로 시작한다: 요청 기록과 렌더 통계를 비운다 */
+  reset: () => void;
+  /** 보고서를 이름 붙여 저장한다(.rdx/<name>.json, dev 서버 플러그인이 있을 때). 고치기 전후를 비교할 때 쓴다 */
+  snapshot: (name: string) => Promise<RdxReport>;
+}
+
 declare global {
   interface Window {
     /** 브라우저 도구를 쓰는 AI 가 부른다: `window.__RDX__.report()` */
-    __RDX__?: { report: () => RdxReport };
+    __RDX__?: RdxApi;
   }
 }
 
@@ -29,6 +40,34 @@ const report = (): RdxReport => {
 const HANDSHAKE_RETRY_MS = 3000;
 // dev 서버가 꺼지면 계속 실패하므로 이만큼 연속 실패하면 멈춘다. 서버가 돌아오면 Vite 가 페이지를 다시 열어 처음부터 확인한다.
 const MAX_UPLOAD_FAILURES = 3;
+
+// 보고서 이름: 파일 이름이 되므로 경로를 만들 수 있는 글자는 받지 않는다.
+export const SNAPSHOT_NAME = /^[\w.-]{1,64}$/;
+
+// 확인한 dev 서버 미들웨어가 있는지(업로드를 시작할 때 정한다)
+let endpointReady = false;
+
+const reset = (): void => {
+  clearRecords();
+  resetRenderStats();
+};
+
+const snapshot = async (name: string): Promise<RdxReport> => {
+  if (!SNAPSHOT_NAME.test(name) || name.startsWith('.')) {
+    throw new Error(`[react-data-xray] 보고서 이름은 영문·숫자·. _ - 로 64자까지입니다(. 으로 시작할 수 없습니다): ${name}`);
+  }
+  const result = report();
+  const send = getNativeFetch();
+  if (endpointReady && send) {
+    await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(result),
+    }).catch(() => null);
+  }
+  return result;
+};
 
 /**
  * dev 서버에 rdx 미들웨어가 있는지. 본문 없는 GET 으로 묻고, 미들웨어만 붙이는 헤더로 판단한다.
@@ -53,6 +92,7 @@ const hasReportEndpoint = async (send: typeof fetch): Promise<boolean> => {
 const startUpload = async (): Promise<void> => {
   const send = getNativeFetch();
   if (!send || !(await hasReportEndpoint(send))) return;
+  endpointReady = true;
   keepRenderMonitoring();
   let last = '';
   let failures = 0;
@@ -84,6 +124,6 @@ const startUpload = async (): Promise<void> => {
 /** `window.__RDX__` 를 걸고, dev 서버 플러그인이 있으면 보고서를 파일로 보낸다. */
 export const installReportApi = (): void => {
   if (typeof window === 'undefined' || window.__RDX__) return;
-  window.__RDX__ = { report };
+  window.__RDX__ = { report, reset, snapshot };
   void startUpload();
 };

@@ -37,7 +37,7 @@ describe('보고서 미들웨어', () => {
     expect(JSON.parse(await readFile(join(root, '.rdx/report.json'), 'utf8'))).toEqual({ requests: { total: 1 } });
     expect(await readFile(join(root, '.rdx/.gitignore'), 'utf8')).toBe('*\n');
     // 임시 파일에 쓰고 이름을 바꾸므로 남는 임시 파일이 없다.
-    expect((await readdir(join(root, '.rdx'))).sort()).toEqual(['.gitignore', 'report.json']);
+    expect((await readdir(join(root, '.rdx'))).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 
   it('GET 으로 물으면 미들웨어가 있다는 표시 헤더로 답한다(본문은 쓰지 않는다)', async () => {
@@ -60,6 +60,19 @@ describe('보고서 미들웨어', () => {
     expect(await asHost('[::1]:5173')).toBe(204);
     expect(await asHost('app.dev.example:5173', rdxReportMiddleware(root, { allowedHosts: ['.dev.example'] }))).toBe(204);
     expect(await asHost('anything:5173', rdxReportMiddleware(root, { allowedHosts: true }))).toBe(204);
+  });
+
+  it('이름을 주면 <이름>.json 으로 따로 저장하고, 경로를 만들 수 있는 이름은 받지 않는다', async () => {
+    const postAs = (name: string) =>
+      fetch(`${base}/__rdx/report?name=${encodeURIComponent(name)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: base },
+        body: '{"scenario":1}',
+      });
+    expect((await postAs('before-fix')).status).toBe(204);
+    expect(JSON.parse(await readFile(join(root, '.rdx/before-fix.json'), 'utf8'))).toEqual({ scenario: 1 });
+    expect((await postAs('../escape')).status).toBe(400);
+    expect((await postAs('.gitignore')).status).toBe(400);
   });
 
   it('다른 출처, JSON 이 아닌 본문, 다른 경로는 받지 않는다', async () => {

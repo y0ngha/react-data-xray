@@ -82,8 +82,8 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
     {record.trigger && <Muted>{TRIGGER_TEXT[record.trigger]}</Muted>}
     <ConsumerList record={record} />
     {record.stack && (
-      <Section title="요청을 보낸 코드" copy={record.stack}>
-        <CodeBlock text={record.stack} />
+      <Section title="요청을 보낸 코드" copy={record.sourceStack ?? record.stack}>
+        <CodeBlock text={record.sourceStack ?? record.stack} />
       </Section>
     )}
     <Section title="Query">

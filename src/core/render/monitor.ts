@@ -109,6 +109,15 @@ export const setRenderMonitoring = (on: boolean): void => {
 
 export const isRenderMonitoring = (): boolean => users > 0;
 
+/** 지금까지의 렌더 통계를 비운다(측정 시나리오를 새로 시작할 때). 감시는 켜 둔 채로 둔다. */
+export const resetRenderStats = (): void => {
+  active.forEach((entry) => {
+    entry.events.length = 0;
+  });
+  active.clear();
+  commits.length = 0;
+};
+
 /** 이 컴포넌트와 그 하위는 세지 않는다(rdx 패널 자신). */
 export const ignoreComponent = (type: unknown): void => {
   ignoredTypes.add(type);

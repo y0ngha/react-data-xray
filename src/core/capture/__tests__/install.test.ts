@@ -7,7 +7,8 @@ it('fetch·Response·XHR 이 없는 환경에서도 설치가 깨지지 않고, 
   vi.stubGlobal('fetch', undefined);
   vi.stubGlobal('Response', undefined);
   vi.stubGlobal('XMLHttpRequest', undefined);
-  const { installCapture, getNativeFetch } = await import('../install.js');
+  const { installCapture } = await import('../install.js');
+  const { getNativeFetch } = await import('../nativeFetch.js');
   expect(() => installCapture()).not.toThrow();
   expect(window.fetch).toBeUndefined();
   expect(getNativeFetch()).toBeUndefined();

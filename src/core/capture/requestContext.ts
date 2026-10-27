@@ -1,4 +1,6 @@
+import { touchRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
+import { resolveStack } from './sourceMap.js';
 
 // 이 시간 안에 나간 요청은 포커스·재연결 때문에 라이브러리가 자동으로 다시 보낸 것으로 본다.
 const TRIGGER_WINDOW_MS = 1000;
@@ -64,5 +66,19 @@ export const annotateRequest = (record: RequestRecord): RequestRecord => {
   record.strictModeReplay = STRICT_MODE_REPLAY.test(raw) || undefined;
   record.stack = appStack(raw);
   record.trigger = triggerAt(record.startedAt);
+  resolveSourceStack(record);
   return record;
+};
+
+/** dev 서버가 변환한 위치를 원본 위치로 바꿔 둔다(보고서·요청 상세가 원본 줄 번호를 보이게). 실패하면 그대로 둔다. */
+const resolveSourceStack = (record: RequestRecord): void => {
+  const stack = record.stack;
+  if (!stack || typeof window === 'undefined') return;
+  resolveStack(stack)
+    .then((resolved) => {
+      if (resolved === stack) return;
+      record.sourceStack = resolved;
+      touchRecords();
+    })
+    .catch(() => undefined);
 };

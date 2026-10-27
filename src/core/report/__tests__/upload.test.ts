@@ -18,3 +18,13 @@ it('dev 서버 미들웨어가 표시 헤더로 답하면 보고서를 보내고
   expect(window.__RDX__?.report().renders.monitoring).toBe(true);
   expect(getRecords()).toHaveLength(0);
 });
+
+it('snapshot 은 이름 붙인 보고서를 보내고, reset 은 기록을 비우며, 이상한 이름은 거절한다', async () => {
+  await fetch('/api/before').then((r) => r.json());
+  const before = await window.__RDX__!.snapshot('before');
+  expect(before.requests.total).toBeGreaterThan(0);
+  expect(mockFetch.mock.calls.some(([input]) => String(input) === `${REPORT_PATH}?name=before`)).toBe(true);
+  window.__RDX__!.reset();
+  expect(window.__RDX__!.report().requests.total).toBe(0);
+  await expect(window.__RDX__!.snapshot('../x')).rejects.toThrow(/보고서 이름/);
+});
