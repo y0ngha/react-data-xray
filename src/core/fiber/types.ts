@@ -21,6 +21,8 @@ export interface Fiber {
   selfBaseDuration?: number;
   /** 이 컴포넌트가 읽은 context 목록 */
   dependencies?: { firstContext: ContextDependency | null } | null;
+  /** dev 빌드(React 18)가 기록하는, 이 컴포넌트를 그리는 JSX 의 위치 */
+  _debugSource?: { fileName?: string; lineNumber?: number } | null;
 }
 
 /** 함수 컴포넌트의 훅은 memoizedState 에서 시작하는 연결 리스트다. */

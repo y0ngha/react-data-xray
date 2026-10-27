@@ -142,7 +142,9 @@ describe('RenderGroupRow', () => {
       contextKeys: [],
       memoized: false,
       network: 3,
-      causes: [{ record, direct: 1, parent: 2 }],
+      causes: [{ record, direct: 1, parent: 2, sameResponse: 2 }],
+      origins: [{ name: 'Page', reason: 'state', count: 4 }],
+      location: 'src/Page.tsx:12',
     };
     const stat = { endpoint: 'GET /api/src', count: 5, duplicates: 2, sameResponses: 1, review: 0, explained: 0, avgMs: 10 };
     renderWithActions(
@@ -153,6 +155,9 @@ describe('RenderGroupRow', () => {
     expect(screen.getByText(/네트워크 응답으로 3회 · 네트워크와 무관 1회/)).toBeTruthy();
     expect(screen.getByText(/그중 부모를 따라 2회/)).toBeTruthy();
     expect(screen.getByText(/React.memo 로 감싸면/)).toBeTruthy();
+    expect(screen.getByText(/src\/Page\.tsx:12/)).toBeTruthy();
+    expect(screen.getByText(/렌더 시작: <Page>\(state\) 4회/)).toBeTruthy();
+    expect(screen.getByText(/직전과 같은 응답으로 2회/)).toBeTruthy();
   });
 });
 

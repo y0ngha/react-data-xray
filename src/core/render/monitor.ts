@@ -1,13 +1,19 @@
-import { getComponentName, isMemoized, rememberRootContainer } from '../fiber/tree.js';
+import { getComponentName, isMemoized, jsxLocationOf, rememberRootContainer } from '../fiber/tree.js';
 import { isComposite, PERFORMED_WORK, type Fiber } from '../fiber/types.js';
 import { listenToCommits } from './devtoolsHook.js';
 import { causeOf } from './networkCause.js';
 import { reasonOf } from './renderReason.js';
 import { summarize, WINDOW_MS } from './summary.js';
-import type { Commit, NetworkCause, RenderEntry, RenderEvent, RenderSummary } from './types.js';
+import type { Commit, NetworkCause, RenderEntry, RenderEvent, RenderOrigin, RenderReason, RenderSummary } from './types.js';
 
 const MAX_EVENTS_PER_COMPONENT = 200;
 const MAX_COMMITS = 500;
+
+/** 자식에게 물려주는 것: 네트워크 원인과, 이 렌더를 시작한 조상 */
+interface Inherited {
+  cause?: NetworkCause;
+  origin?: RenderOrigin;
+}
 
 const commits: Commit[] = [];
 const entries = new WeakMap<Fiber, RenderEntry>();
@@ -20,22 +26,33 @@ let users = 0;
 
 const entryOf = (fiber: Fiber): RenderEntry => {
   const existing = entries.get(fiber) ?? (fiber.alternate ? entries.get(fiber.alternate) : undefined);
-  const entry = existing ?? { name: getComponentName(fiber), events: [], fiber, memoized: isMemoized(fiber) };
+  const entry = existing ?? {
+    name: getComponentName(fiber),
+    events: [],
+    fiber,
+    memoized: isMemoized(fiber),
+    location: jsxLocationOf(fiber),
+  };
   entries.set(fiber, entry);
   if (fiber.alternate) entries.set(fiber.alternate, entry);
   return entry;
 };
 
+// 스스로 렌더를 시작하는 이유. 나머지(props·같은 내용·새 콜백·부모)는 조상이 시작한 렌더를 따라온 것이다.
+const STARTS_RENDER = new Set<RenderReason>(['mount', 'state', 'context']);
+
 /** 이번 commit 에서 렌더된 컴포넌트를 기록한다. */
-const recordRender = (fiber: Fiber, now: number, inherited: NetworkCause | undefined): RenderEvent => {
+const recordRender = (fiber: Fiber, now: number, inherited: Inherited): RenderEvent => {
   const entry = entryOf(fiber);
   const result = reasonOf(fiber);
+  const startsRender = STARTS_RENDER.has(result.reason);
   const event: RenderEvent = {
     time: now,
     ms: typeof fiber.selfBaseDuration === 'number' ? fiber.selfBaseDuration : undefined,
     reason: result.reason,
     keys: result.keys,
-    cause: causeOf(result, inherited, now),
+    cause: causeOf(result, inherited.cause, now),
+    origin: startsRender ? undefined : inherited.origin,
   };
   entry.fiber = fiber;
   // React commit 안에서 도는 코드라 배열을 복사하지 않는다.
@@ -54,17 +71,20 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   if (users === 0) return;
   const now = Date.now();
   let count = 0;
-  // 위에서 아래로 내려가며, 가장 가까운 렌더된 조상의 네트워크 원인을 자식에게 넘긴다.
-  const visit = (fiber: Fiber | null, inherited: NetworkCause | undefined): void => {
+  // 위에서 아래로 내려가며, 가장 가까운 렌더된 조상의 네트워크 원인과 렌더를 시작한 조상을 자식에게 넘긴다.
+  const visit = (fiber: Fiber | null, inherited: Inherited): void => {
     for (let f = fiber; f; f = f.sibling) {
       if (ignoredTypes.has(f.type)) continue;
       const rendered = isComposite(f) && (f.flags & PERFORMED_WORK) !== 0;
-      const cause = rendered ? recordRender(f, now, inherited).cause : inherited;
+      const event = rendered ? recordRender(f, now, inherited) : undefined;
       count += rendered ? 1 : 0;
-      if (f.child && wasRecreated(f)) visit(f.child, cause);
+      const next: Inherited = event
+        ? { cause: event.cause, origin: event.origin ?? { name: getComponentName(f), reason: event.reason } }
+        : inherited;
+      if (f.child && wasRecreated(f)) visit(f.child, next);
     }
   };
-  if (wasRecreated(root.current)) visit(root.current.child, undefined);
+  if (wasRecreated(root.current)) visit(root.current.child, {});
   if (count === 0) return;
   commits.push({ id: ++commitSeq, time: now, count });
   if (commits.length > MAX_COMMITS) commits.shift();

@@ -1,5 +1,12 @@
 import { endpointOf } from '../requests/requestKey.js';
-import { RENDER_REASONS, type NetworkCauseCount, type RenderEntry, type RenderReason, type RenderSummary } from './types.js';
+import {
+  RENDER_REASONS,
+  type NetworkCauseCount,
+  type OriginCount,
+  type RenderEntry,
+  type RenderReason,
+  type RenderSummary,
+} from './types.js';
 
 export const WINDOW_MS = 10_000;
 
@@ -13,10 +20,25 @@ const countCauses = (events: RenderEntry['events']): NetworkCauseCount[] => {
   const byEndpoint = events.reduce((acc, { cause }) => {
     if (!cause) return acc;
     const key = endpointOf(cause.record);
-    const prev = acc.get(key) ?? { record: cause.record, direct: 0, parent: 0 };
-    return acc.set(key, { ...prev, record: cause.record, [cause.via]: prev[cause.via] + 1 });
+    const prev = acc.get(key) ?? { record: cause.record, direct: 0, parent: 0, sameResponse: 0 };
+    const sameResponse = prev.sameResponse + (cause.record.sameResponseAs ? 1 : 0);
+    return acc.set(key, { ...prev, record: cause.record, sameResponse, [cause.via]: prev[cause.via] + 1 });
   }, new Map<string, NetworkCauseCount>());
   return Array.from(byEndpoint.values()).sort((a, b) => b.direct + b.parent - (a.direct + a.parent));
+};
+
+const MAX_ORIGINS = 3;
+
+/** 조상 때문에 렌더됐을 때, 그 렌더를 시작한 조상(이름·이유) 별 횟수 */
+const countOrigins = (events: RenderEntry['events']): OriginCount[] => {
+  const byOrigin = new Map<string, OriginCount>();
+  events.forEach(({ origin }) => {
+    if (!origin) return;
+    const key = `${origin.name}|${origin.reason}`;
+    const prev = byOrigin.get(key);
+    byOrigin.set(key, prev ? { ...prev, count: prev.count + 1 } : { ...origin, count: 1 });
+  });
+  return [...byOrigin.values()].sort((a, b) => b.count - a.count).slice(0, MAX_ORIGINS);
 };
 
 /** 최근 10초 렌더 요약 */
@@ -37,5 +59,6 @@ export const summarize = (entry: RenderEntry, now: number): RenderSummary => {
     memoized: entry.memoized,
     network: recent.filter((e) => e.cause).length,
     causes: countCauses(recent),
+    origins: countOrigins(recent),
   };
 };

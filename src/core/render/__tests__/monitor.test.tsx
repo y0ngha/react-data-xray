@@ -227,4 +227,18 @@ describe('렌더의 네트워크 원인', () => {
     expect(getTopRenders(1)[0].name).not.toBe('Quiet');
     expect(getTopRenders(1, Date.now(), (e) => e.name === 'Quiet').map((e) => e.name)).toEqual(['Quiet']);
   });
+
+  it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유)과 자기를 그리는 JSX 위치를 남긴다', () => {
+    function Leaf() {
+      return <em>leaf</em>;
+    }
+    function Middle() {
+      return <Leaf />;
+    }
+    render(<Counter>{() => <Middle />}</Counter>);
+    bump(2);
+    const leaf = getTopRenders(200).find((e) => e.name === 'Leaf')!;
+    expect(leaf.origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
+    expect(leaf.location).toMatch(/monitor\.test\.tsx:\d+$/);
+  });
 });

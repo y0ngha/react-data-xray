@@ -26,10 +26,18 @@ export interface NetworkCause {
   via: 'direct' | 'parent';
 }
 
+/** 렌더를 시작한 컴포넌트: 자기 state·context 가 바뀌었거나 새로 붙은 가장 가까운 조상(부모를 따라 렌더된 자손이 이어받는다) */
+export interface RenderOrigin {
+  name: string;
+  reason: RenderReason;
+}
+
 export interface RenderEvent {
   time: number;
   reason: RenderReason;
   cause?: NetworkCause;
+  /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상. 스스로 시작한 렌더면 없다. */
+  origin?: RenderOrigin;
   /** 자기 자신의 렌더 시간(ms). dev 빌드가 기록하지 않으면 없다. */
   ms?: number;
   /** props·context 때문이면 바뀐 props 이름 또는 context 이름 */
@@ -44,12 +52,20 @@ export interface RenderEntry {
   fiber: unknown;
   /** 이미 React.memo 로 감싼 컴포넌트인지(그러면 React.memo 를 권하지 않는다) */
   memoized: boolean;
+  /** 이 컴포넌트를 그리는 JSX 위치(dev 빌드가 기록할 때만) */
+  location?: string;
 }
 
 export interface NetworkCauseCount {
   record: RequestRecord;
   direct: number;
   parent: number;
+  /** 그중 직전과 똑같은 응답(같은 응답 재요청)으로 일어난 렌더 */
+  sameResponse: number;
+}
+
+export interface OriginCount extends RenderOrigin {
+  count: number;
 }
 
 export interface RenderSummary {
@@ -68,6 +84,8 @@ export interface RenderSummary {
   network: number;
   /** 원인 요청(엔드포인트별 최신 요청)과 직접·부모 경유 횟수 */
   causes: NetworkCauseCount[];
+  /** 조상 때문에 렌더됐을 때 그 렌더를 시작한 조상(많은 순) */
+  origins: OriginCount[];
 }
 
 export interface Commit {

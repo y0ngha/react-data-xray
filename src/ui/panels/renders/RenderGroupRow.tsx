@@ -22,8 +22,15 @@ const Headline = ({ group, showTime }: { group: RenderGroup; showTime: boolean }
     {showTime && <span style={{ color: color.muted }}> · {group.ms.toFixed(1)}ms</span>} &lt;{group.name}&gt;
     {group.instances > 1 && <span style={{ color: color.muted }}> × {group.instances}개</span>}
     {group.avoidable > 0 && <Badge color={color.review}>줄일 수 있음 {group.avoidable}</Badge>}
+    {group.location && <span style={{ color: color.muted }}> · {group.location}</span>}
   </div>
 );
+
+/** 조상 때문에 렌더됐다면, 그 렌더를 시작한 조상. 고칠 곳은 대개 이 조상의 state 변경이다. */
+const Origins = ({ group }: { group: RenderGroup }) =>
+  group.origins.length > 0 ? (
+    <Muted>렌더 시작: {group.origins.map((o) => `<${o.name}>(${REASON_LABEL[o.reason]}) ${o.count}회`).join(' · ')}</Muted>
+  ) : null;
 
 /** 렌더는 네트워크와 무관할 수 있다. 응답 객체로 근거가 확인된 것만 네트워크 원인으로 보여 준다. */
 const NetworkCauses = ({ group }: { group: RenderGroup }) => (
@@ -34,8 +41,8 @@ const NetworkCauses = ({ group }: { group: RenderGroup }) => (
     {group.causes.slice(0, 3).map((c) => (
       <RequestLink key={c.record.id} record={c.record}>
         <Muted>
-          ⇠ <RequestTitle record={c.record} /> 응답으로 렌더 {c.direct + c.parent}회{c.parent > 0 && ` (그중 부모를 따라 ${c.parent}회)`}{' '}
-          <ClassBadge record={c.record} />
+          ⇠ <RequestTitle record={c.record} /> 응답으로 렌더 {c.direct + c.parent}회{c.parent > 0 && ` (그중 부모를 따라 ${c.parent}회)`}
+          {c.sameResponse > 0 && ` · 그중 직전과 같은 응답으로 ${c.sameResponse}회`} <ClassBadge record={c.record} />
         </Muted>
       </RequestLink>
     ))}
@@ -65,6 +72,7 @@ export const RenderGroupRow = ({ group, source, stat, showTime }: RenderGroupRow
   <div style={rowStyle}>
     <Headline group={group} showTime={showTime} />
     <Muted>{reasonSummary(group)}</Muted>
+    <Origins group={group} />
     {renderAdvice(group).map((text) => (
       <div key={text} style={{ color: color.review }}>
         · {text}

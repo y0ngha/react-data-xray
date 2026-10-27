@@ -54,7 +54,11 @@ export interface RdxReport {
       memoized: boolean;
       reasons: Record<string, number>;
       changedProps: { sameContent: string[]; newCallback: string[]; context: string[] };
-      networkCauses: Array<{ endpoint: string; direct: number; viaParent: number }>;
+      /** 이 컴포넌트를 그리는 JSX 위치(dev 빌드가 기록할 때) */
+      renderedAt?: string;
+      /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상(이름·이유). 고칠 곳은 대개 이 조상이다 */
+      causedBy: Array<{ name: string; reason: string; count: number }>;
+      networkCauses: Array<{ endpoint: string; direct: number; viaParent: number; fromSameResponse: number }>;
       advice: string[];
     }>;
   };
@@ -69,6 +73,8 @@ const HOW_TO_READ = [
   'renders.components 는 최근 10초 렌더를 컴포넌트 이름별로 합친 것이고, 줄일 수 있는 렌더 많은 순이다.',
   'reactQuery.findings 는 queryKey 설계 문제다(중복 캐시, 키에 빠진 파라미터, 빗나간 무효화, staleTime 0). fix 를 따른다.',
   'networkCauses 의 viaParent 는 조상이 응답으로 렌더돼서 따라 렌더된 횟수다. 고칠 곳은 대개 그 조상의 setState 다.',
+  'networkCauses 의 fromSameResponse 는 직전과 똑같은 응답인데도 렌더된 횟수다. 같은 응답이면 setState 를 건너뛰거나 구조적 공유를 쓴다.',
+  'causedBy 는 그 렌더를 시작한 조상(이름·이유)이다. renderedAt 은 이 컴포넌트를 그리는 JSX 위치다.',
 ];
 
 // 첫 줄은 대개 앱의 공통 fetch 함수라 그것만으로는 어디서 보냈는지 모른다. 바깥으로 몇 줄 더 본다.
@@ -143,7 +149,14 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
         memoized: g.memoized,
         reasons: nonZero(Object.fromEntries(RENDER_REASONS.map((r) => [r, g.reasons[r]]))),
         changedProps: { sameContent: g.sameContentKeys, newCallback: g.callbackKeys, context: g.contextKeys },
-        networkCauses: g.causes.map((c) => ({ endpoint: endpointOf(c.record), direct: c.direct, viaParent: c.parent })),
+        renderedAt: g.location,
+        causedBy: g.origins,
+        networkCauses: g.causes.map((c) => ({
+          endpoint: endpointOf(c.record),
+          direct: c.direct,
+          viaParent: c.parent,
+          fromSameResponse: c.sameResponse,
+        })),
         advice: renderAdvice(g),
       })),
     },

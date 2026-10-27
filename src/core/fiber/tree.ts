@@ -41,6 +41,16 @@ export const getComponentName = (fiber: Pick<Fiber, 'type'>): string => {
   return type?.displayName || type?.name || type?.render?.name || type?.type?.name || 'Anonymous';
 };
 
+/** 이 컴포넌트를 그리는 JSX 위치(src/... 부터, 줄 번호 포함). dev 빌드가 기록하지 않으면(React 19 등) undefined */
+export const jsxLocationOf = (fiber: Fiber): string | undefined => {
+  // eslint 의 dangle 규칙: React 가 정한 dev 필드 이름이라 바꿀 수 없다.
+  // oxlint-disable-next-line no-underscore-dangle
+  const source = fiber._debugSource;
+  if (!source?.fileName) return undefined;
+  const file = source.fileName.replace(/^.*?\/(src|app|pages|components)\//, '$1/');
+  return source.lineNumber ? `${file}:${source.lineNumber}` : file;
+};
+
 /** React.memo 로 감싼 컴포넌트인지(memo 의 안쪽 컴포넌트 포함) */
 export const isMemoized = (fiber: Fiber): boolean =>
   fiber.tag === SIMPLE_MEMO_COMPONENT || fiber.tag === MEMO_COMPONENT || fiber.return?.tag === MEMO_COMPONENT;

@@ -93,7 +93,7 @@ describe('summary, groups, advice', () => {
     ]);
     const row = groups.find((g) => g.name === 'Row')!;
     expect(row).toMatchObject({ instances: 2, recent: 2, avoidable: 2, callbackKeys: ['onClick'] });
-    expect(row.causes).toEqual([{ record, direct: 1, parent: 1 }]);
+    expect(row.causes).toEqual([{ record, direct: 1, parent: 1, sameResponse: 0 }]);
     expect(sortRenderGroups(groups, 'avoidable')[0].name).toBe('Row');
     expect(sortRenderGroups(groups, 'count').map((g) => g.name)).toEqual(['Row', 'Other']);
     expect(sortRenderGroups(groups, 'time')).toHaveLength(2);
@@ -112,6 +112,7 @@ describe('summary, groups, advice', () => {
       memoized: false,
       network: 0,
       causes: [],
+      origins: [],
     };
     const group: RenderGroup = { ...base, name: 'X', instances: 1, fiber: {} };
     const advice = renderAdvice(group);
