@@ -64,7 +64,7 @@ export interface RdxReport {
       causedBy: Array<{ name: string; reason: string; count: number }>;
       stateChanges: Array<{ label: string; count: number; intervalMs?: number; last: { from: string; to: string } }>;
       startedRenders?: { renders: number; unchanged: number; unchangedComponents: number; changedProps: string[] };
-      networkCauses: Array<{ endpoint: string; direct: number; viaParent: number; fromSameResponse: number }>;
+      networkCauses: Array<{ endpoint: string; direct: number; byTiming: number; viaParent: number; fromSameResponse: number }>;
       advice: string[];
     }>;
   };
@@ -80,6 +80,7 @@ const HOW_TO_READ = [
   'requests.dropped 가 0 보다 크면 기록 상한(200건)을 넘어 오래된 요청이 빠진 것이다. 전후 비교는 시나리오를 짧게 나눠 다시 잰다.',
   'reactQuery.findings 는 queryKey 설계 문제다(중복 캐시, 키에 빠진 파라미터, 빗나간 무효화, staleTime 0). fix 를 따른다.',
   'networkCauses 의 viaParent 는 조상이 응답으로 렌더돼서 따라 렌더된 횟수다. 고칠 곳은 대개 그 조상의 setState 다.',
+  'networkCauses 의 byTiming 은 응답 객체는 찾지 못했지만(가공해 넣음) 응답 도착 직후 자기 state 가 바뀐 횟수다(시간으로 추정).',
   'networkCauses 의 fromSameResponse 는 직전과 똑같은 응답인데도 렌더된 횟수다. 같은 응답이면 setState 를 건너뛰거나 구조적 공유를 쓴다.',
   'causedBy 는 그 렌더를 시작한 조상(이름·이유)이다. renderedAt 은 이 컴포넌트를 그리는 JSX 위치다.',
   'stateChanges 는 state 때문에 렌더됐을 때 값이 바뀐 훅(종류 #순서)과 횟수, 일정한 간격(intervalMs, 타이머 신호), 최근 변경이다.',
@@ -174,6 +175,7 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
         networkCauses: g.causes.map((c) => ({
           endpoint: endpointOf(c.record),
           direct: c.direct,
+          byTiming: c.timing,
           viaParent: c.parent,
           fromSameResponse: c.sameResponse,
         })),

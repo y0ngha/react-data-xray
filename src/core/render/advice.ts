@@ -1,5 +1,6 @@
+import { endpointOf } from '../requests/requestKey.js';
 import type { RenderGroup } from './groups.js';
-import type { StateHookSummary } from './types.js';
+import type { NetworkCauseCount, StateHookSummary } from './types.js';
 
 const propsList = (keys: readonly string[]): string => keys.map((k) => `props.${k}`).join(', ');
 
@@ -22,6 +23,33 @@ export const colocationAdvice = (g: RenderGroup): string | undefined => {
   const changed =
     impact.changedProps.length > 0 ? `값이 실제로 바뀐 건 ${impact.changedProps.join(' → ')} 뿐입니다` : '하위에서 값이 바뀐 곳은 없습니다';
   return `이 컴포넌트의 ${cause} 변경이 하위 렌더 ${impact.renders}회를 일으켰지만, ${changed}(나머지 ${impact.unchangedComponents}개 컴포넌트는 값이 그대로). 바뀌는 값을 그것을 쓰는 컴포넌트 가까이로 내리면(state colocation) ${impact.unchanged}회가 사라집니다. React.memo 를 하나씩 붙이는 것보다 근본적인 해법입니다.`;
+};
+
+// 응답 직후 자기 state 가 이만큼 넘게 바뀌고, 그 요청이 effect 에서 나가면 고리로 본다.
+const LOOP_MIN_RENDERS = 5;
+// 요청을 보낸 코드에서 이름만 뽑아 보여 줄 프레임 수
+const CALLER_FRAMES = 2;
+
+/** 요청을 보낸 코드의 위쪽 함수 이름들: "fetchActiveNotices ← useNoticePopup[useEffect()]" */
+const callerNames = (stack: string | undefined): string =>
+  (stack ?? '')
+    .split('\n')
+    .slice(0, CALLER_FRAMES)
+    .map((line) => /^at (\S+)/.exec(line.trim())?.[1])
+    .filter(Boolean)
+    .join(' ← ');
+
+// 요청이 effect 안에서 나갔다는 표시: React 19 dev 의 훅 프레임 이름("useX[useEffect()]")과, 18·19 의 effect 실행 함수
+const FROM_EFFECT = /\[use(?:Layout|Insertion)?Effect\(\)\]|commitHookEffectListMount/;
+
+const isLoop = (c: NetworkCauseCount): boolean => c.direct + c.timing >= LOOP_MIN_RENDERS && FROM_EFFECT.test(c.record.stack ?? '');
+
+/** 응답을 받을 때마다 자기 state 가 바뀌고, 그 요청이 effect 안에서 다시 나가면 의존성 고리를 의심하라고 한다. */
+const loopAdvice = (g: RenderGroup): string | undefined => {
+  const loop = g.causes.find(isLoop);
+  if (!loop) return undefined;
+  const caller = callerNames(loop.record.stack);
+  return `${endpointOf(loop.record)} 응답을 받을 때마다 이 컴포넌트의 state 가 바뀌어 렌더되고(${loop.direct + loop.timing}회), 그 요청은 effect 안에서 다시 나갑니다${caller ? `(${caller})` : ''}. 응답 → state → effect → 다시 요청 고리입니다. 그 effect 의 의존성 배열에 effect 가 바꾸는 state 나 렌더마다 새로 만드는 값이 들어 있는지 보세요.`;
 };
 
 /** 일정한 간격으로 바뀌는 state 는 타이머가 바꾸는 경우가 많다. */
@@ -47,6 +75,7 @@ const parentAdvice = (g: RenderGroup): string | undefined => {
  */
 export const renderAdvice = (g: RenderGroup): string[] =>
   [
+    loopAdvice(g),
     colocationAdvice(g),
     timerAdvice(g),
     g.reasons['same-content'] > 0 &&

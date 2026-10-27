@@ -21,7 +21,7 @@ const countCauses = (events: RenderEntry['events']): NetworkCauseCount[] => {
   const byEndpoint = events.reduce((acc, { cause }) => {
     if (!cause) return acc;
     const key = endpointOf(cause.record);
-    const prev = acc.get(key) ?? { record: cause.record, direct: 0, parent: 0, sameResponse: 0 };
+    const prev = acc.get(key) ?? { record: cause.record, direct: 0, timing: 0, parent: 0, sameResponse: 0 };
     const sameResponse = prev.sameResponse + (cause.record.sameResponseAs ? 1 : 0);
     return acc.set(key, { ...prev, record: cause.record, sameResponse, [cause.via]: prev[cause.via] + 1 });
   }, new Map<string, NetworkCauseCount>());

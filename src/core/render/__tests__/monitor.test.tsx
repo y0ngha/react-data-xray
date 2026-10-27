@@ -1,5 +1,15 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { createContext, memo, useContext, useDeferredValue, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  createContext,
+  memo,
+  useContext,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_BODY, flush } from '../../../testing/fetchMock.js';
@@ -13,6 +23,7 @@ import {
   setRenderMonitoring,
   subscribeCommits,
 } from '../monitor.js';
+import { renderAdvice } from '../advice.js';
 import { groupRenders } from '../groups.js';
 
 const byName = () => Object.fromEntries(getTopRenders(200).map((e) => [e.name, e]));
@@ -217,6 +228,28 @@ describe('렌더의 네트워크 원인', () => {
         .filter((e) => e.name === 'Row')
         .map((e) => e.network),
     ).toEqual([1, 1]);
+  });
+
+  it('응답을 가공해 state 에 넣어도 응답 직후의 렌더로 잇고, effect 에서 거듭 다시 요청하면 의존성 고리라고 짚는다', async () => {
+    function Notices() {
+      const [items, setItems] = useState<Array<{ id: number }>>([]);
+      const runs = useRef(0);
+      // 이 effect 가 채우는 state 를 의존성에 넣은 실수. 테스트가 끝나도록 6번에서 멈춘다.
+      useEffect(() => {
+        if (runs.current++ >= 6) return;
+        void fetch('/api/notices')
+          .then((r) => r.json())
+          .then((json: typeof DEFAULT_BODY) => setItems(json.data.list.map((x) => ({ id: x.id }))));
+      }, [items]);
+      return <p>{items.length}</p>;
+    }
+    render(<Notices />);
+    for (let i = 0; i < 8; i++) await act(flush);
+    const notices = groupRenders(getTopRenders(200), 0).find((g) => g.name === 'Notices')!;
+    expect(notices.causes[0].record.url).toBe('/api/notices');
+    expect(notices.causes[0].timing).toBeGreaterThanOrEqual(5);
+    expect(notices.network).toBeGreaterThanOrEqual(5);
+    expect(renderAdvice(notices)[0]).toContain('응답 → state → effect → 다시 요청 고리');
   });
 
   it('네트워크와 무관한 state 변경 렌더는 원인을 붙이지 않는다', () => {

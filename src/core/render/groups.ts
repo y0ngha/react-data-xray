@@ -30,7 +30,13 @@ const mergeCauses = (a: readonly NetworkCauseCount[], b: readonly NetworkCauseCo
     return acc.set(
       key,
       prev
-        ? { ...prev, direct: prev.direct + c.direct, parent: prev.parent + c.parent, sameResponse: prev.sameResponse + c.sameResponse }
+        ? {
+            ...prev,
+            direct: prev.direct + c.direct,
+            timing: prev.timing + c.timing,
+            parent: prev.parent + c.parent,
+            sameResponse: prev.sameResponse + c.sameResponse,
+          }
         : { ...c },
     );
   }, new Map<string, NetworkCauseCount>());

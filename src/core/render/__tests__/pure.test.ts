@@ -56,11 +56,15 @@ describe('networkCause', () => {
     expect(findRecentResponse([1, null, document.createElement('div')], arrived)).toBeUndefined();
   });
 
-  it('자기 변경값에 응답이 없으면 조상의 원인을 이어받되, 자기 state 변경 렌더는 이어받지 않는다', () => {
+  it('자기 변경값에 응답이 없으면 조상의 원인을 이어받되, 자기 state 변경 렌더는 이어받지 않고 응답 직후일 때만 시간으로 잇는다', () => {
     const record = respond('/api/p', { x: { id: 2 } });
+    const arrived = record.startedAt + record.durationMs;
     const inherited = { record, via: 'direct' as const };
     expect(causeOf({ reason: 'parent', changed: [] }, inherited, Date.now())).toEqual({ record, via: 'parent' });
-    expect(causeOf({ reason: 'state', changed: [{ y: 1 }] }, inherited, Date.now())).toBeUndefined();
+    // 응답을 가공해 넣은 state 변경: 객체로는 못 잇지만 도착 직후라 시간으로 잇는다.
+    expect(causeOf({ reason: 'state', changed: [{ y: 1 }] }, inherited, arrived + 10)).toEqual({ record, via: 'timing' });
+    // 한참 뒤의 state 변경은 응답과 무관하다.
+    expect(causeOf({ reason: 'state', changed: [{ y: 1 }] }, inherited, arrived + 1000)).toBeUndefined();
     expect(causeOf({ reason: 'parent', changed: [] }, undefined, Date.now())).toBeUndefined();
   });
 });
@@ -93,7 +97,7 @@ describe('summary, groups, advice', () => {
     ]);
     const row = groups.find((g) => g.name === 'Row')!;
     expect(row).toMatchObject({ instances: 2, recent: 2, avoidable: 2, callbackKeys: ['onClick'] });
-    expect(row.causes).toEqual([{ record, direct: 1, parent: 1, sameResponse: 0 }]);
+    expect(row.causes).toEqual([{ record, direct: 1, timing: 0, parent: 1, sameResponse: 0 }]);
     expect(sortRenderGroups(groups, 'avoidable')[0].name).toBe('Row');
     expect(sortRenderGroups(groups, 'count').map((g) => g.name)).toEqual(['Row', 'Other']);
     expect(sortRenderGroups(groups, 'time')).toHaveLength(2);

@@ -64,7 +64,9 @@ const NetworkCauses = ({ group }: { group: RenderGroup }) => (
     {group.causes.slice(0, 3).map((c) => (
       <RequestLink key={c.record.id} record={c.record}>
         <Muted>
-          ⇠ <RequestTitle record={c.record} /> 응답으로 렌더 {c.direct + c.parent}회{c.parent > 0 && ` (그중 부모를 따라 ${c.parent}회)`}
+          ⇠ <RequestTitle record={c.record} /> 응답으로 렌더 {c.direct + c.timing + c.parent}회
+          {c.parent > 0 && ` (그중 부모를 따라 ${c.parent}회)`}
+          {c.timing > 0 && ` · 그중 응답 직후 state 변경(시간으로 추정) ${c.timing}회`}
           {c.sameResponse > 0 && ` · 그중 직전과 같은 응답으로 ${c.sameResponse}회`} <ClassBadge record={c.record} />
         </Muted>
       </RequestLink>

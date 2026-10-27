@@ -19,11 +19,12 @@ export const RENDER_REASONS: readonly RenderReason[] = ['mount', 'state', 'conte
 /**
  * 이 렌더가 네트워크 응답 때문인지. 렌더는 네트워크와 무관할 수 있으므로 근거가 있을 때만 붙인다.
  * - direct: 새로 바뀐 state·props·context 안에 최근(3초 안) 도착한 응답의 객체가 있다
+ * - timing: 응답 객체는 못 찾았지만(가공해 넣었거나 빈 배열) 응답이 도착한 직후 자기 state 가 바뀌었다(시간으로 추정)
  * - parent: 같은 commit 에서 네트워크 응답 때문에 렌더된 조상을 따라 렌더됐다
  */
 export interface NetworkCause {
   record: RequestRecord;
-  via: 'direct' | 'parent';
+  via: 'direct' | 'timing' | 'parent';
 }
 
 /** 렌더를 시작한 컴포넌트: 자기 state·context 가 바뀌었거나 새로 붙은 가장 가까운 조상(부모를 따라 렌더된 자손이 이어받는다) */
@@ -103,6 +104,8 @@ export interface OriginImpact {
 export interface NetworkCauseCount {
   record: RequestRecord;
   direct: number;
+  /** 응답 도착 직후의 자기 state 변경(시간으로 추정) */
+  timing: number;
   parent: number;
   /** 그중 직전과 똑같은 응답(같은 응답 재요청)으로 일어난 렌더 */
   sameResponse: number;
