@@ -145,7 +145,7 @@ dev 환경 전용이라 요청과 응답의 원문을 보관해도 됩니다. �
 
 ### 4.7 렌더를 시작한 조상
 
-"부모를 따라 렌더"만 보여 주면 어디를 고칠지 모릅니다. commit 을 위에서 아래로 내려가며, 스스로 렌더를 시작한 컴포넌트(state·context 변경, mount)를 자손에게 물려줍니다. props 변경이나 부모를 따라 렌더된 자손은 그 조상을 이어받습니다. 렌더 탭과 보고서에 "렌더 시작: <ProjectPanelContent>(state) 24회" 로 보이고, 고칠 곳은 대개 이 조상의 setState 입니다. 같은 응답(직전과 똑같은 본문)으로 일어난 렌더는 따로 셉니다. 그리는 JSX 위치는 dev 빌드의 `_debugSource` 로 붙입니다(React 19 처럼 없으면 생략).
+"부모를 따라 렌더"만 보여 주면 어디를 고칠지 모릅니다. commit 을 위에서 아래로 내려가며, 스스로 렌더를 시작한 컴포넌트(state·context 변경, mount)를 자손에게 물려줍니다. props 변경이나 부모를 따라 렌더된 자손은 그 조상을 이어받습니다. 렌더 탭과 보고서에 "렌더 시작: <ProjectList>(state) 24회" 로 보이고, 고칠 곳은 대개 이 조상의 setState 입니다. 같은 응답(직전과 똑같은 본문)으로 일어난 렌더는 따로 셉니다. 그리는 JSX 위치는 dev 빌드의 `_debugSource` 로 붙입니다(React 19 처럼 없으면 생략).
 
 ### 4.8 React Query 캐시키 점검
 
@@ -158,7 +158,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 
 - **보고서.** `window.__RDX__.report()` 와, dev 서버 플러그인(`react-data-xray/vite`, `react-data-xray/middleware`)이 5초마다 쓰는 `.rdx/report.json`. 응답 본문과 헤더는 넣지 않습니다. `reset()` 으로 측정을 새로 시작하고 `snapshot(이름)` 으로 `.rdx/<이름>.json` 을 따로 남겨 고치기 전후를 비교합니다.
 - **보내기 전 확인.** 플러그인이 없는 dev 서버는 `/__rdx/report` 를 원격 백엔드로 프록시할 수 있습니다(whatap-front 가 그렇습니다). 그래서 본문 없는 GET 으로 미들웨어 표시 헤더를 확인한 뒤에만 보냅니다. 미들웨어는 Host 를 로컬 이름·IP·`allowedHosts` 로 제한하고(DNS 리바인딩), Origin 을 포트까지 비교하며, 임시 파일에 쓴 뒤 이름을 바꿉니다.
-- **원본 위치.** 호출 스택의 http 프레임을 모듈의 `sourceMappingURL` 로 원본 위치(`rest/global.ts:935`)로 바꿉니다. 세 모델 감사에서 "줄 번호가 원본과 다르다"가 공통 지적이었습니다.
+- **원본 위치.** 호출 스택의 http 프레임을 모듈의 `sourceMappingURL` 로 원본 위치(`src/api/client.ts:42`)로 바꿉니다. 세 모델 감사에서 "줄 번호가 원본과 다르다"가 공통 지적이었습니다.
 - **AI 스킬.** `skills/rdx-perf/SKILL.md`: 측정 → 결과 읽기 → 원인 확인 → 처방 → 다시 측정의 순서와 지킬 것.
 - **탭 단위 유지.** 패널 열림·박스·관점과 요청 기록을 sessionStorage 에 둡니다. 요청 기록은 페이지를 떠날 때 저장하고(응답 객체 제외, 원문 10KB·전체 500KB, 비밀번호·토큰 가림), 되살린 뒤 저장소를 비웁니다. 주기 판정은 페이지 로드별로 해서 새로고침 사이 간격이 주기를 깨지 않게 합니다.
 

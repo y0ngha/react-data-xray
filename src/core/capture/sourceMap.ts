@@ -108,7 +108,7 @@ const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   if (!map?.mappings || !map.sources) return null;
   const root = map.sourceRoot ? map.sourceRoot.replace(/\/?$/, '/') : '';
   const base = entryBase();
-  // sources 는 소스맵(또는 모듈) 위치 기준 상대 경로일 수 있다(Vite: "global.ts"). 모듈 주소 기준으로 풀어 경로를 살린다.
+  // sources 는 소스맵(또는 모듈) 위치 기준 상대 경로일 수 있다(Vite: "client.ts"). 모듈 주소 기준으로 풀어 경로를 살린다.
   return { sources: map.sources.map((s) => sourcePath(`${root}${s}`, scriptUrl, base)), lines: parseMappings(map.mappings) };
 };
 

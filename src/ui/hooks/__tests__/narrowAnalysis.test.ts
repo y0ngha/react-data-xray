@@ -12,9 +12,9 @@ it('분석 대상이 쓰는 요청과 같은 요청(메서드·URL·본문)의 �
     finishRecord(r, 200);
     return r;
   };
-  send('/api/card?pcode=1');
-  const latest = send('/api/card?pcode=1');
-  send('/api/card?pcode=2');
+  send('/api/card?id=1');
+  const latest = send('/api/card?id=1');
+  send('/api/card?id=2');
   send('/api/other');
   const records = getRecords();
   const classes = classifyRecords(records, new Set());
@@ -28,6 +28,6 @@ it('분석 대상이 쓰는 요청과 같은 요청(메서드·URL·본문)의 �
     wasteCount: 0,
   };
   const narrowed = narrowAnalysis(all, new Set([requestKeyOf(latest)]));
-  expect(narrowed.records.map((r) => r.url)).toEqual(['/api/card?pcode=1', '/api/card?pcode=1']);
+  expect(narrowed.records.map((r) => r.url)).toEqual(['/api/card?id=1', '/api/card?id=1']);
   expect(narrowed.stats).toHaveLength(1);
 });

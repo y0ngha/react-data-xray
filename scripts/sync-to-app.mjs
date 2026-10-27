@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 빌드한 dist 를 이 패키지를 file: 로 쓰는 앱의 node_modules 에 반영한다.
 // 같은 버전으로 덮어쓰면 Vite 의 사전 번들 캐시와 브라우저 캐시가 이전 코드를 계속 쓰므로 Vite 캐시 파일도 지운다.
-// 사용법: pnpm sync <앱 디렉터리>   예) pnpm sync ~/Projects/whatap-front/.worktrees/rdx/apps/whatap-front
+// 사용법: pnpm sync <앱 디렉터리>   예) pnpm sync ../my-app
 import { cpSync, existsSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
