@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
-import { StrictMode, useEffect, useState } from 'react';
+import { createContext, StrictMode, useContext, useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_BODY, flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
@@ -127,6 +127,26 @@ describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => 
     render(<Summary data={summary} />);
     const result = inspect(screen.getByText('4,321'));
     expect(result.components[0].hits[0]).toMatchObject({ path: '$.total', match: 'exact' });
+  });
+
+  it('context 로만 내려받은 응답 데이터도 출처를 찾고, 요청을 쓰는 컴포넌트로 알려 준다', async () => {
+    const UserContext = createContext<{ name: string } | null>(null);
+    UserContext.displayName = 'UserContext';
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ user: { name: 'kim', team: 'ops' } }));
+    const json = await fetch('/api/me').then((r) => r.json());
+    const Badge = () => <span>{useContext(UserContext)?.name}</span>;
+    render(
+      <UserContext.Provider value={json.user}>
+        <div>
+          <Badge />
+        </div>
+      </UserContext.Provider>,
+    );
+    const result = inspect(screen.getByText('kim'));
+    expect(result.components[0]).toMatchObject({ name: 'Badge' });
+    expect(result.components[0].hits[0]).toMatchObject({ via: 'context(UserContext)', path: '$.user.name', match: 'exact' });
+    const record = getRecords().find((r) => r.url === '/api/me')!;
+    expect(findConsumers(record, () => false).map((c) => [c.name, c.via])).toContainEqual(['Badge', 'context(UserContext)']);
   });
 
   it('이름이 같은 조상 컴포넌트가 여러 개여도 깊이로 구분한다', async () => {

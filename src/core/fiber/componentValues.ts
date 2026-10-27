@@ -33,8 +33,18 @@ const hookValue = (hook: Hook, index: number): ComponentValue => {
     : { via: `hook[${index}]`, value: hook.memoizedState };
 };
 
-/** 컴포넌트가 들고 있는 값들: props, 훅 state(함수형), state(클래스형) */
+/** 이 컴포넌트가 읽는 context 값들(useContext). 응답을 Provider 로 내려 주는 앱에서도 출처를 찾게 한다. */
+const contextValues = (fiber: Fiber): ComponentValue[] => {
+  const values: ComponentValue[] = [];
+  for (let dep = fiber.dependencies?.firstContext ?? null; dep; dep = dep.next) {
+    values.push({ via: `context(${dep.context?.displayName || 'Context'})`, value: dep.memoizedValue });
+  }
+  return values;
+};
+
+/** 컴포넌트가 들고 있는 값들: props, 훅 state(함수형), state(클래스형), 읽는 context 값 */
 export const collectValues = (fiber: Fiber): ComponentValue[] => [
   { via: 'props', value: fiber.memoizedProps },
   ...(fiber.tag === CLASS_COMPONENT ? [{ via: 'state', value: fiber.memoizedState }] : hooksOf(fiber).map(hookValue)),
+  ...contextValues(fiber),
 ];
