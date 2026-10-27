@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
-import { collectBoxes, inspect, inspectFiber, type Box, type Hit, type InspectResult } from './inspect.js';
+import { collectBoxes, findConsumers, inspect, inspectFiber, type Box, type Consumer, type Hit, type InspectResult } from './inspect.js';
 import { endpointOf, getRecords, pathOf as shortUrl, subscribe, type RequestRecord } from './registry.js';
 import { CLASS_LABEL, classifyRecords, isInitialLoad, isWaste, needsReview, type RequestClass } from './classify.js';
 import { getCommits, getRenderInfo, getTopRenders, setRenderMonitoring, subscribeCommits, type RenderReason, type RenderSummary } from './renderMonitor.js';
@@ -138,11 +138,17 @@ interface Focus {
 
 const OpenRequestContext = createContext<(record: RequestRecord, focus?: Focus) => void>(() => undefined);
 
-/** 감싼 내용을 클릭하면 그 요청의 상세 화면을 연다. */
+/** 호버한 요청. 그 응답 데이터를 쓰는 컴포넌트를 화면에서 강조한다. */
+const HoverRequestContext = createContext<(record: RequestRecord | null) => void>(() => undefined);
+
+/** 감싼 내용을 클릭하면 그 요청의 상세 화면을 열고, 호버하면 이 요청의 데이터를 쓰는 컴포넌트를 강조한다. */
 const RequestLink = ({ record, focus, children }: { record: RequestRecord; focus?: Focus; children: ReactNode }) => {
   const openRequest = useContext(OpenRequestContext);
+  const hoverRequest = useContext(HoverRequestContext);
   return (
     <div
+      onMouseEnter={() => hoverRequest(record)}
+      onMouseLeave={() => hoverRequest(null)}
       role="button"
       tabIndex={0}
       title="클릭하면 요청 상세(헤더, Request/Response Body)를 봅니다"
@@ -236,6 +242,27 @@ const queryParamsOf = (url: string): Record<string, string> | undefined => {
   }
 };
 
+/** 이 요청의 데이터를 쓰는 컴포넌트를 이름별로 센다. 호버하면 화면에서 강조한다. */
+const ConsumerList = ({ record }: { record: RequestRecord }) => {
+  const hoverRequest = useContext(HoverRequestContext);
+  const [consumers] = useState(() => findConsumers(record, (el) => isOwnUi(el)));
+  const counts = new Map<string, { count: number; via: string }>();
+  for (const c of consumers) counts.set(c.name, { count: (counts.get(c.name)?.count ?? 0) + 1, via: c.via });
+  return (
+    <Section title={`이 요청의 데이터를 쓰는 컴포넌트 (${consumers.length})`}>
+      <div onMouseEnter={() => hoverRequest(record)} onMouseLeave={() => hoverRequest(null)} style={preStyle}>
+        {consumers.length === 0 && <div style={{ color: color.muted }}>지금 화면에서 이 응답 객체를 들고 있는 컴포넌트를 찾지 못했습니다(가공된 데이터일 수 있습니다).</div>}
+        {Array.from(counts).map(([name, { count, via }]) => (
+          <div key={name}>
+            &lt;{name}&gt; {count > 1 && `× ${count}`} <span style={{ color: color.muted }}>← {via}</span>
+          </div>
+        ))}
+        {consumers.length > 0 && <div style={{ color: color.muted }}>여기에 마우스를 올리면 화면에서 강조합니다.</div>}
+      </div>
+    </Section>
+  );
+};
+
 export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord; focus?: Focus; onBack: () => void }) => {
   const requestBody = record.requestBody !== undefined ? prettyText(record.requestBody) : undefined;
   // 파싱된 응답 객체가 있으면 그것을 정렬해 보여 준다. 원문은 100KB 에서 잘려 JSON 으로 다시 읽히지 않을 수 있다.
@@ -265,6 +292,7 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
           {record.trigger === 'focus' ? '창 포커스·탭 전환 직후에 나간 요청입니다(라이브러리의 자동 재요청).' : '네트워크 재연결 직후에 나간 요청입니다.'}
         </div>
       )}
+      <ConsumerList record={record} />
       {record.stack && (
         <Section title="요청을 보낸 코드" copy={record.stack}>
           <pre style={preStyle}>{record.stack}</pre>
@@ -546,9 +574,11 @@ type RenderSort = 'count' | 'time' | 'avoidable';
 const REASON_LABEL: Record<RenderReason, string> = {
   mount: 'mount',
   state: 'state',
+  context: 'context',
   props: 'props',
   'same-content': '같은 내용 새 참조',
-  parent: '부모/context',
+  'new-callback': '새 콜백',
+  parent: '부모 렌더',
 };
 
 interface RenderGroup extends RenderSummary {
@@ -557,34 +587,55 @@ interface RenderGroup extends RenderSummary {
   fiber: unknown;
 }
 
+const union = (a: string[], b: string[]) => Array.from(new Set([...a, ...b]));
+
 /** 같은 컴포넌트가 여러 개 렌더되면(목록의 행 등) 이름별로 합친다. */
 const groupRenders = (): RenderGroup[] => {
   const grouped = new Map<string, RenderGroup>();
   for (const e of getTopRenders(500)) {
     const g = grouped.get(e.name);
     if (!g) {
-      grouped.set(e.name, { ...e, reasons: { ...e.reasons }, sameContentKeys: [...e.sameContentKeys], instances: 1 });
+      grouped.set(e.name, { ...e, reasons: { ...e.reasons }, causes: e.causes.map((c) => ({ ...c })), instances: 1 });
       continue;
     }
     g.recent += e.recent;
     g.ms += e.ms;
     g.avoidable += e.avoidable;
+    g.network += e.network;
     g.instances++;
     for (const r of Object.keys(g.reasons) as RenderReason[]) g.reasons[r] += e.reasons[r];
-    g.sameContentKeys = Array.from(new Set([...g.sameContentKeys, ...e.sameContentKeys]));
+    g.sameContentKeys = union(g.sameContentKeys, e.sameContentKeys);
+    g.callbackKeys = union(g.callbackKeys, e.callbackKeys);
+    g.contextKeys = union(g.contextKeys, e.contextKeys);
+    for (const c of e.causes) {
+      const same = g.causes.find((x) => endpointOf(x.record) === endpointOf(c.record));
+      if (same) {
+        same.direct += c.direct;
+        same.parent += c.parent;
+      } else g.causes.push({ ...c });
+    }
   }
   return Array.from(grouped.values());
 };
 
-/** 줄일 수 있는 렌더가 있으면 어떻게 줄일지 한 줄로 알려 준다. */
-const renderAdvice = (g: RenderGroup): string | null => {
-  if (g.reasons['same-content'] > 0 && g.reasons['same-content'] >= g.reasons.parent) {
-    return `${g.sameContentKeys.map((k) => `props.${k}`).join(', ')} 가 내용은 같은데 새 객체로 내려옵니다. 부모에서 useMemo 로 참조를 유지하거나, 응답을 구조적 공유(React Query select 등)로 받으세요.`;
+const propsList = (keys: string[]) => keys.map((k) => `props.${k}`).join(', ');
+
+/** 줄일 수 있거나 점검할 렌더가 있으면 어떻게 줄일지 알려 준다. 렌더는 네트워크와 무관하게도 비효율적일 수 있다. */
+const renderAdvice = (g: RenderGroup): string[] => {
+  const advice: string[] = [];
+  if (g.reasons['same-content'] > 0) {
+    advice.push(`${propsList(g.sameContentKeys)} 가 내용은 같은데 새 객체로 내려옵니다. 부모에서 useMemo 로 참조를 유지하거나, 응답을 구조적 공유(React Query select 등)로 받으세요.`);
   }
-  if (g.reasons.parent > 0) {
-    return 'props 와 state 가 그대로인데 렌더됐습니다(부모 렌더 또는 context 변경). React.memo 로 감싸거나, 바뀌지 않는 context 를 나누세요.';
+  if (g.reasons['new-callback'] > 0) {
+    advice.push(`${propsList(g.callbackKeys)} 에 렌더마다 새 함수가 내려옵니다. 부모에서 useCallback 으로 감싸세요.`);
   }
-  return null;
+  if (g.reasons.parent > 0 && !g.memoized) {
+    advice.push('props·state·context 가 그대로인데 부모가 렌더돼서 같이 렌더됐습니다. React.memo 로 감싸면 줄일 수 있습니다.');
+  }
+  if (g.reasons.context > 0) {
+    advice.push(`읽고 있는 context(${g.contextKeys.join(', ')}) 값이 바뀌어 렌더됐습니다. React.memo 로는 줄지 않습니다. 자주 바뀌는 값과 아닌 값을 다른 context 로 나누거나, Provider 의 value 를 useMemo 로 감싸세요.`);
+  }
+  return advice;
 };
 
 const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: Map<string, EndpointStat> }) => {
@@ -623,6 +674,7 @@ const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: Map<string, Endpoint
         const hit = inspectFiber(g.fiber as never)[0];
         const stat = hit ? statsByEndpoint.get(endpointOf(hit.record)) : undefined;
         const advice = renderAdvice(g);
+        const nonNetwork = g.recent - g.network;
         return (
           <div key={i} style={{ padding: '4px 0', borderTop: `1px solid ${color.border}` }}>
             <div>
@@ -637,11 +689,27 @@ const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: Map<string, Endpoint
                 .map((r) => `${REASON_LABEL[r]} ${g.reasons[r]}`)
                 .join(' · ')}
             </div>
-            {advice && <div style={{ color: color.review }}>{advice}</div>}
+            {advice.map((text, j) => (
+              <div key={j} style={{ color: color.review }}>
+                · {text}
+              </div>
+            ))}
+            {/* 렌더는 네트워크와 무관할 수 있다. 응답 객체로 근거가 확인된 것만 네트워크 원인으로 보여 준다. */}
+            <div style={{ color: color.muted }}>
+              네트워크 응답으로 {g.network}회 · 네트워크와 무관 {nonNetwork}회
+            </div>
+            {g.causes.slice(0, 3).map((c, j) => (
+              <RequestLink key={j} record={c.record}>
+                <div style={{ color: color.muted }}>
+                  ⇠ <u>{c.record.method} {shortUrl(c.record.url)}</u> 응답으로 렌더 {c.direct + c.parent}회
+                  {c.parent > 0 && ` (그중 부모를 따라 ${c.parent}회)`} <ClassBadge record={c.record} />
+                </div>
+              </RequestLink>
+            ))}
             {hit && (
               <RequestLink record={hit.record}>
                 <div style={{ color: color.muted }}>
-                  ← <u>{hit.record.method} {shortUrl(hit.record.url)}</u> <ClassBadge record={hit.record} />
+                  데이터 출처 ← <u>{hit.record.method} {shortUrl(hit.record.url)}</u> <ClassBadge record={hit.record} />
                   {stat && stat.duplicates > 0 && <Badge c={color.warn}>중복 {stat.duplicates}</Badge>}
                   {stat && stat.sameResponses > 0 && <Badge c={color.warn}>같은 응답 {stat.sameResponses}</Badge>}
                 </div>
@@ -685,6 +753,7 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
   const [paused, setPaused] = useState(false);
   const [hovered, setHovered] = useState<{ record: RequestRecord; x: number; y: number } | null>(null);
   const openRequest = useContext(OpenRequestContext);
+  const hoverRequest = useContext(HoverRequestContext);
   const classOf = useContext(ClassContext);
   // 도킹 방식에 따라 패널 너비가 달라지므로 그릴 때마다 실제 너비를 잰다.
   const boxRef = useRef<HTMLDivElement>(null);
@@ -765,7 +834,11 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
               fill={fill}
               stroke={hovered?.record === r ? '#fff' : undefined}
               style={{ cursor: 'pointer' }}
-              onMouseEnter={() => setHovered({ record: r, x: x(r.startedAt), y: lane * (LANE_H + 2) + LANE_H + 6 })}
+              onMouseEnter={() => {
+                setHovered({ record: r, x: x(r.startedAt), y: lane * (LANE_H + 2) + LANE_H + 6 });
+                hoverRequest(r);
+              }}
+              onMouseLeave={() => hoverRequest(null)}
               onClick={() => openRequest(r)}
             />
           );
@@ -819,6 +892,43 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
         막대에 마우스를 올리면 요청 정보가, 클릭하면 상세(헤더, Request/Response Body)가 보입니다. 요청이 몰린 직후 렌더 눈금이 연달아 찍히면 요청마다 따로 렌더되고 있다는 뜻입니다.
       </div>
     </div>
+  );
+};
+
+// ---- 요청 → 컴포넌트 강조 ----
+
+const CONSUMER_COLOR = '#fb923c';
+
+/** 호버한 요청의 응답 데이터를 쓰는 컴포넌트를 주황 점선으로 강조한다. */
+const ConsumerHighlight = ({ record }: { record: RequestRecord }) => {
+  const [consumers, setConsumers] = useState<Consumer[]>([]);
+  useEffect(() => setConsumers(findConsumers(record, (el) => isOwnUi(el))), [record]);
+  return (
+    <>
+      {consumers.map(
+        (c, i) =>
+          c.rect && (
+            <div
+              key={i}
+              style={{
+                position: 'fixed',
+                left: c.rect.left,
+                top: c.rect.top,
+                width: c.rect.width,
+                height: c.rect.height,
+                outline: `2px dashed ${CONSUMER_COLOR}`,
+                background: `${CONSUMER_COLOR}1f`,
+                pointerEvents: 'none',
+                zIndex: Z - 1,
+              }}
+            >
+              <span style={{ position: 'absolute', right: 0, top: 0, background: CONSUMER_COLOR, color: '#000', font: '10px/1.4 ui-monospace, Menlo, monospace', padding: '0 3px' }}>
+                &lt;{c.name}&gt;
+              </span>
+            </div>
+          ),
+      )}
+    </>
   );
 };
 
@@ -1078,6 +1188,7 @@ export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsP
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const [result, setResult] = useState<InspectResult | null>(null);
   const [selected, setSelected] = useState<{ record: RequestRecord; focus?: Focus } | null>(null);
+  const [hoveredRecord, setHoveredRecord] = useState<RequestRecord | null>(null);
   const openRequest = (record: RequestRecord, focus?: Focus) => {
     setOpen(true);
     setSelected({ record, focus });
@@ -1243,9 +1354,11 @@ export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsP
 
   return createPortal(
     <ClassContext.Provider value={classOf}>
+    <HoverRequestContext.Provider value={setHoveredRecord}>
     <OpenRequestContext.Provider value={openRequest}>
     <div {...{ [ROOT_ATTR]: '' }}>
       {showAll && <Overlay />}
+      {hoveredRecord && <ConsumerHighlight record={hoveredRecord} />}
       {hoverRect && (
         <div
           style={{
@@ -1293,6 +1406,7 @@ export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsP
       </button>
     </div>
     </OpenRequestContext.Provider>
+    </HoverRequestContext.Provider>
     </ClassContext.Provider>,
     document.body,
   );

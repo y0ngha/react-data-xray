@@ -1,4 +1,4 @@
-import { getBodyVersion, getOrigin, getRecords, type Origin, type RequestRecord } from './registry.js';
+import { getBodyVersion, getOrigin, getRecords, requestKeyOf, type Origin, type RequestRecord } from './registry.js';
 
 // React 내부 구조(fiber)는 공개 API가 아니다. 18, 19에서 같은 필드를 쓴다.
 interface Fiber {
@@ -362,4 +362,53 @@ export const collectBoxes = (isOwnUi: (el: Element) => boolean): Box[] => {
   };
   for (const root of findRootFibers()) visit(root.child, null);
   return boxes;
+};
+
+// ---- 요청 → 컴포넌트: 이 요청의 응답 데이터를 쓰는 컴포넌트를 찾는다 ----
+
+export interface Consumer {
+  name: string;
+  rect: DOMRect | null;
+  /** 컴포넌트 안에서 데이터가 있던 곳. 예: props.item, useQuery */
+  via: string;
+}
+
+const MAX_CONSUMERS = 300;
+const MAX_CONSUMER_DEPTH = 3;
+
+/**
+ * 같은 요청(메서드·URL·payload)의 응답 객체를 props·훅 state 로 들고 있는 컴포넌트.
+ * React Query 는 응답이 같으면 이전 객체를 재사용하므로, 이 요청 하나가 아니라 같은 요청의 이전 응답까지 함께 본다.
+ */
+export const findConsumers = (record: RequestRecord, isOwnUi: (el: Element) => boolean): Consumer[] => {
+  const key = requestKeyOf(record);
+  const consumers: Consumer[] = [];
+  const holds = (root: unknown): boolean => {
+    const seen = new WeakSet<object>();
+    const walk = (value: unknown, depth: number): boolean => {
+      if (value === null || typeof value !== 'object' || seen.has(value)) return false;
+      if (typeof Node !== 'undefined' && value instanceof Node) return false;
+      seen.add(value);
+      const origin = getOrigin(value);
+      if (origin) return requestKeyOf(origin.record) === key;
+      if (depth >= MAX_CONSUMER_DEPTH || (value as { $$typeof?: unknown }).$$typeof) return false;
+      const children = Array.isArray(value) ? value.slice(0, 100) : Object.values(value).slice(0, 100);
+      return children.some((child) => walk(child, depth + 1));
+    };
+    return walk(root, 0);
+  };
+  const visit = (fiber: Fiber | null) => {
+    for (let f = fiber; f && consumers.length < MAX_CONSUMERS; f = f.sibling) {
+      if (COMPOSITE_TAGS.has(f.tag)) {
+        const found = collectValues(f).find(({ value }) => holds(value));
+        if (found) {
+          const nodes = hostNodesOf(f).filter((n) => !isOwnUi(n));
+          if (nodes.length > 0) consumers.push({ name: getComponentName(f), rect: unionRect(nodes), via: found.via });
+        }
+      }
+      visit(f.child);
+    }
+  };
+  for (const root of findRootFibers()) visit(root.child);
+  return consumers;
 };

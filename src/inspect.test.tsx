@@ -4,7 +4,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { install, serializeBody } from './capture.js';
-import { collectBoxes, inspect } from './inspect.js';
+import { collectBoxes, findConsumers, inspect } from './inspect.js';
 import { clearRecords, getRecords } from './registry.js';
 
 // 파생 매칭은 의미 있는 필드 값이 2개 이상 같아야 하므로 id 를 두 자리 이상으로 둔다.
@@ -194,6 +194,19 @@ describe('inspect', () => {
     expect(inspect(p).components[0].hits).toEqual([
       expect.objectContaining({ path: '$.data.list[0]', via: 'props.region, props.role', match: 'exact' }),
     ]);
+  });
+
+  it('요청의 응답 데이터를 쓰는 컴포넌트를 찾는다(같은 요청의 이전 응답 포함)', async () => {
+    render(<EffectList />);
+    await screen.findByText('메모리 경고');
+    const record = getRecords().find((r) => r.url === '/api/events')!;
+    const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 10, 10));
+
+    const names = findConsumers(record, () => false).map((c) => `${c.name} ${c.via}`);
+    spy.mockRestore();
+
+    // 목록은 응답 배열을 state 로, 행은 응답 항목을 props 로 들고 있다.
+    expect(names).toEqual(['EffectList hook[0]', 'Row props', 'Row props']);
   });
 
   it('StrictMode 가 effect 를 다시 실행해 생긴 중복은 호출 스택으로 알아본다', async () => {
