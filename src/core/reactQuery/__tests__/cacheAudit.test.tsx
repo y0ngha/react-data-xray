@@ -43,6 +43,18 @@ describe('React Query 캐시키 점검', () => {
     expect(found?.requests).toEqual(['GET /api/list?page=1', 'GET /api/list?page=2']);
   });
 
+  it('목록(배열) 응답도 두 번째 조회부터 출처를 잃지 않고 키에 빠진 인자를 찾는다', async () => {
+    // structural sharing 은 내용이 바뀐 배열을 새로 복사한다. 점검을 사이에 부르지 않는다(앱에서처럼).
+    mockFetch.mockImplementation(async (input) => jsonResponse([{ symbol: String(input), name: `name ${String(input)}` }]));
+    const client = new QueryClient();
+    withClient(client, <p>app</p>);
+    findQueryClients();
+    await client.fetchQuery({ queryKey: ['search'], queryFn: load('/api/search?q=aapl'), staleTime: 0 });
+    await client.fetchQuery({ queryKey: ['search'], queryFn: load('/api/search?q=msft'), staleTime: 0 });
+    const found = auditQueryCache(sameOrOk, getRecords()).find((f) => f.kind === 'key-missing-param');
+    expect(found?.requests).toEqual(['GET /api/search?q=aapl', 'GET /api/search?q=msft']);
+  });
+
   it('setQueryData 로 직접 넣은 데이터는 요청으로 세지 않는다(수정 응답으로 캐시를 갱신하는 정상 패턴)', async () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
@@ -89,7 +101,23 @@ describe('React Query 캐시키 점검', () => {
     const misses = auditQueryCache(sameOrOk, getRecords()).filter((f) => f.kind === 'invalidate-miss');
     expect(misses.map((f) => f.keys[0])).toEqual(['["todo"]']);
     expect(misses[0].stack).toContain('cacheAudit.test');
+    // 첫 줄이 앱 코드다(rdx 가 감싼 프레임이 아니다).
+    expect(misses[0].stack?.split('\n')[0]).toContain('cacheAudit.test');
+    expect(misses[0].stack).not.toContain('recordInvalidate');
     expect(client.getQueryState(['todos', 1])?.isInvalidated).toBe(true);
+  });
+
+  it('staleTime 0 인 쿼리가 2초 안에(중복으로 분류) 같은 응답을 다시 받아도 알린다', async () => {
+    mockFetch.mockImplementation(async () => jsonResponse({ same: true }));
+    const client = new QueryClient();
+    const View = () => <p>{useQuery({ queryKey: ['config'], queryFn: load('/api/config') }).data ? 'ready' : ''}</p>;
+    withClient(client, <View />);
+    await screen.findByText('ready');
+    await act(() => client.refetchQueries({ queryKey: ['config'] }));
+    await act(flush);
+    await waitFor(() => expect(getRecords().some((r) => r.sameResponseAs)).toBe(true));
+    const dupOrOk = (r: RequestRecord): RequestClass => (r.sameResponseAs ? 'duplicate' : 'ok');
+    expect(auditQueryCache(dupOrOk, getRecords()).some((f) => f.kind === 'stale-zero')).toBe(true);
   });
 
   it('staleTime 0 인 쿼리가 같은 응답을 다시 받으면 알린다', async () => {

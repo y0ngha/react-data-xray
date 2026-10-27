@@ -3,7 +3,7 @@ import { findDerivedOrigin, flushIndex } from '../inspect/derivedMatch.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
-import type { RequestRecord } from '../requests/types.js';
+import type { Origin, RequestRecord } from '../requests/types.js';
 
 /**
  * React Query 캐시키 설계 점검. react-query 를 import 하지 않고 객체 모양으로 알아본다(패키지에 의존하지 않기 위해).
@@ -108,9 +108,27 @@ export const resetCacheAudit = (): void => {
 
 const describeRequest = (r: RequestRecord): string => `${r.method} ${r.url}`;
 
+// 배열의 출처를 항목으로 찾을 때 볼 항목 수
+const MAX_ITEMS_TO_MATCH = 5;
+
+/**
+ * 캐시 데이터의 출처. structural sharing 은 이전 데이터와 다르면 배열·객체를 새로 복사한다. 객체는 필드 값(파생)으로 찾지만
+ * 배열은 파생 매칭이 없어, 목록 응답([...])은 두 번째 조회부터 출처를 잃었다. 배열이면 항목의 출처에서 요청을 찾는다.
+ */
+const originOfData = (data: object): Origin | undefined => {
+  const direct = getOrigin(data) ?? findDerivedOrigin(data) ?? undefined;
+  if (direct || !Array.isArray(data)) return direct;
+  for (const item of data.slice(0, MAX_ITEMS_TO_MATCH)) {
+    if (item === null || typeof item !== 'object') continue;
+    const origin = getOrigin(item) ?? findDerivedOrigin(item);
+    if (origin) return origin;
+  }
+  return undefined;
+};
+
 /** 쿼리 함수가 가져온 데이터의 요청. 같은 참조가 아니면(structural sharing 이 복사) 필드 값으로 찾되, 성공 직전에 끝난 요청만 */
 const fetchedRequest = (data: object, at: number): RequestRecord | undefined => {
-  const record = (getOrigin(data) ?? findDerivedOrigin(data))?.record;
+  const record = originOfData(data)?.record;
   const finished = record ? record.startedAt + record.durationMs : -Infinity;
   return record && finished <= at && at - finished <= FETCH_WINDOW_MS ? record : undefined;
 };
@@ -163,12 +181,24 @@ const resolvePending = (history: ClientHistory): void => {
   history.pending = [];
 };
 
+/** 앱에서 invalidateQueries 를 부른 위치. rdx 가 감싼 invalidateQueries 와 그 안쪽 프레임은 뺀다(앱 코드가 첫 줄에 오게). */
+const callerStack = (): string | undefined => {
+  const lines = (new Error().stack ?? '').split('\n').map((line) => line.trim());
+  const wrapper = lines.findIndex((line) => line.includes('invalidateQueries'));
+  return (
+    lines
+      .slice(wrapper + 1)
+      .filter((line) => line && line !== 'Error')
+      .join('\n') || undefined
+  );
+};
+
 const recordInvalidate = (history: ClientHistory, args: unknown[]): void => {
   const key = invalidatedKey(args);
   if (key === undefined || [...history.keys.values()].some((k) => partialMatch(key, k))) return;
   pushBounded(history.misses, {
     at: Date.now(),
-    finding: { kind: 'invalidate-miss', keys: [keyText(key)], requests: [], stack: new Error().stack },
+    finding: { kind: 'invalidate-miss', keys: [keyText(key)], requests: [], stack: callerStack() },
   });
 };
 
@@ -270,7 +300,7 @@ const staleFindings = (queries: readonly QueryLike[], sameResponse: ReadonlySet<
   queries.filter(refetchesOnEveryVisit).flatMap((q): CacheFinding[] => {
     const data = q.state.data;
     // queryFn 이 응답을 가공해 돌려줘도 찾도록 필드 값까지 본다.
-    const record = data !== null && typeof data === 'object' ? (getOrigin(data) ?? findDerivedOrigin(data))?.record : undefined;
+    const record = data !== null && typeof data === 'object' ? originOfData(data)?.record : undefined;
     return record && sameResponse.has(requestKeyOf(record))
       ? [{ kind: 'stale-zero', keys: [keyText(q.queryKey)], requests: [describeRequest(record)] }]
       : [];
@@ -283,7 +313,12 @@ export const auditQueryCache = (
   clients: readonly QueryClientLike[] = findQueryClients(),
 ): CacheFinding[] => {
   const now = Date.now();
-  const sameResponse = new Set(records.filter((r) => classOf(r) === 'same-response').map(requestKeyOf));
+  // 2초 안에 다시 받으면 '중복'으로 나뉘지만, 본문이 같았다면 staleTime 0 의 재요청과 같은 일이다(빠른 재마운트·화면 전환).
+  const sameResponse = new Set(
+    records
+      .filter((r) => classOf(r) === 'same-response' || (classOf(r) === 'duplicate' && r.sameResponseAs !== undefined))
+      .map(requestKeyOf),
+  );
   const fetched: Fetched[] = [];
   const others: CacheFinding[] = [];
   // 여러 QueryClient 를 쓰면 client 사이의 중복 캐시도 보도록 함께 판정한다.
