@@ -4,7 +4,7 @@ import { isComposite, type Fiber } from '../fiber/types.js';
 import { findDerivedOrigin, flushIndex } from './derivedMatch.js';
 import { findExactOrigins, isSameOrChildPath, type Candidate } from './exactMatch.js';
 import { mergeHits } from './mergeHits.js';
-import { guessByText } from './textMatch.js';
+import { guessByText, narrowToField } from './textMatch.js';
 import type { ComponentResult, Hit, InspectResult } from './types.js';
 
 // styled 래퍼, Tooltip 같은 중간 컴포넌트가 많아 데이터를 가진 컴포넌트까지 꽤 올라가야 한다.
@@ -54,7 +54,9 @@ export const inspect = (el: Element): InspectResult => {
   }
   const found = components.some((c) => c.hits.length > 0);
   const text = el.childElementCount === 0 ? (el.textContent ?? '') : '';
-  return { components, guesses: found ? [] : guessByText(text) };
+  // 글자를 눌렀으면 출처를 그 글자가 있는 필드까지 좁힌다.
+  const narrowed = text ? components.map((c) => ({ ...c, hits: c.hits.map((h) => narrowToField(h, text)) })) : components;
+  return { components: narrowed, guesses: found ? [] : guessByText(text) };
 };
 
 /** 요소를 고르면 분석 대상으로 삼을 컴포넌트: 데이터를 가진 가장 가까운 조상, 없으면 가장 가까운 컴포넌트 */

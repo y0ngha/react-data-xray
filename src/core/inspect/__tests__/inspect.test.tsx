@@ -52,7 +52,8 @@ describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => 
     render(<EffectList />);
     const result = inspect(await screen.findByText('메모리 경고'));
     expect(result.components[0].name).toBe('Row');
-    expect(result.components[0].hits[0]).toMatchObject({ path: '$.data.list[1]', via: 'props.item', match: 'exact' });
+    // 누른 글자가 있는 필드까지 좁힌다.
+    expect(result.components[0].hits[0]).toMatchObject({ path: '$.data.list[1].title', via: 'props.item', match: 'exact' });
     expect(result.components[0].hits[0].record).toMatchObject({ method: 'GET', url: '/api/events', status: 200 });
   });
 
@@ -73,7 +74,7 @@ describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => 
       </QueryClientProvider>,
     );
     const component = inspect(await screen.findByText('CPU 경고')).components.find((c) => c.name === 'QueryList');
-    expect(component?.hits[0]).toMatchObject({ path: '$', via: 'useQuery', queryKey: ['events', 'p1'], match: 'exact' });
+    expect(component?.hits[0]).toMatchObject({ path: '$.data.list[0].title', via: 'useQuery', queryKey: ['events', 'p1'], match: 'exact' });
   });
 
   it('가공돼 새 객체가 됐어도 필드 값이 2개 이상 겹치면 파생으로 찾는다', async () => {
@@ -84,7 +85,7 @@ describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => 
     };
     render(<Derived />);
     const result = inspect(await screen.findByText('메모리 경고'));
-    expect(result.components[0].hits[0]).toMatchObject({ path: '$.data.list[1]', via: 'props.item', match: 'derived' });
+    expect(result.components[0].hits[0]).toMatchObject({ path: '$.data.list[1].title', via: 'props.item', match: 'derived' });
   });
 
   it('필드 값이 하나만 같으면 파생으로 보지 않고, 화면 글자로 추정한다', async () => {
@@ -110,8 +111,21 @@ describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => 
     };
     render(<Holder />);
     expect(inspect(await screen.findByText('seoul')).components[0].hits).toEqual([
-      expect.objectContaining({ path: '$.list[0]', via: 'props.region, props.role', match: 'exact' }),
+      expect.objectContaining({ path: '$.list[0].region.name', via: 'props.region, props.role', match: 'exact' }),
     ]);
+  });
+
+  it('응답 전체를 받은 컴포넌트에서 글자를 누르면, 출처를 그 글자가 있는 필드까지 좁힌다', async () => {
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ total: 4321, label: 'servers' }));
+    const summary = await fetch('/api/summary-field').then((r) => r.json());
+    const Summary = ({ data }: { data: { total: number; label: string } }) => (
+      <p>
+        <b>{data.total.toLocaleString('en-US')}</b> <i>{data.label}</i>
+      </p>
+    );
+    render(<Summary data={summary} />);
+    const result = inspect(screen.getByText('4,321'));
+    expect(result.components[0].hits[0]).toMatchObject({ path: '$.total', match: 'exact' });
   });
 
   it('이름이 같은 조상 컴포넌트가 여러 개여도 깊이로 구분한다', async () => {

@@ -13,7 +13,7 @@ const respond = (url: string, body: unknown): RequestRecord => {
 import { findDerivedOrigin } from '../derivedMatch.js';
 import { findExactOrigins, isSameOrChildPath } from '../exactMatch.js';
 import { mergeHits } from '../mergeHits.js';
-import { guessByText } from '../textMatch.js';
+import { guessByText, narrowToField } from '../textMatch.js';
 import type { Hit } from '../types.js';
 
 describe('exactMatch', () => {
@@ -82,5 +82,18 @@ describe('textMatch', () => {
   it('최근 응답부터 같은 값을 찾는다', () => {
     const record = respond('/api/t', { list: [{ count: 42 }, null] });
     expect(guessByText(' 42 ')).toEqual([{ record, path: '$.list[0].count', via: 'text', match: 'text' }]);
+  });
+});
+
+describe('필드 수준 출처', () => {
+  it('클릭한 글자가 응답 안에 하나뿐이면 그 필드까지 좁히고, 여러 곳이면 그대로 둔다', () => {
+    const record = respond('/api/summary', { data: { summary: { total: 1234, normal: 0, paused: 0 }, title: 'CPU' } });
+    const hit: Hit = { record, path: '$', via: 'props.summary', match: 'derived' };
+    expect(narrowToField(hit, '1,234').path).toBe('$.data.summary.total');
+    expect(narrowToField(hit, ' CPU ').path).toBe('$.data.title');
+    // 0 은 두 필드에 있어 어느 것인지 모른다.
+    expect(narrowToField(hit, '0').path).toBe('$');
+    expect(narrowToField(hit, '없는 글자').path).toBe('$');
+    expect(narrowToField({ ...hit, path: '$.data.title' }, 'CPU').path).toBe('$.data.title');
   });
 });
