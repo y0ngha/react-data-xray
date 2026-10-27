@@ -50,7 +50,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
-  const signal = useProblemSignal(analysis.records, analysis.wasteCount);
+  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.wasteCount);
   const { open, show, hide, popup, settings, updateDock, saveDock, changeDock } = usePanelVisibility();
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
 
@@ -139,7 +139,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   return createPortal(
     <RequestActionsProvider value={actions}>
       <div {...ownUiProps}>
-        {boxesVisible && <SourceOverlay boxes={boxes} stats={analysis.statsByEndpoint} />}
+        {boxesVisible && <SourceOverlay boxes={boxes} records={scopedAnalysis.records} classes={scopedAnalysis.classes} />}
         {hovered && <ConsumerHighlight record={hovered} />}
         {pickRect && <PickHighlight rect={pickRect} />}
         {open && settings.dock !== 'window' && panel}

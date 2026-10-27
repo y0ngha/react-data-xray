@@ -54,8 +54,11 @@ export const inspect = (el: Element): InspectResult => {
   }
   const found = components.some((c) => c.hits.length > 0);
   const text = el.childElementCount === 0 ? (el.textContent ?? '') : '';
-  // 글자를 눌렀으면 출처를 그 글자가 있는 필드까지 좁힌다.
-  const narrowed = text ? components.map((c) => ({ ...c, hits: c.hits.map((h) => narrowToField(h, text)) })) : components;
+  // 글자를 눌렀으면 출처를 그 글자가 있는 필드까지 좁힌다. 누른 글자는 가장 가까운(데이터를 가진) 컴포넌트의 것이라
+  // 그 컴포넌트의 출처만 좁힌다(조상마다 큰 응답을 다시 훑지 않게).
+  const nearest = components.find((c) => c.hits.length > 0);
+  const narrowed =
+    text && nearest ? components.map((c) => (c === nearest ? { ...c, hits: c.hits.map((h) => narrowToField(h, text)) } : c)) : components;
   return { components: narrowed, guesses: found ? [] : guessByText(text) };
 };
 

@@ -25,7 +25,7 @@ const borderColor = (issues: number, alert: boolean): string => (alert ? color.r
 export const FloatingButton = ({ position, issues, alert, handlers }: FloatingButtonProps) => (
   <button
     type="button"
-    aria-label="React Data X-ray 열기"
+    aria-label={`React Data X-ray 열기${issues > 0 ? ` (문제 ${issues}개)` : ''}`}
     title={`React Data X-ray (드래그로 이동)${issues > 0 ? ` · 문제 ${issues}개` : ''}`}
     {...handlers}
     style={{

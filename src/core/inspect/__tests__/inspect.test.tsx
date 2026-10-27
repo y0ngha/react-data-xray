@@ -74,7 +74,8 @@ describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => 
       </QueryClientProvider>,
     );
     const component = inspect(await screen.findByText('CPU 경고')).components.find((c) => c.name === 'QueryList');
-    expect(component?.hits[0]).toMatchObject({ path: '$.data.list[0].title', via: 'useQuery', queryKey: ['events', 'p1'], match: 'exact' });
+    // 조상 컴포넌트의 출처는 필드까지 좁히지 않는다(누른 글자는 가장 가까운 Row 의 것).
+    expect(component?.hits[0]).toMatchObject({ path: '$', via: 'useQuery', queryKey: ['events', 'p1'], match: 'exact' });
   });
 
   it('가공돼 새 객체가 됐어도 필드 값이 2개 이상 겹치면 파생으로 찾는다', async () => {

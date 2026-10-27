@@ -41,10 +41,17 @@ export const wasteCount = (stat: EndpointStat): number => stat.duplicates + stat
 
 export const isWastefulStat = (stat: EndpointStat | undefined): boolean => !!stat && wasteCount(stat) > 0;
 
-/** 엔드포인트별 호출 수와 낭비 지표. 낭비가 많은 순, 그다음 호출이 많은 순 */
-export const getEndpointStats = (records: readonly RequestRecord[], classes: ReadonlyMap<number, RequestClass>): EndpointStat[] => {
+/**
+ * 엔드포인트별 호출 수와 낭비 지표. 낭비가 많은 순, 그다음 호출이 많은 순.
+ * keyOf 를 requestKeyOf 로 주면 같은 요청(쿼리·본문까지 같은 것)별로 센다(박스 라벨용).
+ */
+export const getEndpointStats = (
+  records: readonly RequestRecord[],
+  classes: ReadonlyMap<number, RequestClass>,
+  keyOf: (record: RequestRecord) => string = endpointOf,
+): EndpointStat[] => {
   const byEndpoint = records.reduce((acc, r) => {
-    const endpoint = endpointOf(r);
+    const endpoint = keyOf(r);
     return acc.set(endpoint, tally(acc.get(endpoint) ?? emptyStat(endpoint), r.durationMs, classes.get(r.id)));
   }, new Map<string, EndpointStat & { totalMs: number }>());
   return Array.from(byEndpoint.values(), ({ totalMs, ...stat }): EndpointStat =>

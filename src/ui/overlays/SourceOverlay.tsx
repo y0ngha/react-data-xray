@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { unionRect } from '../../core/fiber/tree.js';
 import type { Box } from '../../core/inspect/types.js';
@@ -6,8 +6,9 @@ import { getRenderInfo, subscribeCommits } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { isWaste } from '../../core/requests/classify.js';
-import { endpointOf, pathOf } from '../../core/requests/requestKey.js';
-import { statSummary, type EndpointStat } from '../../core/requests/endpointStats.js';
+import { pathOf, requestKeyOf } from '../../core/requests/requestKey.js';
+import { getEndpointStats, statSummary, type EndpointStat } from '../../core/requests/endpointStats.js';
+import type { RequestClass } from '../../core/requests/classify.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
 import { color, MATCH_COLOR, SMALL_FONT, Z_OVERLAY } from '../theme.js';
@@ -37,9 +38,14 @@ const placeBox = (root: HTMLDivElement, rect: DOMRect | null): void => {
   root.style.height = `${rect.height}px`;
 };
 
+/** 글자가 같으면 쓰지 않는다. textContent 를 쓰면 같은 글자여도 텍스트 노드를 갈아 끼워 레이아웃을 다시 한다. */
+const setText = (el: HTMLElement, text: string): void => {
+  if (el.textContent !== text) el.textContent = text;
+};
+
 const paintMetrics = ({ box, metrics }: BoxElements, statOf: StatOf): void => {
   const text = statSummary(statOf(box.hit.record));
-  metrics.textContent = text ? ` ${text}` : '';
+  setText(metrics, text ? ` ${text}` : '');
 };
 
 const paintRenders = ({ box, root, label, count }: BoxElements, now: number): void => {
@@ -51,7 +57,7 @@ const paintRenders = ({ box, root, label, count }: BoxElements, now: number): vo
   const recent = render?.recent ?? 0;
   count.style.display = recent > 0 ? '' : 'none';
   count.style.color = recent >= RENDER_STORM ? '#7f1d1d' : '#000';
-  count.textContent = recent > 0 ? `↻${recent}${render!.avoidable > 0 ? `(불필요 ${render!.avoidable})` : ''}` : '';
+  setText(count, recent > 0 ? `↻${recent}${render!.avoidable > 0 ? `(불필요 ${render!.avoidable})` : ''}` : '');
   label.title = `클릭하면 요청 상세를 봅니다${render ? ` · 최근 10초 렌더 ${render.recent}회, 줄일 수 있는 렌더 ${render.avoidable}회` : ''}`;
 };
 
@@ -77,7 +83,8 @@ const useBoxPainter = (statOf: StatOf) => {
     const els = { box, root: el, label, count, metrics };
     elements.current.set(box.id, els);
     paintRenders(els, Date.now());
-    paintMetrics(els, latestStatOf.current);
+    // ref 는 effect 보다 먼저 붙으므로, 같은 렌더에서 바뀐 집계를 읽도록 다음 프레임에 칠한다.
+    requestAnimationFrame(() => paintMetrics(els, latestStatOf.current));
   }, []);
 
   useEffect(() => {
@@ -182,8 +189,18 @@ const SourceBox = memo(function SourceBox({ box, waste, onOpen, register }: Sour
 });
 
 /** 화면 박스: 분석 대상 안에서 데이터 출처가 있는 컴포넌트마다 박스, URL 과 그 API 의 지표, 렌더 횟수를 그리고 렌더될 때마다 깜빡인다. */
-export const SourceOverlay = ({ boxes, stats }: { boxes: readonly Box[]; stats: ReadonlyMap<string, EndpointStat> }) => {
-  const statOf = useCallback((record: RequestRecord) => stats.get(endpointOf(record)), [stats]);
+export const SourceOverlay = ({
+  boxes,
+  records,
+  classes,
+}: {
+  boxes: readonly Box[];
+  records: readonly RequestRecord[];
+  classes: ReadonlyMap<number, RequestClass>;
+}) => {
+  // 박스 하나는 쿼리·본문까지 같은 요청 하나를 가리키므로, 지표도 같은 요청별로 센다(page=1 과 page=2 를 섞지 않게).
+  const stats = useMemo(() => new Map(getEndpointStats(records, classes, requestKeyOf).map((s) => [s.endpoint, s])), [records, classes]);
+  const statOf = useCallback((record: RequestRecord) => stats.get(requestKeyOf(record)), [stats]);
   const register = useBoxPainter(statOf);
   const { open, classOf } = useRequestActions();
   return (

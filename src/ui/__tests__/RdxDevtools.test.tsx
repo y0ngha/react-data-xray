@@ -5,7 +5,7 @@ import { flush } from '../../testing/fetchMock.js';
 import { RdxDevtools } from '../RdxDevtools.js';
 
 const openPanel = () => {
-  const button = screen.getByRole('button', { name: 'React Data X-ray 열기' });
+  const button = screen.getByRole('button', { name: /React Data X-ray 열기/ });
   fireEvent.pointerDown(button, { clientX: 0, clientY: 0, pointerId: 1 });
   fireEvent.pointerUp(button, { pointerId: 1 });
   return screen.getByRole('complementary', { name: 'React Data X-ray' });
