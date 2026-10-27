@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { collectBoxes, inspect, inspectFiber, type Box, type Hit, type InspectResult } from './inspect.js';
 import { endpointOf, getRecords, pathOf as shortUrl, subscribe, type RequestRecord } from './registry.js';
 import { CLASS_LABEL, classifyRecords, isInitialLoad, isWaste, needsReview, type RequestClass } from './classify.js';
-import { getCommits, getRenderInfo, getTopRenders, setRenderMonitoring, subscribeCommits } from './renderMonitor.js';
+import { getCommits, getRenderInfo, getTopRenders, setRenderMonitoring, subscribeCommits, type RenderReason, type RenderSummary } from './renderMonitor.js';
 
 export interface RdxDevtoolsProps {
   /** 요소 선택 단축키. 기본값 Ctrl+Shift+D (macOS 는 Cmd 도 허용) */
@@ -541,8 +541,55 @@ const RequestsTab = ({
   );
 };
 
+type RenderSort = 'count' | 'time' | 'avoidable';
+
+const REASON_LABEL: Record<RenderReason, string> = {
+  mount: 'mount',
+  state: 'state',
+  props: 'props',
+  'same-content': '같은 내용 새 참조',
+  parent: '부모/context',
+};
+
+interface RenderGroup extends RenderSummary {
+  name: string;
+  instances: number;
+  fiber: unknown;
+}
+
+/** 같은 컴포넌트가 여러 개 렌더되면(목록의 행 등) 이름별로 합친다. */
+const groupRenders = (): RenderGroup[] => {
+  const grouped = new Map<string, RenderGroup>();
+  for (const e of getTopRenders(500)) {
+    const g = grouped.get(e.name);
+    if (!g) {
+      grouped.set(e.name, { ...e, reasons: { ...e.reasons }, sameContentKeys: [...e.sameContentKeys], instances: 1 });
+      continue;
+    }
+    g.recent += e.recent;
+    g.ms += e.ms;
+    g.avoidable += e.avoidable;
+    g.instances++;
+    for (const r of Object.keys(g.reasons) as RenderReason[]) g.reasons[r] += e.reasons[r];
+    g.sameContentKeys = Array.from(new Set([...g.sameContentKeys, ...e.sameContentKeys]));
+  }
+  return Array.from(grouped.values());
+};
+
+/** 줄일 수 있는 렌더가 있으면 어떻게 줄일지 한 줄로 알려 준다. */
+const renderAdvice = (g: RenderGroup): string | null => {
+  if (g.reasons['same-content'] > 0 && g.reasons['same-content'] >= g.reasons.parent) {
+    return `${g.sameContentKeys.map((k) => `props.${k}`).join(', ')} 가 내용은 같은데 새 객체로 내려옵니다. 부모에서 useMemo 로 참조를 유지하거나, 응답을 구조적 공유(React Query select 등)로 받으세요.`;
+  }
+  if (g.reasons.parent > 0) {
+    return 'props 와 state 가 그대로인데 렌더됐습니다(부모 렌더 또는 context 변경). React.memo 로 감싸거나, 바뀌지 않는 context 를 나누세요.';
+  }
+  return null;
+};
+
 const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: Map<string, EndpointStat> }) => {
   const [, setTick] = useState(0);
+  const [sort, setSort] = useState<RenderSort>('avoidable');
   useEffect(() => {
     setRenderMonitoring(true);
     const timer = window.setInterval(() => setTick((t) => t + 1), 1000);
@@ -551,36 +598,50 @@ const RendersTab = ({ statsByEndpoint }: { statsByEndpoint: Map<string, Endpoint
       setRenderMonitoring(false);
     };
   }, []);
-  // 같은 컴포넌트가 여러 개 렌더되면(목록의 행 등) 이름별로 묶는다.
-  const grouped = new Map<string, { name: string; recent: number; instances: number; fiber: unknown }>();
-  for (const e of getTopRenders(200)) {
-    const g = grouped.get(e.name);
-    if (g) {
-      g.recent += e.recent;
-      g.instances++;
-    } else grouped.set(e.name, { name: e.name, recent: e.recent, instances: 1, fiber: e.fiber });
-  }
-  const top = Array.from(grouped.values())
-    .sort((a, b) => b.recent - a.recent)
-    .slice(0, 20);
+  const key = (g: RenderGroup) => (sort === 'time' ? g.ms : sort === 'avoidable' ? g.avoidable * 1000 + g.recent : g.recent);
+  const top = groupRenders()
+    .sort((a, b) => key(b) - key(a))
+    .slice(0, 30);
+  const hasTiming = top.some((g) => g.ms > 0);
   return (
     <div>
-      <div style={{ color: color.muted, marginBottom: 8 }}>이 탭을 연 동안 최근 10초 렌더 횟수입니다.</div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+        <span style={{ color: color.muted }}>최근 10초 ·</span>
+        <Button active={sort === 'avoidable'} onClick={() => setSort('avoidable')} title="줄일 수 있는 렌더(같은 내용 새 참조, 부모/context)가 많은 순">
+          줄일 수 있는 렌더순
+        </Button>
+        <Button active={sort === 'count'} onClick={() => setSort('count')}>
+          횟수순
+        </Button>
+        <Button active={sort === 'time'} onClick={() => setSort('time')} title="자식을 뺀 자기 자신의 렌더 시간 합">
+          시간순
+        </Button>
+      </div>
       {top.length === 0 && <div style={{ color: color.muted }}>아직 렌더가 없습니다. 화면을 조작해 보세요.</div>}
-      {top.map((e, i) => {
+      {top.map((g, i) => {
         // 렌더가 잦은 컴포넌트가 어떤 요청의 데이터를 쓰는지 같이 보여 준다.
-        const hit = inspectFiber(e.fiber as never)[0];
+        const hit = inspectFiber(g.fiber as never)[0];
         const stat = hit ? statsByEndpoint.get(endpointOf(hit.record)) : undefined;
+        const advice = renderAdvice(g);
         return (
           <div key={i} style={{ padding: '4px 0', borderTop: `1px solid ${color.border}` }}>
             <div>
-              <b style={{ color: e.recent / e.instances >= 10 ? color.warn : color.text }}>{e.recent}회</b> &lt;{e.name}&gt;
-              {e.instances > 1 && <span style={{ color: color.muted }}> × {e.instances}개</span>}
+              <b style={{ color: g.recent / g.instances >= 10 ? color.warn : color.text }}>{g.recent}회</b>
+              {hasTiming && <span style={{ color: color.muted }}> · {g.ms.toFixed(1)}ms</span>} &lt;{g.name}&gt;
+              {g.instances > 1 && <span style={{ color: color.muted }}> × {g.instances}개</span>}
+              {g.avoidable > 0 && <Badge c={color.review}>줄일 수 있음 {g.avoidable}</Badge>}
             </div>
+            <div style={{ color: color.muted }}>
+              {(Object.keys(g.reasons) as RenderReason[])
+                .filter((r) => g.reasons[r] > 0)
+                .map((r) => `${REASON_LABEL[r]} ${g.reasons[r]}`)
+                .join(' · ')}
+            </div>
+            {advice && <div style={{ color: color.review }}>{advice}</div>}
             {hit && (
               <RequestLink record={hit.record}>
                 <div style={{ color: color.muted }}>
-                  ← <u>{hit.record.method} {shortUrl(hit.record.url)}</u>{' '}
+                  ← <u>{hit.record.method} {shortUrl(hit.record.url)}</u> <ClassBadge record={hit.record} />
                   {stat && stat.duplicates > 0 && <Badge c={color.warn}>중복 {stat.duplicates}</Badge>}
                   {stat && stat.sameResponses > 0 && <Badge c={color.warn}>같은 응답 {stat.sameResponses}</Badge>}
                 </div>
@@ -831,7 +892,7 @@ const Overlay = () => {
           >
             <span
               role="button"
-              title={`클릭하면 요청 상세를 봅니다${render ? ` · 최근 10초 렌더 ${render.recent}회` : ''}`}
+              title={`클릭하면 요청 상세를 봅니다${render ? ` · 최근 10초 렌더 ${render.recent}회, 줄일 수 있는 렌더 ${render.avoidable}회` : ''}`}
               onClick={() => openRequest(b.hit.record)}
               style={{
                 position: 'absolute',
@@ -849,7 +910,10 @@ const Overlay = () => {
               }}
             >
               {render && render.recent > 0 && (
-                <b style={{ color: storm ? '#7f1d1d' : '#000', marginRight: 4 }}>↻{render.recent}</b>
+                <b style={{ color: storm ? '#7f1d1d' : '#000', marginRight: 4 }}>
+                  ↻{render.recent}
+                  {render.avoidable > 0 && `(불필요 ${render.avoidable})`}
+                </b>
               )}
               {shortUrl(b.hit.record.url)}
             </span>
