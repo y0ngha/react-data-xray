@@ -56,3 +56,12 @@ export const queryParamsOf = (url: string): Record<string, string> | undefined =
 export const formatTime = (time: number): string => new Date(time).toLocaleTimeString();
 
 export const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
+
+/** 퍼센트 인코딩을 푼다. 잘못 인코딩된 값(100%, %zz)이면 원문 그대로 둔다. */
+export const safeDecode = (text: string): string => {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+};

@@ -69,4 +69,18 @@ describe('store', () => {
     finishRecord(r, 0, 'abort');
     expect(getRecords()[0]).toMatchObject({ status: 0, error: 'abort', kind: 'xhr' });
   });
+
+  it('URL 이 매번 다른 요청이 많아도 같은 응답 판정용 기록은 상한까지만 남긴다', () => {
+    const respond = (url: string) => {
+      const r = createRecord('fetch', 'GET', url);
+      finishRecord(r, 200);
+      keepResponseText(r, '{"same":true}', { compare: true });
+      return r;
+    };
+    respond('/api/first');
+    Array.from({ length: 600 }, (_, i) => respond(`/api/poll?_t=${i}`));
+    // 첫 키는 밀려나 비교 대상이 없다.
+    expect(respond('/api/first').sameResponseAs).toBeUndefined();
+    expect(respond('/api/first').sameResponseAs).toBeDefined();
+  });
 });

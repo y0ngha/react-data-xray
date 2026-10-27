@@ -1,3 +1,5 @@
+import { useMemo } from 'react';
+
 import type { RequestRecord } from '../../core/requests/types.js';
 import { prettyText, queryParamsOf, truncate, valueAt } from '../../shared/format.js';
 import { Button } from '../components/Button.js';
@@ -44,7 +46,10 @@ const RequestBodySection = ({ record }: { record: RequestRecord }) => {
 };
 
 const ResponseBodySection = ({ record }: { record: RequestRecord }) => {
-  const text = responseBodyText(record);
+  const { body, responseText } = record;
+  // 폴링 화면에서는 요청이 들어올 때마다 패널이 다시 그려진다. 큰 응답을 그때마다 직렬화하지 않는다.
+  // 본문은 상세를 연 뒤에 도착할 수 있어 body·responseText 가 바뀔 때만 다시 만든다.
+  const text = useMemo(() => responseBodyText({ ...record, body, responseText }), [record, body, responseText]);
   return (
     <Section title="Response Body" copy={text}>
       {text === undefined ? <Muted>(텍스트가 아닌 응답이거나 아직 받지 못했습니다)</Muted> : <CodeBlock text={text} />}

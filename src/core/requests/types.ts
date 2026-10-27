@@ -27,6 +27,8 @@ export interface RequestRecord {
   duplicateOf?: number;
   /** 같은 요청(메서드·URL·본문)의 직전 응답과 본문이 똑같았던 경우 */
   sameResponseAs?: number;
+  /** 새로고침 전 페이지에서 기록해 되살린 요청. 응답 객체(body)는 없고 원문만 있다. */
+  restored?: boolean;
 }
 
 /** 응답 본문 안의 객체가 어느 요청의 어느 위치에서 왔는지 */

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { collectBoxes } from '../../core/inspect/boxes.js';
+import { isIndexPending } from '../../core/inspect/derivedMatch.js';
 import type { Box } from '../../core/inspect/types.js';
 import { subscribeCommits } from '../../core/render/monitor.js';
 import { isOwnUi } from '../ownUi.js';
@@ -26,6 +27,8 @@ export const useOverlayBoxes = (): Box[] => {
       const { boxes: next, deferred } = collectBoxes(isOwnUi, BUDGET_MS);
       setBoxes(next);
       if (deferred) timer = window.setTimeout(collect, CONTINUE_MS);
+      // 응답 색인이 덜 끝났으면 commit 이 없어도 평소 간격 뒤에 한 번 더 모은다(색인 뒤에야 찾는 파생 출처).
+      else if (isIndexPending()) timer = window.setTimeout(collect, COLLECT_MS);
     };
     const schedule = () => {
       if (!timer) timer = window.setTimeout(collect, Math.max(0, last + COLLECT_MS - Date.now()));

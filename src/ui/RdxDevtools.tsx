@@ -11,6 +11,7 @@ import { useDraggable } from './hooks/useDraggable.js';
 import { useElementPicker } from './hooks/useElementPicker.js';
 import { useHotkey, type Hotkey } from './hooks/useHotkey.js';
 import { useIgnoredEndpoints } from './hooks/useIgnoredEndpoints.js';
+import { useStoredState } from './hooks/useStoredState.js';
 import { usePopupWindow } from './hooks/usePopupWindow.js';
 import { useRequestAnalysis } from './hooks/useRequestAnalysis.js';
 import { ConsumerHighlight } from './overlays/ConsumerHighlight.js';
@@ -29,12 +30,24 @@ export interface RdxDevtoolsProps {
 
 const DEFAULT_HOTKEY: Hotkey = { key: 'd', shift: true };
 
+// 앱 코드(API 모듈 등)를 고치거나 새로고침하면 페이지가 통째로 다시 열린다. 그때마다 패널이 닫히고 전체 표시가
+// 꺼지지 않게, 탭을 닫을 때까지(sessionStorage) 기억한다. 새 탭은 처음 상태로 시작한다.
+const OPEN_KEY = 'react-data-xray:open';
+const SHOW_ALL_KEY = 'react-data-xray:show-all';
+const TAB_KEY = 'react-data-xray:tab';
+const TABS: readonly Tab[] = ['inspect', 'requests', 'timeline', 'renders'];
+const parseBool = (raw: unknown): boolean | undefined => (typeof raw === 'boolean' ? raw : undefined);
+const parseTab = (raw: unknown): Tab | undefined => TABS.find((t) => t === raw);
+const no = () => false;
+const firstTab = (): Tab => 'inspect';
+const asIs = <T,>(value: T): unknown => value;
+
 /** rdx 의 조립 지점: 상태를 모아 패널·오버레이·버튼에 나눠 준다. */
 export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<Tab>('inspect');
+  const [storedOpen, setOpen] = useStoredState(OPEN_KEY, parseBool, no, asIs, 'session');
+  const [tab, setTab] = useStoredState(TAB_KEY, parseTab, firstTab, asIs, 'session');
   const [picking, setPicking] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  const [showAll, setShowAll] = useStoredState(SHOW_ALL_KEY, parseBool, no, asIs, 'session');
   const [result, setResult] = useState<InspectResult | null>(null);
   const [selected, setSelected] = useState<{ record: RequestRecord; focus?: Focus } | null>(null);
   const [hovered, setHovered] = useState<RequestRecord | null>(null);
@@ -45,16 +58,18 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   // 별도 창이 막히거나 닫히면 작게 보기로 돌아온다.
   const popupWindow = usePopupWindow(useCallback(() => updateDock({ dock: 'float' }), [updateDock]));
   const { open: openPopup, close: closePopup, popup } = popupWindow;
+  // 별도 창은 사용자의 클릭 없이 열 수 없으므로, 다시 열린 페이지에서는 창이 생길 때까지 닫힌 것으로 본다.
+  const open = storedOpen && (settings.dock !== 'window' || popup !== null);
 
   /** 패널을 연다. 별도 창 모드면 사용자의 동작(클릭·단축키) 안에서 창을 연다. */
   const show = useCallback(() => {
     setOpen(true);
     if (settings.dock === 'window' && !popup) openPopup();
-  }, [settings.dock, popup, openPopup]);
+  }, [settings.dock, popup, openPopup, setOpen]);
   const hide = useCallback(() => {
     setOpen(false);
     closePopup();
-  }, [closePopup]);
+  }, [closePopup, setOpen]);
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
 
   const startPicking = useCallback(() => {
@@ -62,7 +77,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
     setTab('inspect');
     setSelected(null);
     setPicking((v) => !v);
-  }, [show]);
+  }, [show, setTab]);
   const stopPicking = useCallback(() => setPicking(false), []);
   useHotkey(hotkey, startPicking, stopPicking);
   const pickRect = useElementPicker(

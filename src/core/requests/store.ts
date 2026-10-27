@@ -70,6 +70,18 @@ export const registerBody = (record: RequestRecord, body: unknown): void => {
   notify();
 };
 
+/**
+ * 새로고침 전 페이지의 기록을 앞에 되살린다. 앱 요청보다 먼저(설치할 때) 부른다.
+ * 새 요청의 id 가 되살린 것보다 크도록 이어서 매긴다(최신 응답을 고르는 규칙이 id 에 기댄다).
+ */
+export const restoreRecords = (restored: readonly RequestRecord[]): void => {
+  if (restored.length === 0) return;
+  records.unshift(...restored.slice(-MAX_RECORDS));
+  records.splice(MAX_RECORDS);
+  nextId = Math.max(nextId, ...restored.map((r) => r.id + 1));
+  notify();
+};
+
 export const clearRecords = (): void => {
   records.length = 0;
   resetRepeatDetection();

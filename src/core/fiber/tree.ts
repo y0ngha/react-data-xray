@@ -37,6 +37,15 @@ export const isMemoized = (fiber: Fiber): boolean =>
 // React 루트 컨테이너는 거의 바뀌지 않으므로 찾은 것을 기억해 두고, 없을 때만 페이지를 훑는다.
 let rootContainers: Element[] = [];
 
+/**
+ * commit 이 일어난 루트의 컨테이너를 기억한다. 앱이 나중에 모달·위젯용 createRoot 를 만들어도 찾을 수 있다.
+ * (처음 한 번 문서를 훑은 뒤로는 목록이 빌 때까지 다시 훑지 않는다.)
+ */
+export const rememberRootContainer = (root: { containerInfo?: unknown }): void => {
+  const el = root.containerInfo;
+  if (el instanceof Element && !rootContainers.includes(el)) rootContainers = [...rootContainers, el];
+};
+
 /** 컨테이너에 붙은 HostRoot fiber. 루트를 unmount 하면 키는 남고 값이 null 이 된다. */
 const hostRootOfContainer = (el: Element): Fiber | null => {
   const key = findKey(el, CONTAINER_KEY_PREFIX);

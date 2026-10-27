@@ -4,7 +4,11 @@ import type { RequestRecord } from '../requests/types.js';
 const MAX_PENDING_TEXTS = 50;
 const pending = new Map<string, RequestRecord>();
 
+/** JSON 처럼 보이는 원문만 들고 있는다. HTML·CSV 처럼 JSON.parse 할 일이 없는 큰 원문을 붙잡지 않는다. */
+const looksLikeJson = (text: string): boolean => /^\s*[[{]/.test(text);
+
 export const rememberText = (text: string, record: RequestRecord): void => {
+  if (!looksLikeJson(text)) return;
   pending.set(text, record);
   if (pending.size > MAX_PENDING_TEXTS) pending.delete(pending.keys().next().value as string);
 };

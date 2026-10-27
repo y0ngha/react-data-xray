@@ -82,15 +82,16 @@ const cache = {
   timer: 0,
 };
 
-/** 남은 색인 작업을 SLICE_MS 동안 한다. 작은 응답은 이 안에 끝나 바로 찾을 수 있다. */
-const runQueue = (): void => {
+/** 남은 색인 작업을 limitMs 동안 한다. 남으면 백그라운드에서 SLICE_MS 씩 이어 한다. 작은 응답은 첫 조각 안에 끝난다. */
+const runQueue = (limitMs = SLICE_MS): void => {
   const started = performance.now();
-  while (cache.queue.length > 0 && performance.now() - started < SLICE_MS) {
+  while (cache.queue.length > 0 && performance.now() - started < limitMs) {
     const { record, work } = cache.queue[0];
     // 색인하는 사이 목록에서 밀려난 응답은 마저 하지 않는다.
     if (!cache.segments.has(record) || work.next().done) cache.queue.shift();
   }
-  cache.timer = cache.queue.length > 0 ? window.setTimeout(runQueue, 0) : 0;
+  window.clearTimeout(cache.timer);
+  cache.timer = cache.queue.length > 0 ? window.setTimeout(() => runQueue(), 0) : 0;
 };
 
 const getSegments = (): ReadonlyMap<RequestRecord, Segment> => {
@@ -113,13 +114,13 @@ const getSegments = (): ReadonlyMap<RequestRecord, Segment> => {
 /** 아직 색인하지 못한 응답이 있는지. 있으면 지금 못 찾은 값도 곧 찾을 수 있다. */
 export const isIndexPending = (): boolean => cache.queue.length > 0;
 
-/** 남은 색인을 지금 다 한다. 요소 클릭처럼 한 번 묻고 끝나는 조회는 기다리지 않고 바로 답해야 한다. */
+// 요소 클릭처럼 한 번 묻고 끝나는 조회가 기다릴 수 있는 시간. 막 도착한 큰 응답 여러 개를 한 번에 다 하면 수백 ms 멈춘다.
+const FLUSH_LIMIT_MS = 200;
+
+/** 남은 색인을 FLUSH_LIMIT_MS 까지 지금 한다. 요소 클릭처럼 한 번 묻는 조회는 기다리지 않고 바로 답해야 한다. */
 export const flushIndex = (): void => {
   getSegments();
-  while (cache.queue.length > 0) {
-    const { record, work } = cache.queue[0];
-    if (!cache.segments.has(record) || work.next().done) cache.queue.shift();
-  }
+  runQueue(FLUSH_LIMIT_MS);
 };
 
 /**

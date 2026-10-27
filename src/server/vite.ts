@@ -4,6 +4,7 @@ import { rdxReportMiddleware, type RdxReportOptions } from './middleware.js';
 
 // vite 를 의존성으로 두지 않으려고 쓰는 부분만 적는다.
 interface ViteDevServer {
+  config?: { server?: { allowedHosts?: readonly string[] | true } };
   middlewares: { use: (handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void) => void };
 }
 
@@ -16,6 +17,8 @@ export const rdx = (options: RdxReportOptions = {}) => ({
   name: 'react-data-xray',
   apply: 'serve' as const,
   configureServer(server: ViteDevServer) {
-    server.middlewares.use(rdxReportMiddleware(process.cwd(), options));
+    // Vite 에 이미 지정한 allowedHosts 를 그대로 쓴다(LAN IP·컨테이너 이름으로 접속하는 경우).
+    const allowedHosts = options.allowedHosts ?? server.config?.server?.allowedHosts;
+    server.middlewares.use(rdxReportMiddleware(process.cwd(), { ...options, allowedHosts }));
   },
 });

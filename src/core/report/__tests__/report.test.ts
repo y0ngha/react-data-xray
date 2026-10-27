@@ -20,6 +20,15 @@ describe('보고서', () => {
     expect(report.renders.monitoring).toBe(false);
   });
 
+  it('패널에서 의도된 반복으로 지정한 엔드포인트는 보고서에서도 낭비로 세지 않는다', async () => {
+    localStorage.setItem('react-data-xray:ignored-endpoints', JSON.stringify(['GET /api/status']));
+    const load = () => fetch('/api/status').then((r) => r.json());
+    await [0, 1].reduce((prev) => prev.then(load), Promise.resolve());
+    await flush();
+    const endpoint = buildReport(false).requests.endpoints.find((e) => e.endpoint === 'GET /api/status');
+    expect(endpoint).toMatchObject({ ignored: true, duplicates: 0, wasteExamples: [] });
+  });
+
   it('Firefox·Safari 형식의 호출 스택도 보낸 위치로 읽는다', () => {
     const record = createRecord('fetch', 'GET', '/api/ff');
     record.stack = 'loadUsers@http://localhost:5173/src/api.ts:12:3\nApp@http://localhost:5173/src/App.tsx:5:1';

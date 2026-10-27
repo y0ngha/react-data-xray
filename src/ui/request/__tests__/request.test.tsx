@@ -103,3 +103,12 @@ describe('RequestDetail', () => {
     expect(writeText).toHaveBeenCalledWith('{\n  "id": 7\n}');
   });
 });
+
+describe('잘못 인코딩된 쿼리', () => {
+  it('퍼센트 인코딩이 깨진 쿼리도 원문 그대로 보여 주고 렌더를 깨지 않는다', () => {
+    const record = createRecord('fetch', 'GET', '/api/search?q=100%');
+    finishRecord(record, 200);
+    renderWithActions(<RequestParams record={record} />);
+    expect(screen.getByText(/q=100%/)).toBeTruthy();
+  });
+});

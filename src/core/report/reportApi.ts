@@ -26,10 +26,24 @@ const report = (): RdxReport => {
   return buildReport(monitoring);
 };
 
-/** dev 서버에 rdx 미들웨어가 있는지. 본문 없는 GET 으로 묻고, 미들웨어만 붙이는 헤더로 판단한다. */
+const HANDSHAKE_RETRY_MS = 3000;
+// dev 서버가 꺼지면 계속 실패하므로 이만큼 연속 실패하면 멈춘다. 서버가 돌아오면 Vite 가 페이지를 다시 열어 처음부터 확인한다.
+const MAX_UPLOAD_FAILURES = 3;
+
+/**
+ * dev 서버에 rdx 미들웨어가 있는지. 본문 없는 GET 으로 묻고, 미들웨어만 붙이는 헤더로 판단한다.
+ * 의존성 최적화 리로드 중처럼 응답이 아예 없으면 한 번 더 묻는다. 응답이 왔는데 표시가 없으면 미들웨어가 없는 것이다(프록시·SPA 폴백).
+ */
 const hasReportEndpoint = async (send: typeof fetch): Promise<boolean> => {
-  const res = await send(REPORT_PATH, { method: 'GET', credentials: 'omit' }).catch(() => null);
-  return res?.headers.get(REPORT_HEADER) === '1';
+  const ask = () => send(REPORT_PATH, { method: 'GET', credentials: 'omit' }).catch(() => null);
+  const res = (await ask()) ?? (await new Promise((resolve) => window.setTimeout(resolve, HANDSHAKE_RETRY_MS)).then(ask));
+  const mark = res?.headers.get(REPORT_HEADER);
+  if (mark === 'forbidden-host') {
+    console.warn(
+      `[react-data-xray] dev 서버가 ${location.host} 에서 온 보고서를 막았습니다. rdx({ allowedHosts: ['${location.hostname}'] }) 로 허용하세요.`,
+    );
+  }
+  return mark === '1';
 };
 
 /**
@@ -41,6 +55,8 @@ const startUpload = async (): Promise<void> => {
   if (!send || !(await hasReportEndpoint(send))) return;
   keepRenderMonitoring();
   let last = '';
+  let failures = 0;
+  let timer = 0;
   const upload = async () => {
     const { generatedAt, ...content } = buildReport(isRenderMonitoring());
     const key = JSON.stringify(content);
@@ -52,10 +68,16 @@ const startUpload = async (): Promise<void> => {
       headers: { 'content-type': 'application/json' },
       body,
     }).catch(() => null);
-    // dev 서버 재시작처럼 잠깐 실패하면 다음 주기에 다시 보낸다.
-    if (res?.ok) last = key;
+    if (res?.ok) {
+      last = key;
+      failures = 0;
+      return;
+    }
+    // 잠깐 실패하면 다음 주기에 다시 보내고, 계속 실패하면 멈춘다.
+    failures++;
+    if (failures >= MAX_UPLOAD_FAILURES) window.clearInterval(timer);
   };
-  window.setInterval(() => void upload(), UPLOAD_MS);
+  timer = window.setInterval(() => void upload(), UPLOAD_MS);
   await upload();
 };
 

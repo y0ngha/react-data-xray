@@ -50,7 +50,8 @@ const propHits = (fiber: Fiber, budget: Budget): Hit[] => {
   const props = fiber.memoizedProps;
   if (!props || typeof props !== 'object') return [];
   const cached = hitsByProps.get(props);
-  if (cached?.every((h) => budget.live.has(h.record))) return remember(fiber, cached);
+  // 정확 매칭은 앱이 그 응답 객체를 직접 쥐고 있는 것이라 다시 찾아도 같다. 파생 매칭만 다시 확인한다.
+  if (cached?.every((h) => h.match === 'exact' || budget.live.has(h.record))) return remember(fiber, cached);
   const entries = plainEntries(props);
   const exact = entries.flatMap(([k, v]) => {
     const origin = getOrigin(v);
@@ -66,32 +67,34 @@ const propHits = (fiber: Fiber, budget: Budget): Hit[] => {
     return origin ? [toHit(k, origin, 'derived')] : [];
   });
   const hits = [...exact, ...derived];
-  // 색인 중에는 기억하지 않고, 곧 다시 수집하도록 알린다. 색인이 끝나면 더 최신 응답이나 못 찾은 출처를 찾을 수 있다.
-  if (isIndexPending() && rest.length > 0) budget.deferred = true;
-  else hitsByProps.set(props, hits);
+  // 색인 중에는 기억하지 않는다. 색인이 끝난 뒤 수집에서 더 최신 응답이나 못 찾은 출처를 찾는다.
+  // (style·theme 처럼 원래 출처가 없는 객체도 "못 찾음"이라, 이것으로 곧바로 다시 수집하게 하면 색인 내내 수집이 이어진다.)
+  if (!isIndexPending() || rest.length === 0) hitsByProps.set(props, hits);
   return remember(fiber, hits);
 };
 
-/** 경로가 속한 목록 항목. $.data.projects[0].status → $.data.projects[0]. 목록 안이 아니면 null */
-const itemOf = (path: string): string | null => {
+/** 경로가 속한 목록 항목. $.data.projects[0].status → $.data.projects[0]. 목록 안이 아니면 경로 그대로 */
+const itemOf = (path: string): string => {
   const end = path.lastIndexOf(']');
-  return end < 0 ? null : path.slice(0, end + 1);
+  return end < 0 ? path : path.slice(0, end + 1);
 };
 
-// 조상 박스가 보여 준 것과 같은 데이터거나, 조상이 목록 항목 안의 데이터를 보여 줬다면 그 항목 안은 다시 그리지 않는다.
-// 카드가 같은 프로젝트 항목의 status·region·type 을 컴포넌트마다 따로 받을 때 박스가 겹겹이 생기지 않게 한다.
-// 목록 밖 경로($, $.data)를 받은 조상은 같은 경로만 덮는다. 그 아래 목록 행처럼 항목 단위 박스가 더 쓸모 있다.
+/**
+ * 조상 박스가 보여 준 데이터 안이면 다시 그리지 않는다. 조상이 목록 항목 안을 받았으면 그 항목 전체가 범위다
+ * (카드가 같은 프로젝트 항목의 status·region·type 을 컴포넌트마다 따로 받는 경우).
+ * 다만 그 사이에 목록 첨자([n])가 있으면 덮지 않는다. $.data 를 받은 조상 아래의 목록 행처럼 항목 단위 박스가 더 쓸모 있다.
+ */
 const covered = (shown: readonly Hit[], h: Hit): boolean =>
   shown.some((s) => {
     if (s.record !== h.record) return false;
-    const item = itemOf(s.path);
-    return s.path === h.path || (item !== null && isSameOrChildPath(h.path, item));
+    const scope = itemOf(s.path);
+    return isSameOrChildPath(h.path, scope) && !h.path.slice(scope.length).includes('[');
   });
 
 /**
  * 화면의 모든 컴포넌트 중 응답 객체를 props 로 직접 받는 것마다 박스를 만든다.
  * 폴링 화면에서는 카드 수십 개가 한꺼번에 새 데이터를 받아 파생 조회가 몰린다. budgetMs 를 넘기면 남은 컴포넌트는
- * 직전 결과로 그리고 deferred 를 알린다. 응답 색인이 덜 끝나 못 찾은 것이 있어도 deferred 다. 부르는 쪽이 곧 다시 부르면 이어서 한다.
+ * 직전 결과로 그리고 deferred 를 알린다. 부르는 쪽이 곧 다시 부르면 이어서 한다.
  */
 export const collectBoxes = (isOwnUi: (el: Element) => boolean, budgetMs = Infinity): { boxes: Box[]; deferred: boolean } => {
   const boxes: Box[] = [];

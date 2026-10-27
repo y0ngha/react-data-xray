@@ -6,6 +6,7 @@ import type { EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import { getTopRenders } from '../../../core/render/monitor.js';
 import { isIndexPending } from '../../../core/inspect/derivedMatch.js';
+import { getRecords } from '../../../core/requests/store.js';
 import { inspectFiber } from '../../../core/inspect/inspect.js';
 import type { Fiber } from '../../../core/fiber/types.js';
 import { Button } from '../../components/Button.js';
@@ -33,7 +34,9 @@ const sourceOf = (group: RenderGroup): Hit | undefined => {
   const fiber = group.fiber as Fiber;
   const key: unknown = fiber.memoizedState ?? fiber.memoizedProps;
   if (!key || typeof key !== 'object') return inspectFiber(fiber)[0];
-  if (sources.has(key)) return sources.get(key);
+  // 기억한 출처가 요청 목록에서 밀려난 파생 매칭이면 다시 찾는다(밀려난 응답 본문을 붙잡지 않게).
+  const cached = sources.get(key);
+  if (sources.has(key) && (!cached || cached.match === 'exact' || getRecords().includes(cached.record))) return cached;
   const source = inspectFiber(fiber)[0];
   // 색인 중에 못 찾은 것은 기억하지 않는다(1초 뒤 다시 찾는다).
   if (source || !isIndexPending()) sources.set(key, source);

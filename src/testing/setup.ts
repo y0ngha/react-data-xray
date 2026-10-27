@@ -22,6 +22,7 @@ beforeEach(() => {
   clearRecords();
   resetMockFetch();
   localStorage.clear();
+  sessionStorage.clear();
 });
 
 afterEach(() => cleanup());

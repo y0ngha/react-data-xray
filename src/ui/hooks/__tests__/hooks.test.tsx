@@ -63,6 +63,19 @@ describe('useDraggable', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
+  it('키보드로 누르면 열고, 다른 곳에서 누르고 버튼 위에서 뗀 것은 클릭으로 치지 않는다', () => {
+    const onClick = vi.fn<() => void>();
+    render(<Draggable onClick={onClick} />);
+    const button = screen.getByRole('button');
+    fireEvent.pointerUp(button, { pointerId: 1 });
+    expect(onClick).not.toHaveBeenCalled();
+    fireEvent.click(button, { detail: 0 });
+    expect(onClick).toHaveBeenCalledTimes(1);
+    // 마우스 클릭(detail 1)은 pointerup 에서 이미 처리했으므로 두 번 부르지 않는다.
+    fireEvent.click(button, { detail: 1 });
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
   it('큰 창에서 저장한 위치가 지금 창 밖이면 창 안으로 당겨서 그린다', () => {
     localStorage.setItem('react-data-xray:button', JSON.stringify({ x: 5000, y: 5000 }));
     render(<Draggable onClick={() => undefined} />);
@@ -159,12 +172,15 @@ describe('usePopupWindow', () => {
     vi.useFakeTimers();
     const makePopup = () => ({ closed: false, close: vi.fn<() => void>(), document: document.implementation.createHTMLDocument('popup') });
     const first = makePopup();
+    // 새로고침 전 페이지가 같은 이름의 창에 남긴 패널
+    first.document.body.innerHTML = '<div>old panel</div>';
     vi.spyOn(window, 'open').mockReturnValue(first as unknown as Window);
     const onClosed = vi.fn<() => void>();
     const { result } = renderHook(() => usePopupWindow(onClosed));
     act(() => result.current.open());
     expect(result.current.popup).toBe(first);
     expect(first.document.title).toBe('React Data X-ray');
+    expect(first.document.body.textContent).toBe('');
     first.closed = true;
     act(() => {
       vi.advanceTimersByTime(600);

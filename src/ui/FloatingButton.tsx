@@ -1,4 +1,4 @@
-import type { PointerEvent } from 'react';
+import type { MouseEvent, PointerEvent } from 'react';
 
 import type { Position } from './hooks/useDraggable.js';
 import { color, Z_PANEL } from './theme.js';
@@ -13,6 +13,7 @@ interface FloatingButtonProps {
     onPointerDown: (e: PointerEvent) => void;
     onPointerMove: (e: PointerEvent) => void;
     onPointerUp: () => void;
+    onClick: (e: MouseEvent) => void;
   };
 }
 

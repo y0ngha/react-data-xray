@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_BODY, flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { getRecords } from '../../requests/store.js';
 import { collectBoxes } from '../boxes.js';
-import { flushIndex } from '../derivedMatch.js';
+import { flushIndex, isIndexPending } from '../derivedMatch.js';
 import { findConsumers } from '../consumers.js';
 import { inspect } from '../inspect.js';
 
@@ -192,22 +192,27 @@ describe('전체 표시 박스', () => {
     ]);
   });
 
-  it('큰 응답의 색인이 덜 끝나 못 찾았으면 미뤘다고 알리고, 색인이 끝나면 찾는다', async () => {
+  it('큰 응답의 색인이 덜 끝나 못 찾은 결과는 기억하지 않아, 색인이 끝난 뒤 수집에서 찾는다', async () => {
     const list = Array.from({ length: 30_000 }, (_, i) => ({ id: 70_000 + i, title: `item-${i}` }));
     mockFetch.mockImplementationOnce(async () => jsonResponse({ list }));
     const json: { list: Item[] } = await fetch('/api/big-derived').then((r) => r.json());
     const Copy = ({ item }: { item: Item }) => <p>{item.title}</p>;
-    render(<Copy item={{ ...json.list[29_999], title: json.list[29_999].title }} />);
-    const first = withLayout(() => collectBoxes(() => false));
-    expect(first.deferred).toBe(true);
+    // 색인은 배열을 뒤에서부터 하므로, 첫 항목이 가장 늦게 색인된다.
+    render(<Copy item={{ ...json.list[0], title: json.list[0].title }} />);
+    expect(withLayout(() => collectBoxes(() => false)).boxes).toEqual([]);
+    expect(isIndexPending()).toBe(true);
     flushIndex();
     expect(withLayout(() => collectBoxes(() => false)).boxes.map((b) => [b.name, b.hit.match])).toEqual([['Copy', 'derived']]);
   });
 
-  it('목록 밖 경로($.data)를 받은 조상 아래의 목록 행은 행마다 그린다', async () => {
-    const json: typeof DEFAULT_BODY = await fetch('/api/dashboard').then((r) => r.json());
-    const Dashboard = ({ data }: { data: typeof DEFAULT_BODY.data }) => (
+  it('목록 밖 경로($.data)를 받은 조상 아래에서 목록 행은 행마다 그리고, 목록 밖 하위 객체는 다시 그리지 않는다', async () => {
+    type Data = typeof DEFAULT_BODY.data & { user: { name: string } };
+    mockFetch.mockImplementationOnce(async () => jsonResponse({ data: { ...DEFAULT_BODY.data, user: { name: 'kim' } } }));
+    const json: { data: Data } = await fetch('/api/dashboard').then((r) => r.json());
+    const Header = ({ user }: { user: Data['user'] }) => <h1>{user.name}</h1>;
+    const Dashboard = ({ data }: { data: Data }) => (
       <ul>
+        <Header user={data.user} />
         {data.list.map((item) => (
           <Row key={item.id} item={item} />
         ))}
@@ -219,6 +224,15 @@ describe('전체 표시 박스', () => {
       ['Row', '$.data.list[0]'],
       ['Row', '$.data.list[1]'],
     ]);
+  });
+
+  it('나중에 만든 React 루트(모달·위젯용 createRoot)의 컴포넌트도 찾는다', async () => {
+    const res = await fetch('/api/roots').then((r) => r.json());
+    const rows: Item[] = res.data.list;
+    render(<Row item={rows[0]} />);
+    expect(withLayout(() => collectBoxes(() => false).boxes)).toHaveLength(1);
+    render(<Row item={rows[1]} />);
+    expect(withLayout(() => collectBoxes(() => false).boxes)).toHaveLength(2);
   });
 
   it('commit 이 여러 번 일어나도 지금 화면의 박스만 만든다', async () => {

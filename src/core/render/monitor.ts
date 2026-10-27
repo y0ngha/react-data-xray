@@ -1,4 +1,4 @@
-import { getComponentName, isMemoized } from '../fiber/tree.js';
+import { getComponentName, isMemoized, rememberRootContainer } from '../fiber/tree.js';
 import { isComposite, PERFORMED_WORK, type Fiber } from '../fiber/types.js';
 import { listenToCommits } from './devtoolsHook.js';
 import { causeOf } from './networkCause.js';
@@ -49,7 +49,8 @@ const recordRender = (fiber: Fiber, now: number, inherited: NetworkCause | undef
 // 지난 렌더의 PerformedWork 플래그가 남아 있어, 들어가면 렌더하지 않은 것을 렌더로 센다.
 const wasRecreated = (fiber: Fiber): boolean => !fiber.alternate || fiber.child !== fiber.alternate.child;
 
-const onCommit = (root: { current: Fiber }): void => {
+const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
+  rememberRootContainer(root);
   if (users === 0) return;
   const now = Date.now();
   let count = 0;

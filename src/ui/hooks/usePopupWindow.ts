@@ -8,6 +8,8 @@ const openWindow = (): Window | null => {
   const win = window.open('', 'react-data-xray', 'width=960,height=640');
   if (!win) return null;
   win.document.title = 'React Data X-ray';
+  // 같은 이름의 창이 이미 있으면 그 창이 돌아온다. 새로고침 전 페이지가 남긴 패널을 지운다.
+  win.document.body.textContent = '';
   Object.assign(win.document.body.style, { margin: '0', background: color.bg });
   return win;
 };

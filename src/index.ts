@@ -2,17 +2,21 @@
 import { ignoreComponent } from './core/render/monitor.js';
 import { installCapture } from './core/capture/install.js';
 import { installReportApi } from './core/report/reportApi.js';
-import { RdxDevtools as Devtools, type RdxDevtoolsProps } from './ui/RdxDevtools.js';
+import { installSessionRecords } from './core/requests/sessionRecords.js';
+import type { RdxDevtoolsProps } from './ui/RdxDevtools.js';
+import { SafeRdxDevtools as Devtools } from './ui/SafeRdxDevtools.js';
 
 export type { RdxDevtoolsProps } from './ui/RdxDevtools.js';
 
 // 조건을 변수에 담지 않고 직접 쓴다. 그래야 webpack 도 production 에서 dev 분기를 상수로 접어 패널 코드를 지운다.
 if (process.env.NODE_ENV !== 'production') {
+  // 새로고침 전 요청 기록을 앱 요청보다 먼저 되살린다(같은 탭 안에서만).
+  installSessionRecords();
   // 컴포넌트 mount 보다 먼저 요청이 나가므로(자식 effect 가 먼저 돈다) import 시점에 설치한다.
   installCapture();
   // AI 가 결과를 읽는 창구: window.__RDX__.report(), dev 서버 플러그인이 있으면 .rdx/report.json
   installReportApi();
-  // 패널 자신의 렌더는 렌더 감시에서 뺀다.
+  // 패널 자신(과 그것을 감싼 에러 바운더리)의 렌더는 렌더 감시에서 뺀다.
   ignoreComponent(Devtools);
 }
 

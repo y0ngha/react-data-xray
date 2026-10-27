@@ -1,4 +1,4 @@
-import { useRef, useSyncExternalStore, type PointerEvent } from 'react';
+import { useRef, useSyncExternalStore, type MouseEvent, type PointerEvent } from 'react';
 
 import { clamp } from '../../shared/format.js';
 import { useStoredState } from './useStoredState.js';
@@ -33,7 +33,7 @@ interface Drag {
  * 끌어서 옮길 수 있는 요소. 위치를 기억한다.
  * onClick 은 끌지 않고 눌렀다 뗐을 때만 부른다.
  */
-export const useDraggable = (size: number, onClick: () => void) => {
+export const useDraggable = (size: number, onClickProp: () => void) => {
   const [stored, setPosition, savePosition] = useStoredState(POSITION_KEY, parse, () => ({
     x: window.innerWidth - size - 20,
     y: window.innerHeight - size - 20,
@@ -58,12 +58,19 @@ export const useDraggable = (size: number, onClick: () => void) => {
   };
 
   const onPointerUp = () => {
-    const moved = drag.current?.moved;
+    // 다른 곳에서 누르고(텍스트 선택 등) 버튼 위에서 뗀 것은 클릭이 아니다.
+    if (!drag.current) return;
+    const moved = drag.current.moved;
     drag.current = null;
     // 끄는 동안에는 저장을 미루고, 다 끌었을 때 한 번만 저장한다.
     if (moved) savePosition();
-    else onClick();
+    else onClickProp();
   };
 
-  return { position, handlers: { onPointerDown, onPointerMove, onPointerUp } };
+  // 키보드(Enter·Space)로 누르면 pointer 이벤트 없이 click 만 온다(detail 0). 마우스 클릭은 pointerup 에서 이미 처리했다.
+  const onClick = (e: MouseEvent) => {
+    if (e.detail === 0) onClickProp();
+  };
+
+  return { position, handlers: { onPointerDown, onPointerMove, onPointerUp, onClick } };
 };

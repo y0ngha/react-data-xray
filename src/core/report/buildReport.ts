@@ -8,6 +8,7 @@ import { endpointOf } from '../requests/requestKey.js';
 import { getRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
 import { groupBy } from '../../shared/collections.js';
+import { readIgnoredEndpoints } from '../../shared/ignoredEndpoints.js';
 
 const MAX_RENDER_GROUPS = 30;
 const MAX_CALLERS = 3;
@@ -22,7 +23,11 @@ export interface RdxReport {
     total: number;
     endpoints: Array<{
       endpoint: string;
+      /** 사용자가 의도된 반복으로 지정해 낭비로 세지 않은 엔드포인트 */
+      ignored: boolean;
       count: number;
+      /** 그중 새로고침 전 페이지의 요청 수 */
+      restoredCount: number;
       avgMs: number;
       duplicates: number;
       sameResponses: number;
@@ -52,6 +57,8 @@ export interface RdxReport {
 const HOW_TO_READ = [
   'requests.endpoints 는 낭비(duplicates: 2초 안 같은 요청, sameResponses: 직전과 똑같은 응답) 많은 순이다.',
   'review 는 주기 요청·포커스 재요청처럼 의도일 수 있지만 점검할 반복이다.',
+  'ignored: true 인 엔드포인트는 사용자가 의도된 반복으로 지정한 것이라 고치지 않는다.',
+  '요청 집계에는 같은 탭에서 새로고침하기 전의 요청도 들어 있다. 새로고침 전후를 가르려면 restoredCount 를 본다.',
   'callers 의 줄 번호는 dev 서버가 변환한 코드 기준이라 원본과 몇십 줄 어긋날 수 있다. 함수 이름으로 찾는다.',
   'renders.components 는 최근 10초 렌더를 컴포넌트 이름별로 합친 것이고, 줄일 수 있는 렌더 많은 순이다.',
   'networkCauses 의 viaParent 는 조상이 응답으로 렌더돼서 따라 렌더된 횟수다. 고칠 곳은 대개 그 조상의 setState 다.',
@@ -68,6 +75,8 @@ const callerOf = (stack: string | undefined): string | undefined =>
     // V8: "at fn (url:1:2)", Firefox·Safari: "fn@url:1:2"
     .filter((line) => line.startsWith('at ') || /@.+:\d+:\d+$/.test(line))
     .slice(0, CALLER_FRAMES)
+    // dev 서버가 파일을 고칠 때마다 붙이는 ?t=·?v= 를 뗀다. 그래야 같은 호출 위치가 고칠 때마다 갈라지지 않는다.
+    .map((line) => line.replace(/\?[^\s:)]*(?=:\d+:\d+)/g, ''))
     .join(' <- ') || undefined;
 
 const callersOf = (records: readonly RequestRecord[]) => {
@@ -86,7 +95,9 @@ const nonZero = (reasons: Record<string, number>): Record<string, number> =>
 /** 지금까지 모은 요청과 렌더를 요약한다. */
 export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport => {
   const records = getRecords();
-  const classes = classifyRecords(records, new Set());
+  // 패널에서 "의도된 반복"으로 지정한 엔드포인트는 보고서에서도 낭비로 세지 않는다.
+  const ignored = readIgnoredEndpoints();
+  const classes = classifyRecords(records, ignored);
   const byEndpoint = groupBy(records, endpointOf);
   const groups = sortRenderGroups(groupRenders(getTopRenders(500, now)), 'avoidable').slice(0, MAX_RENDER_GROUPS);
   return {
@@ -99,7 +110,9 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
         const own = byEndpoint.get(s.endpoint) ?? [];
         return {
           endpoint: s.endpoint,
+          ignored: ignored.has(s.endpoint),
           count: s.count,
+          restoredCount: own.filter((r) => r.restored).length,
           avgMs: s.avgMs,
           duplicates: s.duplicates,
           sameResponses: s.sameResponses,

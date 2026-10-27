@@ -14,5 +14,6 @@ export const RequestTitle = ({ record }: { record: RequestRecord }) => (
 export const RequestStatusLine = ({ record }: { record: RequestRecord }) => (
   <div style={{ color: record.error || record.status >= 400 ? color.warn : color.muted }}>
     {record.kind} · {record.error ? `실패 (${record.error})` : record.status} · {record.durationMs}ms · {formatTime(record.startedAt)}
+    {record.restored && ' · 새로고침 전'}
   </div>
 );
