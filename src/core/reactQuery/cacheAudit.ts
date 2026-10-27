@@ -50,7 +50,6 @@ const keyText = (key: unknown): string => {
   }
 };
 
-const clients = new Set<QueryClientLike>();
 const patched = new WeakSet<QueryClientLike>();
 // queryHash → 지금까지 그 키에 들어온 요청 키들. 기록 수만큼만 남긴다.
 const MAX_HISTORY = 500;
@@ -84,8 +83,9 @@ const watchInvalidations = (client: QueryClientLike): void => {
   };
 };
 
-/** 화면의 QueryClientProvider 에서 QueryClient 를 찾는다. 찾은 것은 기억하고 무효화를 감시한다. */
+/** 지금 화면의 QueryClientProvider 에서 QueryClient 를 찾고 무효화를 감시한다. 사라진 Provider 의 client 는 붙잡지 않는다. */
 export const findQueryClients = (): QueryClientLike[] => {
+  const clients = new Set<QueryClientLike>();
   findRootFibers().forEach((root) =>
     walkFibers(root.child, (f) => {
       const client = (f.memoizedProps as { client?: unknown } | null)?.client;
