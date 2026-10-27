@@ -214,4 +214,17 @@ describe('렌더의 네트워크 원인', () => {
     bump();
     expect(byName().Counter).toMatchObject({ network: 0, recent: 2 });
   });
+
+  it('거르는 조건은 상위 몇 개로 자르기 전에 적용한다(분석 대상 안의 렌더가 빠지지 않게)', () => {
+    function Busy({ n }: { n: number }) {
+      return <b>{n}</b>;
+    }
+    function Quiet({ n }: { n: number }) {
+      return <s>{n % 2}</s>;
+    }
+    render(<Counter>{(n) => (n % 3 === 0 ? <Quiet n={n} /> : <Busy n={n} />)}</Counter>);
+    bump(6);
+    expect(getTopRenders(1)[0].name).not.toBe('Quiet');
+    expect(getTopRenders(1, Date.now(), (e) => e.name === 'Quiet').map((e) => e.name)).toEqual(['Quiet']);
+  });
 });

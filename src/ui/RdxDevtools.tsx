@@ -70,7 +70,9 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
     setPicking(false);
   }, [clearScope]);
 
-  const boxes = useOverlayBoxes(boxesVisible || open, activeScope?.fiber ?? null);
+  // 박스는 화면에 그릴 때, 데이터 관점일 때, 범위로 요청을 거를 때만 모은다(트리 전체를 훑는 일이라).
+  const needBoxes = boxesVisible || (open && (activeScope !== null || tab === 'inspect'));
+  const boxes = useOverlayBoxes(needBoxes, activeScope?.fiber ?? null);
   const scopedAnalysis = useScopedAnalysis(analysis, activeScope, boxes, result);
 
   // 요청이 들어올 때마다 classOf 가 바뀌어도 open 은 그대로라야 오버레이 박스가 다시 렌더되지 않는다.

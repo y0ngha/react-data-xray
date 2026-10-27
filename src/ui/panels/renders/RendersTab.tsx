@@ -56,7 +56,7 @@ export const RendersTab = ({
   useRenderMonitoring();
   const now = useNow(REFRESH_MS);
   const [sort, setSort] = useState<RenderSort>('avoidable');
-  const renders = getTopRenders(MAX_RENDERS, now).filter((e) => !scope || isWithin(e.fiber as Fiber, scope));
+  const renders = getTopRenders(MAX_RENDERS, now, (e) => !scope || isWithin(e.fiber as Fiber, scope));
   const groups = sortRenderGroups(groupRenders(renders), sort).slice(0, MAX_GROUPS);
   const showTime = groups.some((g) => g.ms > 0);
   const statOf = (source: Hit | undefined) => (source ? statsByEndpoint.get(endpointOf(source.record)) : undefined);

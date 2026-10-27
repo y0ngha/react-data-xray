@@ -114,4 +114,26 @@ describe('RdxDevtools', () => {
     fireEvent.click(within(panel).getByRole('button', { name: '<Row> 안 ✕' }));
     expect(within(panel).getByText(/GET \/api\/unused/)).toBeTruthy();
   });
+
+  it('고른 컴포넌트가 화면에서 사라지면 화면 전체로 돌아간다', async () => {
+    type Item = { id: number; title: string };
+    const Row = ({ item }: { item: Item }) => <li>{item.title}</li>;
+    const item: Item = await fetch('/api/gone')
+      .then((r) => r.json())
+      .then((json) => json.data.list[0]);
+    const list = render(
+      <ul>
+        <Row item={item} />
+      </ul>,
+    );
+    render(<RdxDevtools hotkey={{ key: 'e', shift: true }} />);
+    const target = screen.getByText(item.title);
+    Object.defineProperty(document, 'elementFromPoint', { value: () => target, configurable: true });
+    fireEvent.keyDown(window, { key: 'e', metaKey: true, shiftKey: true });
+    fireEvent.click(target);
+    expect(screen.getByRole('button', { name: '<Row> 안 ✕' })).toBeTruthy();
+    list.unmount();
+    fireEvent.click(screen.getByRole('button', { name: /네트워크 요청/ }));
+    expect(screen.queryByRole('button', { name: '<Row> 안 ✕' })).toBeNull();
+  });
 });

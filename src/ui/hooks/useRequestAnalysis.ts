@@ -38,14 +38,13 @@ export const useRequestAnalysis = (ignored: ReadonlySet<string>): RequestAnalysi
 };
 
 /**
- * 분석 대상(고른 컴포넌트 안)이 쓰는 요청만 남긴다. 컴포넌트가 지금 쥔 응답의 요청뿐 아니라 같은 요청(메서드·URL·본문)의
+ * 분석 대상(고른 컴포넌트 안)이 쓰는 요청만 남긴다. 쓰는 요청과 같은 요청(메서드·URL·본문, requestKeyOf)이면
  * 이전 기록도 남긴다(폴링으로 몇 번 받았는지 보려고). 분류는 전체 기록 기준 그대로 둔다(중복·주기는 전체를 봐야 안다).
  * 요청 탭·타임라인이 같은 모양을 받도록 RequestAnalysis 로 돌려준다.
  */
-export const narrowAnalysis = (analysis: RequestAnalysis, used: ReadonlySet<RequestRecord>): RequestAnalysis => {
-  const keys = new Set(Array.from(used, requestKeyOf));
-  const records = analysis.records.filter((r) => used.has(r) || keys.has(requestKeyOf(r)));
-  const stats = getEndpointStats(records, analysis.classes as Map<number, RequestClass>);
+export const narrowAnalysis = (analysis: RequestAnalysis, usedKeys: ReadonlySet<string>): RequestAnalysis => {
+  const records = analysis.records.filter((r) => usedKeys.has(requestKeyOf(r)));
+  const stats = getEndpointStats(records, analysis.classes);
   return {
     ...analysis,
     records,

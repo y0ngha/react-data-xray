@@ -104,12 +104,19 @@ export const getRenderInfo = (fiber: unknown, now = Date.now()): RenderSummary |
 };
 
 /** 최근 10초 렌더가 있는 컴포넌트들(렌더 많은 순) */
-export const getTopRenders = (limit = 20, now = Date.now()): Array<RenderEntry & RenderSummary> => {
+export const getTopRenders = (
+  limit = 20,
+  now = Date.now(),
+  /** 자르기 전에 거른다(분석 대상 안의 렌더만 볼 때). 자른 뒤에 거르면 대상 안의 렌더가 빠질 수 있다. */
+  keep: (entry: RenderEntry) => boolean = () => true,
+): Array<RenderEntry & RenderSummary> => {
   // 10초 넘게 렌더되지 않은 컴포넌트는 빼 둔다. 안 그러면 한 번이라도 렌더된 컴포넌트를 매번 다 요약한다.
   active.forEach((e) => {
     if ((e.events[e.events.length - 1]?.time ?? 0) < now - WINDOW_MS) active.delete(e);
   });
-  return Array.from(active, (e) => Object.assign(summarize(e, now), e))
+  return Array.from(active)
+    .filter(keep)
+    .map((e) => Object.assign(summarize(e, now), e))
     .filter((e) => e.recent > 0)
     .sort((a, b) => b.recent - a.recent)
     .slice(0, limit);

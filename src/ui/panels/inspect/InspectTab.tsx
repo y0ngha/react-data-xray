@@ -17,7 +17,7 @@ const HitList = ({ hits, stats }: { hits: readonly Hit[]; stats: ReadonlyMap<str
 
 /** 데이터 › 출처: 클릭한 요소의 데이터가 어느 API 응답에서 왔는지 */
 export const InspectTab = ({ result, stats }: { result: InspectResult | null; stats: ReadonlyMap<string, EndpointStat> }) => {
-  if (!result) return <Muted>[요소 선택]을 누르고 화면의 요소를 클릭하면, 그 요소의 데이터가 어느 API 응답에서 왔는지 보여 줍니다.</Muted>;
+  if (!result) return <Muted>[요소 선택]으로 화면의 요소를 고르면 그 요소의 출처와, 그 컴포넌트 안만 분석한 결과를 보여 줍니다.</Muted>;
   const withHits = result.components.filter((c) => c.hits.length > 0);
   return (
     <div>

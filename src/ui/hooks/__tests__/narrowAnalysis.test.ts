@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 
 import { classifyRecords } from '../../../core/requests/classify.js';
 import { getEndpointStats } from '../../../core/requests/endpointStats.js';
+import { requestKeyOf } from '../../../core/requests/requestKey.js';
 import { createRecord, finishRecord, getRecords } from '../../../core/requests/store.js';
 import { narrowAnalysis, type RequestAnalysis } from '../useRequestAnalysis.js';
 
@@ -26,7 +27,7 @@ it('분석 대상이 쓰는 요청과 같은 요청(메서드·URL·본문)의 �
     statsByEndpoint: new Map(stats.map((s) => [s.endpoint, s])),
     wasteCount: 0,
   };
-  const narrowed = narrowAnalysis(all, new Set([latest]));
+  const narrowed = narrowAnalysis(all, new Set([requestKeyOf(latest)]));
   expect(narrowed.records.map((r) => r.url)).toEqual(['/api/card?pcode=1', '/api/card?pcode=1']);
   expect(narrowed.stats).toHaveLength(1);
 });

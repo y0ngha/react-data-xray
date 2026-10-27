@@ -63,11 +63,7 @@ export const PanelContent = ({
       {tab === 'inspect' && (
         <>
           {/* 클릭한 요소의 출처. 컴포넌트 밖을 눌러 대상을 못 정했어도 결과는 보여 준다. */}
-          {result ? (
-            <InspectTab result={result} stats={analysis.statsByEndpoint} />
-          ) : (
-            <Muted>[요소 선택]으로 화면의 요소를 고르면 그 요소의 출처와, 그 컴포넌트 안만 분석한 결과를 보여 줍니다.</Muted>
-          )}
+          <InspectTab result={result} stats={analysis.statsByEndpoint} />
           <SourcesByApi boxes={boxes} title={scope ? `<${scope.name}> 안에서 데이터를 쓰는 컴포넌트` : '화면에서 데이터를 쓰는 컴포넌트'} />
         </>
       )}

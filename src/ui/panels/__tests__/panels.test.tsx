@@ -45,7 +45,7 @@ describe('RequestsTab', () => {
 describe('InspectTab', () => {
   it('검사 전, 결과 없음, 글자로 추정한 결과를 구분해 보여 준다', () => {
     const { rerender } = renderWithActions(<InspectTab result={null} stats={new Map()} />);
-    expect(screen.getByText(/요소 선택\]을 누르고/)).toBeTruthy();
+    expect(screen.getByText(/요소 선택\]으로 화면의 요소를 고르면/)).toBeTruthy();
     rerender(<InspectTab result={{ components: [{ depth: 0, name: 'A', hits: [], fiber: null }], guesses: [] }} stats={new Map()} />);
     expect(screen.getByText('연결된 API 응답을 찾지 못했습니다.')).toBeTruthy();
     const record = finished('/api/g');

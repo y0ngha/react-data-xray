@@ -22,7 +22,8 @@ const NO_BOXES: Box[] = [];
  * 스크롤·크기 변경에 따른 위치는 목록을 다시 모으지 않고 그리는 쪽에서 직접 고친다.
  */
 export const useOverlayBoxes = (enabled: boolean, scope: Fiber | null): Box[] => {
-  const [boxes, setBoxes] = useState<Box[]>(NO_BOXES);
+  // 어느 범위에서 모은 박스인지 함께 둔다. 범위가 바뀐 직후 다음 수집 전까지 이전 범위의 박스를 쓰지 않게 한다.
+  const [collected, setCollected] = useState<{ scope: Fiber | null; boxes: Box[] }>({ scope: null, boxes: NO_BOXES });
   // commit 을 받으려면 렌더 감시가 켜져 있어야 한다.
   useRenderMonitoring(enabled);
   useEffect(() => {
@@ -33,7 +34,7 @@ export const useOverlayBoxes = (enabled: boolean, scope: Fiber | null): Box[] =>
       timer = 0;
       last = Date.now();
       const { boxes: next, deferred } = collectBoxes(isOwnUi, BUDGET_MS, scope ?? undefined);
-      setBoxes(next);
+      setCollected({ scope, boxes: next });
       if (deferred) timer = window.setTimeout(collect, CONTINUE_MS);
       // 응답 색인이 덜 끝났으면 commit 이 없어도 평소 간격 뒤에 한 번 더 모은다(색인 뒤에야 찾는 파생 출처).
       else if (isIndexPending()) timer = window.setTimeout(collect, COLLECT_MS);
@@ -48,5 +49,5 @@ export const useOverlayBoxes = (enabled: boolean, scope: Fiber | null): Box[] =>
       unsubscribe();
     };
   }, [enabled, scope]);
-  return enabled ? boxes : NO_BOXES;
+  return enabled && collected.scope === scope ? collected.boxes : NO_BOXES;
 };

@@ -1,4 +1,4 @@
-import { findRootFibers, getComponentName, hostNodesOf, toCurrent, unionRect, walkFibers } from '../fiber/tree.js';
+import { findRootFibers, getComponentName, hostNodesOf, isMounted, toCurrent, unionRect, walkFibers } from '../fiber/tree.js';
 import { isComposite, type Fiber } from '../fiber/types.js';
 import { getOrigin } from '../requests/origins.js';
 import { findDerivedOrigin, isIndexPending } from './derivedMatch.js';
@@ -128,6 +128,7 @@ export const collectBoxes = (
       visitOne(f, shown);
       return false;
     });
+  if (scope && !isMounted(scope)) return { boxes, deferred: false };
   if (scope) {
     // 범위 밖 조상이 이미 보여 준 데이터(카드의 프로젝트 항목 등)는 덮인 것으로 보고 시작한다. 화면 전체로 볼 때와 같은 박스가 나온다.
     const root = toCurrent(scope);
