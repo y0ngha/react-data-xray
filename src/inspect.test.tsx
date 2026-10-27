@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { useEffect, useState } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { install, serializeBody } from './capture.js';
@@ -194,6 +194,25 @@ describe('inspect', () => {
     expect(inspect(p).components[0].hits).toEqual([
       expect.objectContaining({ path: '$.data.list[0]', via: 'props.region, props.role', match: 'exact' }),
     ]);
+  });
+
+  it('StrictMode 가 effect 를 다시 실행해 생긴 중복은 호출 스택으로 알아본다', async () => {
+    const Fetcher = () => {
+      useEffect(() => {
+        void fetch('/api/strict');
+      }, []);
+      return null;
+    };
+    render(
+      <StrictMode>
+        <Fetcher />
+      </StrictMode>,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    const [first, second] = getRecords().filter((r) => r.url === '/api/strict');
+    expect(first.strictModeReplay).toBeUndefined();
+    expect(second).toMatchObject({ duplicateOf: first.id, strictModeReplay: true });
   });
 
   it('전체 표시는 commit 이 여러 번 일어나도 현재 화면의 박스만 만든다', async () => {

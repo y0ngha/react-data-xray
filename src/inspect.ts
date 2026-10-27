@@ -282,6 +282,8 @@ export interface Box {
   rect: DOMRect;
   name: string;
   hit: Hit;
+  /** 렌더 횟수를 찾을 때 쓰는 컴포넌트 fiber */
+  fiber: unknown;
 }
 
 // React 루트 컨테이너는 거의 바뀌지 않으므로 찾은 것을 기억해 두고, 없을 때만 페이지를 훑는다.
@@ -351,7 +353,7 @@ export const collectBoxes = (isOwnUi: (el: Element) => boolean): Box[] => {
         if (own && !(parentHit && parentHit.record === own.record && parentHit.path === own.path)) {
           const nodes = hostNodesOf(f).filter((n) => !isOwnUi(n));
           const rect = unionRect(nodes);
-          if (rect) boxes.push({ rect, name: getComponentName(f), hit: own });
+          if (rect) boxes.push({ rect, name: getComponentName(f), hit: own, fiber: f });
           hit = own;
         }
       }

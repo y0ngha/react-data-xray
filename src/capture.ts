@@ -12,6 +12,36 @@ const rememberText = (text: string, record: RequestRecord) => {
 const responseRecords = new WeakMap<Response, RequestRecord>();
 let installed = false;
 
+// 이 시간 안에 나간 요청은 포커스·재연결 때문에 라이브러리가 자동으로 다시 보낸 것으로 본다.
+const TRIGGER_WINDOW_MS = 1000;
+let lastFocusAt = 0;
+let lastOnlineAt = 0;
+
+// 호출 스택에서 rdx 자신의 프레임을 빼기 위한 이 모듈의 경로. 번들러가 붙인 쿼리와,
+// 스택에는 나오지 않는 file:// 접두사를 뺀다.
+const OWN_FILE = import.meta.url.split('?')[0].replace(/^file:\/\//, '');
+const MAX_STACK_FRAMES = 15;
+
+// React 가 StrictMode 에서 effect 를 다시 실행할 때만 호출 스택에 나오는 함수들(React 18, 19 dev 빌드).
+const STRICT_MODE_REPLAY = /DoubleInvoke|invoke(Passive|Layout)EffectMountInDEV|doubleInvokeEffects/;
+
+/** 새 요청에 보낸 위치, StrictMode 재실행 여부, 자동 재요청 여부를 붙인다. */
+const annotate = (record: RequestRecord): RequestRecord => {
+  const raw = new Error().stack ?? '';
+  // 판정은 자르기 전 전체 스택으로 한다. React 내부 프레임은 앱 코드보다 한참 아래에 있다.
+  record.strictModeReplay = STRICT_MODE_REPLAY.test(raw) || undefined;
+  const frames = raw
+    .split('\n')
+    .slice(1)
+    .filter((line) => !line.includes(OWN_FILE))
+    .map((line) => line.trim());
+  record.stack = frames.slice(0, MAX_STACK_FRAMES).join('\n') || undefined;
+  const now = record.startedAt;
+  if (now - lastOnlineAt <= TRIGGER_WINDOW_MS) record.trigger = 'reconnect';
+  else if (now - lastFocusAt <= TRIGGER_WINDOW_MS) record.trigger = 'focus';
+  return record;
+};
+
 const toUrl = (input: RequestInfo | URL): string =>
   typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 
@@ -62,6 +92,17 @@ export const install = (): void => {
   if (installed || typeof window === 'undefined') return;
   installed = true;
 
+  // React Query 의 refetchOnWindowFocus, SWR 의 revalidateOnFocus 처럼 라이브러리가 포커스·재연결 때 다시 요청하는 시점을 기억한다.
+  window.addEventListener('focus', () => {
+    lastFocusAt = Date.now();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') lastFocusAt = Date.now();
+  });
+  window.addEventListener('online', () => {
+    lastOnlineAt = Date.now();
+  });
+
   const originalClone = Response.prototype.clone;
   Response.prototype.clone = function () {
     const cloned = originalClone.call(this);
@@ -75,7 +116,7 @@ export const install = (): void => {
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
     // Request 객체의 본문은 동기로 읽을 수 없다.
     const requestBody = init && 'body' in init ? serializeBody(init.body) : input instanceof Request && input.body ? null : undefined;
-    const record = createRecord('fetch', method, toUrl(input), requestBody);
+    const record = annotate(createRecord('fetch', method, toUrl(input), requestBody));
     record.requestHeaders = headersToObject(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     let res: Response;
     try {
@@ -140,7 +181,7 @@ export const install = (): void => {
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const request = xhrRequests.get(this);
     if (request) {
-      const record = createRecord('xhr', request.method, request.url, serializeBody(body));
+      const record = annotate(createRecord('xhr', request.method, request.url, serializeBody(body)));
       if (Object.keys(request.headers).length > 0) record.requestHeaders = { ...request.headers };
       xhrCurrent.set(this, record);
     }

@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 
 import { collectBoxes, inspect, inspectFiber, type Box, type Hit, type InspectResult } from './inspect.js';
 import { endpointOf, getRecords, pathOf as shortUrl, subscribe, type RequestRecord } from './registry.js';
-import { getCommits, getTopRenders, setRenderMonitoring } from './renderMonitor.js';
+import { CLASS_LABEL, classifyRecords, isInitialLoad, isWaste, needsReview, type RequestClass } from './classify.js';
+import { getCommits, getRenderInfo, getTopRenders, setRenderMonitoring, subscribeCommits } from './renderMonitor.js';
 
 export interface RdxDevtoolsProps {
   /** 요소 선택 단축키. 기본값 Ctrl+Shift+D (macOS 는 Cmd 도 허용) */
@@ -16,6 +17,7 @@ const ROOT_ATTR = 'data-rdx-root';
 const Z = 2147483647;
 const POSITION_KEY = 'react-data-xray:button';
 const DOCK_KEY = 'react-data-xray:dock';
+const IGNORE_KEY = 'react-data-xray:ignored-endpoints';
 
 /** float: 버튼 옆 작은 패널 · bottom/right: 화면 가장자리에 도킹 · window: 별도 창(도킹 해제) */
 type Dock = 'float' | 'bottom' | 'right' | 'window';
@@ -59,7 +61,11 @@ const color = {
   derived: '#60a5fa',
   text_: '#facc15',
   warn: '#f87171',
+  review: '#fbbf24',
 };
+
+/** 낭비는 빨강, 확인 필요는 노랑, 정상은 회색 */
+const classColor = (c: RequestClass) => (isWaste(c) ? color.warn : needsReview(c) ? color.review : color.muted);
 
 const MATCH_LABEL = { exact: '정확', derived: '파생', text: '추정' } as const;
 const MATCH_COLOR = { exact: color.exact, derived: color.derived, text: color.text_ } as const;
@@ -100,6 +106,27 @@ const valueAt = (body: unknown, path: string): unknown => {
   return keys.reduce<unknown>((acc, k) => (acc as Record<string, unknown> | undefined)?.[k], body);
 };
 
+
+// ---- 요청 분류: 낭비(빨강)와 이유 있는 반복(회색)을 화면 전체에서 같은 기준으로 쓴다 ----
+
+const ClassContext = createContext<(record: RequestRecord) => RequestClass>(() => 'ok');
+
+/** 요청 분류 배지. 낭비는 빨강, 주기 요청·StrictMode·무시는 회색으로 보여 준다. */
+const ClassBadge = ({ record, short }: { record: RequestRecord; short?: boolean }) => {
+  const c = useContext(ClassContext)(record);
+  if (c === 'ok') return null;
+  const label = short ? CLASS_LABEL[c].replace(' 재요청', '').replace(' 요청', '') : CLASS_LABEL[c];
+  return <Badge c={classColor(c)}>{label}</Badge>;
+};
+
+const readIgnored = (): Set<string> => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(IGNORE_KEY) ?? '[]');
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch {
+    return new Set();
+  }
+};
 
 // ---- 요청 상세: rdx 가 보여 주는 모든 요청에서 클릭하면 연다 ----
 
@@ -224,12 +251,23 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
         {record.kind} · {record.error ? `실패 (${record.error})` : record.status} · {record.durationMs}ms · {new Date(record.startedAt).toLocaleTimeString()}
       </div>
       <div style={{ marginTop: 4 }}>
-        {record.duplicateOf && <Badge c={color.warn}>중복 요청 (#{record.duplicateOf})</Badge>}
-        {record.sameResponseAs && <Badge c={color.warn}>같은 응답 재요청 (#{record.sameResponseAs})</Badge>}
+        <ClassBadge record={record} />
+        {record.duplicateOf && <span style={{ color: color.muted }}>앞선 요청 #{record.duplicateOf} </span>}
+        {record.sameResponseAs && <span style={{ color: color.muted }}>같은 응답 #{record.sameResponseAs}</span>}
       </div>
       {focus && (
         <Section title={`이 컴포넌트가 쓰는 데이터: ${focus.path} ← ${focus.via}`}>
           <pre style={preStyle}>{JSON.stringify(valueAt(record.body, focus.path), null, 2) ?? '(값 없음)'}</pre>
+        </Section>
+      )}
+      {record.trigger && (
+        <div style={{ color: color.muted, marginTop: 4 }}>
+          {record.trigger === 'focus' ? '창 포커스·탭 전환 직후에 나간 요청입니다(라이브러리의 자동 재요청).' : '네트워크 재연결 직후에 나간 요청입니다.'}
+        </div>
+      )}
+      {record.stack && (
+        <Section title="요청을 보낸 코드" copy={record.stack}>
+          <pre style={preStyle}>{record.stack}</pre>
         </Section>
       )}
       <Section title="Query">
@@ -266,20 +304,29 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
 interface EndpointStat {
   endpoint: string;
   count: number;
+  /** 낭비로 판정된 중복 요청 */
   duplicates: number;
+  /** 낭비로 판정된 같은 응답 재요청 */
   sameResponses: number;
+  /** 주기 요청·포커스 재요청처럼 의도된 듯하지만 점검할 만한 반복 */
+  review: number;
+  /** StrictMode·재연결·무시처럼 이유가 확실한 반복 */
+  explained: number;
   avgMs: number;
 }
 
-const getEndpointStats = (records: readonly RequestRecord[]): EndpointStat[] => {
+const getEndpointStats = (records: readonly RequestRecord[], classes: Map<number, RequestClass>): EndpointStat[] => {
   const map = new Map<string, EndpointStat & { totalMs: number }>();
   for (const r of records) {
     const endpoint = endpointOf(r);
-    const s = map.get(endpoint) ?? { endpoint, count: 0, duplicates: 0, sameResponses: 0, avgMs: 0, totalMs: 0 };
+    const s = map.get(endpoint) ?? { endpoint, count: 0, duplicates: 0, sameResponses: 0, review: 0, explained: 0, avgMs: 0, totalMs: 0 };
     s.count++;
     s.totalMs += r.durationMs;
-    if (r.duplicateOf) s.duplicates++;
-    if (r.sameResponseAs) s.sameResponses++;
+    const c = classes.get(r.id);
+    if (c === 'duplicate') s.duplicates++;
+    else if (c === 'same-response') s.sameResponses++;
+    else if (needsReview(c)) s.review++;
+    else if (c && c !== 'ok') s.explained++;
     map.set(endpoint, s);
   }
   return Array.from(map.values())
@@ -336,8 +383,7 @@ const Button = ({ active, onClick, children, title }: { active?: boolean; onClic
 
 const RequestFlags = ({ record, stat }: { record: RequestRecord; stat?: EndpointStat }) => (
   <>
-    {record.duplicateOf && <Badge c={color.warn}>중복 요청</Badge>}
-    {record.sameResponseAs && <Badge c={color.warn}>같은 응답 재요청</Badge>}
+    <ClassBadge record={record} />
     {stat && stat.count > 1 && <Badge c={isWasteful(stat) ? color.warn : color.muted}>최근 {stat.count}회 호출</Badge>}
   </>
 );
@@ -406,7 +452,17 @@ const InspectTab = ({ result, stats }: { result: InspectResult | null; stats: Ma
   );
 };
 
-const RequestsTab = ({ records, stats }: { records: readonly RequestRecord[]; stats: EndpointStat[] }) => {
+const RequestsTab = ({
+  records,
+  stats,
+  ignored,
+  onToggleIgnore,
+}: {
+  records: readonly RequestRecord[];
+  stats: EndpointStat[];
+  ignored: ReadonlySet<string>;
+  onToggleIgnore: (endpoint: string) => void;
+}) => {
   const [view, setView] = useState<'endpoints' | 'log'>('endpoints');
   // 엔드포인트를 누르면 그 엔드포인트의 요청만 전체 기록에 보여 준다.
   const [filter, setFilter] = useState<string | null>(null);
@@ -440,13 +496,28 @@ const RequestsTab = ({ records, stats }: { records: readonly RequestRecord[]; st
               }}
               style={{ padding: '4px 0', borderTop: `1px solid ${color.border}`, cursor: 'pointer' }}
             >
-              <div style={{ color: isWasteful(s) ? color.warn : color.text }}>
-                <u>{s.endpoint}</u>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ color: isWasteful(s) ? color.warn : ignored.has(s.endpoint) ? color.muted : color.text, flex: 1 }}>
+                  <u>{s.endpoint}</u>
+                </span>
+                <button
+                  type="button"
+                  title="이 엔드포인트의 중복·같은 응답을 낭비로 세지 않습니다(의도된 동작일 때)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleIgnore(s.endpoint);
+                  }}
+                  style={{ background: 'none', border: `1px solid ${color.border}`, borderRadius: 4, color: color.muted, font: 'inherit', cursor: 'pointer' }}
+                >
+                  {ignored.has(s.endpoint) ? '무시 해제' : '무시'}
+                </button>
               </div>
               <div style={{ color: color.muted }}>
                 {s.count}회 · 평균 {s.avgMs}ms
                 {s.duplicates > 0 && <span style={{ color: color.warn }}> · 중복 {s.duplicates}</span>}
                 {s.sameResponses > 0 && <span style={{ color: color.warn }}> · 같은 응답 {s.sameResponses}</span>}
+                {s.review > 0 && <span style={{ color: color.review }}> · 확인 필요 {s.review}</span>}
+                {s.explained > 0 && <span> · 정상 반복 {s.explained}</span>}
               </div>
             </div>
           ))
@@ -460,8 +531,7 @@ const RequestsTab = ({ records, stats }: { records: readonly RequestRecord[]; st
                 </div>
                 <div style={{ color: r.error ? color.warn : color.muted }}>
                   {r.kind} · {r.error ? `실패 (${r.error})` : r.status} · {r.durationMs}ms · {new Date(r.startedAt).toLocaleTimeString()}{' '}
-                  {r.duplicateOf && <Badge c={color.warn}>중복</Badge>}
-                  {r.sameResponseAs && <Badge c={color.warn}>같은 응답</Badge>}
+                  <ClassBadge record={r} short />
                 </div>
                 <RequestParams record={r} />
               </RequestLink>
@@ -554,6 +624,7 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
   const [paused, setPaused] = useState(false);
   const [hovered, setHovered] = useState<{ record: RequestRecord; x: number; y: number } | null>(null);
   const openRequest = useContext(OpenRequestContext);
+  const classOf = useContext(ClassContext);
   // 도킹 방식에 따라 패널 너비가 달라지므로 그릴 때마다 실제 너비를 잰다.
   const boxRef = useRef<HTMLDivElement>(null);
   const [measured, setMeasured] = useState(456);
@@ -594,7 +665,9 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, color: color.muted }}>
         <span>최근 20초</span>
         <span>
-          <span style={{ color: color.accent }}>■</span> 요청 <span style={{ color: color.warn }}>■</span> 중복·같은 응답 <span style={{ color: '#fb923c' }}>■</span> 실패{' '}
+          <span style={{ color: color.accent }}>■</span> 요청 <span style={{ color: color.warn }}>■</span> 낭비 <span style={{ color: color.review }}>■</span> 확인 필요(주기·포커스){' '}
+          <span style={{ color: color.muted }}>■</span> 정상 반복{' '}
+          <span style={{ color: '#fb923c' }}>■</span> 실패{' '}
           <span style={{ color: '#a78bfa' }}>▮</span> 렌더(높이 = 렌더된 컴포넌트 수)
         </span>
         <span style={{ marginLeft: 'auto' }}>
@@ -605,16 +678,22 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
       </div>
       <div ref={boxRef} style={{ position: 'relative' }} onMouseLeave={() => setHovered(null)}>
       <svg width={width} height={height} style={{ display: 'block', background: color.panel, borderRadius: 4 }}>
-        {bursts.map((b, i) => (
-          <g key={`b${i}`}>
-            <rect x={x(b.from) - 2} y={0} width={Math.max(4, x(b.to) - x(b.from) + 4)} height={height - 14} fill={color.warn} opacity={0.18} />
-            <text x={x(b.from)} y={height - 16} fill={color.warn} fontSize={10}>
-              요청 몰림 {b.count}건
-            </text>
-          </g>
-        ))}
+        {bursts.map((b, i) => {
+          // 페이지 진입 직후의 동시 요청은 흔하지만, 수십 건이 쏟아지는 것은 성능 문제일 수 있어 노랑(확인 필요)으로 둔다.
+          const initial = isInitialLoad(b.from);
+          const c = initial ? color.review : color.warn;
+          return (
+            <g key={`b${i}`}>
+              <rect x={x(b.from) - 2} y={0} width={Math.max(4, x(b.to) - x(b.from) + 4)} height={height - 14} fill={c} opacity={initial ? 0.1 : 0.18} />
+              <text x={x(b.from)} y={height - 16} fill={c} fontSize={10}>
+                {initial ? '첫 로딩 몰림' : '요청 몰림'} {b.count}건
+              </text>
+            </g>
+          );
+        })}
         {bars.map(({ r, lane }) => {
-          const wasteful = !!(r.duplicateOf || r.sameResponseAs);
+          const c = classOf(r);
+          const fill = r.error ? '#fb923c' : c === 'ok' ? color.accent : classColor(c);
           return (
             <rect
               key={r.id}
@@ -622,7 +701,7 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
               y={lane * (LANE_H + 2) + 2}
               width={Math.max(3, x(r.startedAt + r.durationMs) - x(r.startedAt))}
               height={LANE_H}
-              fill={r.error ? '#fb923c' : wasteful ? color.warn : color.accent}
+              fill={fill}
               stroke={hovered?.record === r ? '#fff' : undefined}
               style={{ cursor: 'pointer' }}
               onMouseEnter={() => setHovered({ record: r, x: x(r.startedAt), y: lane * (LANE_H + 2) + LANE_H + 6 })}
@@ -669,8 +748,7 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
           </div>
           <RequestParams record={hovered.record} />
           <div>
-            {hovered.record.duplicateOf && <Badge c={color.warn}>중복 요청</Badge>}
-            {hovered.record.sameResponseAs && <Badge c={color.warn}>같은 응답 재요청</Badge>}
+            <ClassBadge record={hovered.record} />
           </div>
           <div style={{ color: color.accent }}>클릭하면 상세 보기</div>
         </div>
@@ -685,12 +763,23 @@ const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
 
 // ---- 전체 표시 오버레이 ----
 
+// 렌더 직후 박스를 이만큼 보라색으로 강조한다(React DevTools 의 Highlight updates 처럼).
+const FLASH_MS = 600;
+// 최근 10초에 이만큼 넘게 렌더되면 렌더 폭주로 보고 숫자를 빨갛게 표시한다.
+const RENDER_STORM = 10;
+const RENDER_COLOR = '#a78bfa';
+
 const Overlay = () => {
   const [boxes, setBoxes] = useState<Box[]>([]);
+  // 박스 위치를 다시 계산하지 않고 깜빡임과 렌더 횟수만 갱신하는 짧은 주기
+  const [, setTick] = useState(0);
   const openRequest = useContext(OpenRequestContext);
+  const classOf = useContext(ClassContext);
   useEffect(() => {
+    // 전체 표시가 켜져 있는 동안 렌더도 센다.
+    setRenderMonitoring(true);
     const update = () => setBoxes(collectBoxes((el) => isOwnUi(el)));
-    // 스크롤 이벤트는 매우 잦으므로 한 프레임에 한 번만 다시 계산한다.
+    // 스크롤과 commit 은 매우 잦으므로 한 프레임에 한 번만 다시 계산한다.
     let frame = 0;
     const refresh = () => {
       if (frame) return;
@@ -701,21 +790,30 @@ const Overlay = () => {
     };
     update();
     const timer = window.setInterval(refresh, 1000);
+    const flashTimer = window.setInterval(() => setTick((t) => t + 1), 150);
+    const unsubscribe = subscribeCommits(refresh);
     window.addEventListener('scroll', refresh, true);
     window.addEventListener('resize', refresh);
     return () => {
       cancelAnimationFrame(frame);
       window.clearInterval(timer);
+      window.clearInterval(flashTimer);
+      unsubscribe();
       window.removeEventListener('scroll', refresh, true);
       window.removeEventListener('resize', refresh);
+      setRenderMonitoring(false);
     };
   }, []);
+  const now = Date.now();
   return (
     <>
       {boxes.map((b, i) => {
         // 같은 엔드포인트의 다른 호출이 아니라, 이 데이터를 준 요청 자체가 낭비였을 때만 빨갛게 그린다.
-        const wasteful = !!(b.hit.record.duplicateOf || b.hit.record.sameResponseAs);
+        const wasteful = isWaste(classOf(b.hit.record));
         const c = wasteful ? color.warn : MATCH_COLOR[b.hit.match];
+        const render = getRenderInfo(b.fiber);
+        const flashing = !!render && now - render.last < FLASH_MS;
+        const storm = !!render && render.recent >= RENDER_STORM;
         return (
           <div
             key={i}
@@ -725,15 +823,15 @@ const Overlay = () => {
               top: b.rect.top,
               width: b.rect.width,
               height: b.rect.height,
-              outline: `1px solid ${c}`,
-              background: `${c}14`,
+              outline: flashing ? `2px solid ${RENDER_COLOR}` : `1px solid ${c}`,
+              background: flashing ? `${RENDER_COLOR}33` : `${c}14`,
               pointerEvents: 'none',
               zIndex: Z - 2,
             }}
           >
             <span
               role="button"
-              title="클릭하면 요청 상세를 봅니다"
+              title={`클릭하면 요청 상세를 봅니다${render ? ` · 최근 10초 렌더 ${render.recent}회` : ''}`}
               onClick={() => openRequest(b.hit.record)}
               style={{
                 position: 'absolute',
@@ -750,6 +848,9 @@ const Overlay = () => {
                 overflow: 'hidden',
               }}
             >
+              {render && render.recent > 0 && (
+                <b style={{ color: storm ? '#7f1d1d' : '#000', marginRight: 4 }}>↻{render.recent}</b>
+              )}
               {shortUrl(b.hit.record.url)}
             </span>
           </div>
@@ -921,8 +1022,23 @@ export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsP
   const popup = usePopupWindow(open && dock === 'window', () => updateDock({ dock: 'float' }));
   useRecords();
 
+  const [ignored, setIgnored] = useState(readIgnored);
+  const toggleIgnore = (endpoint: string) =>
+    setIgnored((prev) => {
+      const next = new Set(prev);
+      if (next.has(endpoint)) next.delete(endpoint);
+      else next.add(endpoint);
+      try {
+        localStorage.setItem(IGNORE_KEY, JSON.stringify(Array.from(next)));
+      } catch {
+        // 설정 저장은 편의 기능이라 실패해도 넘어간다.
+      }
+      return next;
+    });
   const records = getRecords();
-  const stats = getEndpointStats(records);
+  const classes = classifyRecords(records, ignored);
+  const classOf = (record: RequestRecord): RequestClass => classes.get(record.id) ?? 'ok';
+  const stats = getEndpointStats(records, classes);
   const statsByEndpoint = new Map(stats.map((s) => [s.endpoint, s]));
   const wastefulCount = stats.filter(isWasteful).length;
 
@@ -1038,7 +1154,7 @@ export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsP
         {/* 상세를 여는 동안에도 탭 상태(필터, 타임라인 멈춤 등)를 잃지 않도록 숨기기만 한다. */}
         <div style={{ display: selected ? 'none' : undefined }}>
           {tab === 'inspect' && <InspectTab result={result} stats={statsByEndpoint} />}
-          {tab === 'requests' && <RequestsTab records={records} stats={stats} />}
+          {tab === 'requests' && <RequestsTab records={records} stats={stats} ignored={ignored} onToggleIgnore={toggleIgnore} />}
           {tab === 'timeline' && <TimelineTab records={records} />}
           {tab === 'renders' && <RendersTab statsByEndpoint={statsByEndpoint} />}
         </div>
@@ -1047,6 +1163,7 @@ export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsP
   );
 
   return createPortal(
+    <ClassContext.Provider value={classOf}>
     <OpenRequestContext.Provider value={openRequest}>
     <div {...{ [ROOT_ATTR]: '' }}>
       {showAll && <Overlay />}
@@ -1096,7 +1213,8 @@ export const RdxDevtools = ({ hotkey = { key: 'd', shift: true } }: RdxDevtoolsP
         RDX
       </button>
     </div>
-    </OpenRequestContext.Provider>,
+    </OpenRequestContext.Provider>
+    </ClassContext.Provider>,
     document.body,
   );
 };

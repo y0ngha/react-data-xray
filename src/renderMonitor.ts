@@ -44,6 +44,7 @@ const MAX_COMMITS = 500;
 const commits: Commit[] = [];
 const entries = new WeakMap<Fiber, RenderEntry>();
 const ignoredTypes = new Set<unknown>();
+const commitListeners = new Set<() => void>();
 const active = new Set<RenderEntry>();
 let enabled = false;
 
@@ -91,7 +92,23 @@ const onCommit = (root: { current: Fiber }) => {
   if (count > 0) {
     commits.push({ time: now, count });
     if (commits.length > MAX_COMMITS) commits.shift();
+    commitListeners.forEach((l) => l());
   }
+};
+
+/** 렌더가 있었던 commit 마다 부른다. 전체 표시가 박스를 다시 그릴 때 쓴다. */
+export const subscribeCommits = (listener: () => void): (() => void) => {
+  commitListeners.add(listener);
+  return () => commitListeners.delete(listener);
+};
+
+/** 컴포넌트(fiber) 하나의 최근 10초 렌더 횟수와 마지막 렌더 시각 */
+export const getRenderInfo = (fiber: unknown): { recent: number; last: number } | null => {
+  const f = fiber as Fiber;
+  const entry = entries.get(f) ?? (f.alternate ? entries.get(f.alternate) : undefined);
+  if (!entry) return null;
+  const since = Date.now() - WINDOW_MS;
+  return { recent: entry.times.filter((t) => t >= since).length, last: entry.times[entry.times.length - 1] ?? 0 };
 };
 
 const setupHook = () => {

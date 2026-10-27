@@ -13,6 +13,12 @@ export interface RequestRecord {
   responseText?: string;
   /** 네트워크 실패·취소·타임아웃 */
   error?: string;
+  /** 창 포커스·탭 표시 전환, 네트워크 재연결 직후에 나간 요청(라이브러리의 자동 재요청) */
+  trigger?: 'focus' | 'reconnect';
+  /** 요청을 보낸 코드의 호출 스택(rdx 자신의 프레임은 뺀다) */
+  stack?: string;
+  /** React 가 StrictMode 에서 effect 를 다시 실행하는 도중에 보낸 요청(호출 스택으로 확인) */
+  strictModeReplay?: boolean;
   status: number;
   startedAt: number;
   durationMs: number;
@@ -68,7 +74,7 @@ export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url'>): strin
 
 // 쿼리스트링까지 포함한 요청 단위. 중복·같은 응답 판정은 파라미터가 같은 요청끼리만 한다.
 // 파라미터 순서만 다른 URL 은 같은 요청으로 본다.
-const requestKeyOf = (record: Pick<RequestRecord, 'method' | 'url' | 'requestBody'>): string => {
+export const requestKeyOf = (record: Pick<RequestRecord, 'method' | 'url' | 'requestBody'>): string => {
   let url = record.url;
   try {
     const u = new URL(record.url, location.href);

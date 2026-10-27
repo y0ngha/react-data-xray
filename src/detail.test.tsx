@@ -30,6 +30,17 @@ describe('요청 상세', () => {
     expect(record.responseText).toBe('{"data":{"id":7,"name":"cpu"}}');
   });
 
+  it('요청을 보낸 코드 위치와, 창 포커스 직후의 자동 재요청을 기록한다', async () => {
+    window.dispatchEvent(new Event('focus'));
+    await fetch('/api/after-focus');
+
+    const [record] = getRecords();
+    expect(record.trigger).toBe('focus');
+    // 이 테스트 파일에서 보냈으므로 스택에 이 파일이 있고, rdx 의 capture 모듈은 빠져 있다.
+    expect(record.stack).toContain('detail.test');
+    expect(record.stack).not.toContain('capture.ts');
+  });
+
   it('실패한 요청도 목록에 남기고 앱에는 원래 에러를 던진다', async () => {
     mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
@@ -49,6 +60,7 @@ describe('요청 상세', () => {
     expect(screen.getByText('id:')).toBeTruthy();
     expect(screen.getByText('x-token:')).toBeTruthy();
     expect(screen.getAllByText(/"name": "cpu"/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/중복 요청/)).toBeTruthy();
+    // 낭비 배지는 패널의 분류 컨텍스트가 그리므로, 상세 화면 단독으로는 앞선 요청 번호로 확인한다.
+    expect(screen.getByText(/앞선 요청 #/)).toBeTruthy();
   });
 });
