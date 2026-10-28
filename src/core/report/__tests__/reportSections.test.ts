@@ -21,7 +21,8 @@ const ORIGINAL_HOW_TO_READ: string[] = [
 ];
 
 describe('보고서 섹션 분리', () => {
-  it('how_to_read_order: howToRead 는 분리 전 14줄과 내용·순서가 같다', () => {
-    expect(buildReport(false, 0, false).howToRead).toEqual(ORIGINAL_HOW_TO_READ);
+  it('how_to_read_order: howToRead 앞 14줄은 분리 전과 내용·순서가 같다', () => {
+    // 이슈 작업이 더하는 줄(*_HOW_TO_READ_EXTRA)은 뒤에 붙으므로 앞 14줄만 본다.
+    expect(buildReport(false, 0, false).howToRead.slice(0, ORIGINAL_HOW_TO_READ.length)).toEqual(ORIGINAL_HOW_TO_READ);
   });
 });
