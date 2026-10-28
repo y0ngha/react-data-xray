@@ -29,12 +29,31 @@ const TWO_NODES: ReadonlySet<string> = new Set(['useSyncExternalStore', 'useTran
 const TWO_NODES_REACT_18: ReadonlySet<string> = new Set([...TWO_NODES, 'useDeferredValue']);
 const PREVIEW_CHARS = 40;
 
-/** 값 미리보기: 숫자·문자열은 그대로, 나머지는 짧은 JSON(못 하면 종류만) */
+const PREVIEW_ITEMS = 3;
+
+const cut = (text: string): string => (text.length > PREVIEW_CHARS ? `${text.slice(0, PREVIEW_CHARS)}…` : text);
+
+const json = (v: unknown): string => (typeof v === 'function' ? 'ƒ' : (JSON.stringify(v) ?? String(v)));
+
+/** 값 미리보기: 숫자·문자열은 그대로, Map·Set·Date·클래스 인스턴스는 종류(와 크기)를 붙이고, 나머지는 짧은 JSON(못 하면 종류만) */
 export const previewValue = (value: unknown): string => {
   if (typeof value === 'function') return 'ƒ';
   try {
-    const text = typeof value === 'string' ? JSON.stringify(value) : (JSON.stringify(value) ?? String(value));
-    return text.length > PREVIEW_CHARS ? `${text.slice(0, PREVIEW_CHARS)}…` : text;
+    if (value instanceof Map) {
+      const head = [...value].slice(0, PREVIEW_ITEMS).map(([k, v]) => `${json(k)} => ${json(v)}`);
+      return cut(`Map(${value.size}) {${head.join(', ')}${value.size > PREVIEW_ITEMS ? ', …' : ''}}`);
+    }
+    if (value instanceof Set) {
+      const head = [...value].slice(0, PREVIEW_ITEMS).map(json);
+      return cut(`Set(${value.size}) [${head.join(', ')}${value.size > PREVIEW_ITEMS ? ', …' : ''}]`);
+    }
+    if (value instanceof Date) return `Date(${Number.isNaN(value.getTime()) ? 'Invalid' : value.toISOString()})`;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const proto = Object.getPrototypeOf(value);
+      const name = proto && proto !== Object.prototype ? proto.constructor?.name : undefined;
+      if (name) return cut(`${name} ${JSON.stringify(value)}`);
+    }
+    return cut(json(value));
   } catch {
     return Object.prototype.toString.call(value);
   }
