@@ -388,7 +388,9 @@ describe('바뀐 state 와 렌더 시작점의 영향', () => {
         fireEvent.click(screen.getByText(/^tick/));
       });
       const ticker = getTopRenders(200).find((e) => e.name === 'Ticker')!;
-      expect(ticker.stateHooks).toEqual([{ label: 'useState #2', hookIndex: 2, count: 3, intervalMs: 1000, last: { from: '1000', to: '0' } }]);
+      expect(ticker.stateHooks).toEqual([
+        { label: 'useState #2', hookIndex: 2, count: 3, intervalMs: 1000, last: { from: '1000', to: '0' } },
+      ]);
     } finally {
       vi.useRealTimers();
     }
