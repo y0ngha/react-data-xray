@@ -33,9 +33,10 @@
     "lint:fix": "oxlint src --fix",
     "fmt": "oxfmt src scripts",
     "fmt:check": "oxfmt --check src scripts",
-    "check": "pnpm typecheck && pnpm lint && pnpm lint:react && pnpm fmt:check && pnpm test:coverage",
+    "check": "pnpm typecheck && pnpm lint && pnpm lint:react && pnpm fmt:check && pnpm test:coverage && pnpm test:react19",
     "sync": "pnpm build && node scripts/sync-to-app.mjs",
-    "lint:react": "react-doctor . --no-supply-chain --no-telemetry -y"
+    "lint:react": "react-doctor . --no-supply-chain --no-telemetry -y",
+    "test:react19": "vitest run --config vitest.react19.config.ts"
   },
   "peerDependencies": {
     "react": ">=18",

@@ -1,10 +1,12 @@
 import { touchRecords } from '../requests/store.js';
+import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestRecord } from '../requests/types.js';
 import { resolveStack } from './sourceMap.js';
 
 // 이 시간 안에 나간 요청은 포커스·재연결 때문에 라이브러리가 자동으로 다시 보낸 것으로 본다.
 const TRIGGER_WINDOW_MS = 1000;
-const MAX_STACK_FRAMES = 15;
+// 요청 기록에 남기는 앱 쪽 프레임 수. StrictMode 판정은 CAPTURE_FRAMES 전체로 하고, 기록은 앞부분만 둔다.
+const MAX_STACK_FRAMES = 10;
 // React 가 StrictMode 에서 effect 를 다시 실행할 때만 호출 스택에 나오는 함수들(React 18, 19 dev 빌드).
 const STRICT_MODE_REPLAY = /DoubleInvoke|invoke(Passive|Layout)EffectMountInDEV|doubleInvokeEffects/;
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -40,6 +42,29 @@ export const runtimeModuleUrl = (declared: string, stack: string | undefined): s
 };
 
 const OWN_FRAME = ownFramePattern(runtimeModuleUrl(import.meta.url, new Error().stack));
+
+// StrictMode 재실행 프레임(React 19 의 doubleInvokeEffectsOnFiber)은 앱 코드보다 한참 아래에 있어,
+// V8 기본(10프레임)이면 가로채기·effect 프레임에 밀려 잘린다. 요청을 기록할 때만 이만큼 남긴다.
+const CAPTURE_FRAMES = 40;
+
+/**
+ * 지금 호출 스택을 담은 Error. 상한이 CAPTURE_FRAMES 보다 낮을 때(V8 기본 10)만 이 한 번 올리고 되돌린다.
+ * 상한이 없거나(Firefox) 이미 넉넉하면(Safari 100, 앱이 올려 둔 값) 건드리지 않고, 고칠 수 없게 얼린 Error(SES)면 그대로 만든다.
+ */
+const captureStack = (): Error => {
+  const limit = Error.stackTraceLimit;
+  if (typeof limit !== 'number' || limit >= CAPTURE_FRAMES) return new Error();
+  try {
+    Error.stackTraceLimit = CAPTURE_FRAMES;
+  } catch {
+    return new Error();
+  }
+  try {
+    return new Error();
+  } finally {
+    Error.stackTraceLimit = limit;
+  }
+};
 
 const lastAt = { focus: 0, reconnect: 0 };
 
@@ -77,12 +102,16 @@ const appStack = (raw: string): string | undefined =>
 
 /** 새 요청에 보낸 위치, StrictMode 재실행 여부, 자동 재요청 여부를 붙인다. */
 export const annotateRequest = (record: RequestRecord): RequestRecord => {
-  const raw = new Error().stack ?? '';
-  // 판정은 자르기 전 전체 스택으로 한다. React 내부 프레임은 앱 코드보다 한참 아래에 있다.
-  record.strictModeReplay = STRICT_MODE_REPLAY.test(raw) || undefined;
-  record.stack = appStack(raw);
-  record.trigger = triggerAt(record.startedAt);
-  resolveSourceStack(record);
+  record.trigger = triggerAt(record.startedAt); // 요청 시점의 포커스·재연결 상태여야 한다
+  const err = captureStack(); // .stack 은 V8 이 늦게 만들므로 여기서 읽지 않는다
+  enqueue(() => {
+    const raw = err.stack ?? '';
+    // 판정은 자르기 전 전체 스택으로 한다. React 내부 프레임은 앱 코드보다 한참 아래에 있다.
+    record.strictModeReplay = STRICT_MODE_REPLAY.test(raw) || undefined;
+    record.stack = appStack(raw);
+    resolveSourceStack(record);
+    return true;
+  });
   return record;
 };
 
@@ -104,10 +133,13 @@ const resolveSourceStack = (record: RequestRecord): void => {
 const resolving = new Set<Promise<void>>();
 const RESOLVE_WAIT_MS = 2000;
 
-/** 진행 중인 소스맵 변환이 끝날 때까지(길어도 2초) 기다린다. 보고서를 저장하기 직전에 부른다. */
-export const whenSourcesResolved = async (): Promise<void> => {
-  if (resolving.size === 0) return;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([Promise.allSettled(resolving), new Promise((resolve) => (timer = setTimeout(resolve, RESOLVE_WAIT_MS)))]);
-  clearTimeout(timer);
+// 소스맵 step 은 맵을 받은 뒤에야 큐에 들어오므로, 큐를 비우고 한 틱 기다리기를 변환이 끝날 때까지 되풀이한다.
+const settle = async (deadline: number): Promise<void> => {
+  flushQueue();
+  if ((resolving.size === 0 && !isQueuePending()) || Date.now() >= deadline) return;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return settle(deadline);
 };
+
+/** 진행 중인 소스맵 변환이 끝날 때까지(길어도 2초) 기다린다. 보고서를 저장하기 직전에 부른다. */
+export const whenSourcesResolved = (): Promise<void> => settle(Date.now() + RESOLVE_WAIT_MS);

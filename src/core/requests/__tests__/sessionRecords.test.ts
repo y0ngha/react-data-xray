@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { flushQueue } from '../../scheduler/idleQueue.js';
 import { classifyRecords } from '../classify.js';
 import { installSessionRecords, saveRecords } from '../sessionRecords.js';
 import { clearRecords, createRecord, finishRecord, getRecords, keepResponseText, registerBody } from '../store.js';
@@ -12,6 +13,7 @@ describe('탭 안에서 요청 기록 이어 가기', () => {
     record.requestHeaders = { authorization: 'Bearer secret', accept: 'application/json' };
     finishRecord(record, 200);
     keepResponseText(record, '{"users":[1]}', { compare: true });
+    flushQueue();
     registerBody(record, { users: [1] });
     saveRecords();
 
@@ -23,15 +25,25 @@ describe('탭 안에서 요청 기록 이어 가기', () => {
     expect(restored.body).toBeUndefined();
     expect(restored.requestHeaders).toEqual({ authorization: '(가림)', accept: 'application/json' });
     const next = createRecord('fetch', 'GET', '/api/users');
+    flushQueue();
     expect(next.id).toBeGreaterThan(restored.id);
     // 새로고침 직후 다시 나간 같은 요청을 중복으로 찍지 않는다.
     expect(next.duplicateOf).toBeUndefined();
+  });
+
+  it('saveRecords_flushes: 미뤄 둔 원문 보관이 끝나기 전에 저장해도 원문이 담긴다', () => {
+    const record = createRecord('fetch', 'GET', '/api/pending');
+    finishRecord(record, 200);
+    keepResponseText(record, '{"a":1}', { compare: false });
+    saveRecords(); // flushQueue 없이
+    expect(JSON.parse(sessionStorage.getItem(KEY) ?? '[]')[0].responseText).toBe('{"a":1}');
   });
 
   it('비밀번호·토큰은 본문·원문·쿼리 어디에 있어도 가려서 저장하고, 되살린 뒤에는 저장소를 비운다', () => {
     const login = createRecord('fetch', 'POST', '/api/login?token=abc&page=1', '{"id":"kim","password":"pw"}');
     finishRecord(login, 200);
     keepResponseText(login, '{"accessToken":"t0k3n"}', { compare: false });
+    flushQueue();
     saveRecords();
     const raw = sessionStorage.getItem(KEY) ?? '';
     expect(raw).not.toMatch(/pw"|t0k3n|token=abc/);
@@ -47,6 +59,7 @@ describe('탭 안에서 요청 기록 이어 가기', () => {
       r.startedAt = t;
       finishRecord(r, 200);
       keepResponseText(r, '{"same":1}', { compare: true });
+      flushQueue();
       return r;
     };
     installSessionRecords();
@@ -90,6 +103,7 @@ describe('탭 안에서 요청 기록 이어 가기', () => {
       const r = createRecord('fetch', 'GET', `/api/big/${i}`);
       finishRecord(r, 200);
       keepResponseText(r, big, { compare: false });
+      flushQueue();
       return r;
     });
     saveRecords();

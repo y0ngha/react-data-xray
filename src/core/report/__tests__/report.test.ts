@@ -20,6 +20,15 @@ describe('보고서', () => {
     expect(report.renders.monitoring).toBe(false);
   });
 
+  it('낭비 URL 예에서 쿼리의 비밀값은 가린다(보고서는 AI 가 읽는다)', async () => {
+    const load = () => fetch('/api/secret?access_token=abc123&page=1').then((r) => r.json());
+    await [0, 1].reduce((prev) => prev.then(load), Promise.resolve());
+    await flush();
+    const endpoint = buildReport(false).requests.endpoints.find((e) => e.endpoint === 'GET /api/secret');
+    expect(endpoint?.wasteExamples).toEqual(['/api/secret?access_token=(가림)&page=1']);
+    expect(JSON.stringify(buildReport(false))).not.toContain('abc123');
+  });
+
   it('패널에서 의도된 반복으로 지정한 엔드포인트는 보고서에서도 낭비로 세지 않는다', async () => {
     localStorage.setItem('react-data-xray:ignored-endpoints', JSON.stringify(['GET /api/status']));
     const load = () => fetch('/api/status').then((r) => r.json());

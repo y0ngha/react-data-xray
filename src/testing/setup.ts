@@ -5,6 +5,7 @@ import { cleanup } from '@testing-library/react';
 import { afterEach, beforeEach } from 'vitest';
 
 import { installCapture } from '../core/capture/install.js';
+import { flushQueue } from '../core/scheduler/idleQueue.js';
 import { clearRecords } from '../core/requests/store.js';
 import { mockFetch, resetMockFetch } from './fetchMock.js';
 
@@ -25,4 +26,7 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  flushQueue(); // 한 테스트가 남긴 일이 다음 테스트로 넘어가지 않게 렌더를 걷기 전에 비운다
+  cleanup();
+});

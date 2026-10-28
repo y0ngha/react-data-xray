@@ -1,0 +1,44 @@
+{
+  "skill_name": "rdx-perf",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "대시보드 화면이 느려. 요청이 너무 많이 나가는 것 같은데 고쳐 줘.",
+      "expected_output": "reset 뒤 시나리오를 재서 before 스냅숏을 남기고, howToRead 를 읽은 뒤 낭비 많은 엔드포인트의 callers 를 코드에서 확인하고 한 원인만 고친 다음 after 와 비교해 표로 보고한다.",
+      "files": [],
+      "expectations": [
+        "고치기 전에 window.__RDX__.reset() 또는 새 탭으로 측정을 처음 상태에서 시작한다",
+        "before-<시나리오> 스냅숏(또는 report.json 사본)을 남긴다",
+        "보고서의 howToRead 를 읽는다",
+        "callers 위치의 코드를 열어 진단이 맞는지 확인한 뒤 고친다",
+        "한 번에 한 원인만 고치고 after 스냅숏으로 다시 잰다",
+        "엔드포인트별 count·duplicates·sameResponses 전후 수치를 표로 보고한다"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "목록 화면에서 리렌더가 너무 잦아. rdx 보고서 보고 고쳐 줘.",
+      "expected_output": "renders.components 에서 avoidable 이 많은 컴포넌트를 찾고, causedBy 의 조상에서 불필요한 setState 를 먼저 고친 뒤 필요하면 memo·useMemo·useCallback 을 쓰고, 동작이 바뀌지 않는지 확인한 다음 다시 잰다.",
+      "files": [],
+      "expectations": [
+        "renders.monitoring 이 false 면 다시 측정한다",
+        "React.memo 를 붙이기 전에 causedBy 의 조상을 먼저 본다",
+        "이전 값을 쓰는 화면처럼 수정이 동작을 바꿀 수 있는 곳을 확인한다",
+        "나아지지 않은 수정은 되돌린다",
+        "컴포넌트별 renders·avoidable 전후 수치를 보고한다"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "이 앱 성능 점검해 줘. API 중복 호출이 있는지 보고 싶어.",
+      "expected_output": "앱에 RdxDevtools 나 dev 서버 플러그인이 없음을 확인하고, 붙이는 방법(진입 파일 import 순서, Vite rdx() 또는 webpack rdxReportMiddleware)을 알려 준 뒤 멈춘다. 빌드 설정을 직접 고치지 않는다.",
+      "files": [],
+      "expectations": [
+        "진입 파일과 vite.config 또는 webpack 설정에서 rdx 연결 여부를 확인한다",
+        "RdxDevtools 를 react-dom 보다 먼저 import 해야 한다고 안내한다",
+        "사용자 허락 없이 vite.config·webpack 설정을 수정하지 않는다",
+        "rdx 없이 추측으로 성능 문제를 진단하거나 코드를 고치지 않는다"
+      ]
+    }
+  ]
+}

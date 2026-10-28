@@ -26,9 +26,9 @@
 
 아직 확인하지 않은 환경입니다. 배포 전에 하나씩 확인하고 결과를 여기에 적습니다.
 
-- [ ] **React 19**: fiber 구조(`dependencies.firstContext`, 훅 체인, `PerformedWork` 플래그), StrictMode 재실행 함수 이름, `__REACT_DEVTOOLS_GLOBAL_HOOK__` 등록 시점이 18과 같은지. React 19 는 `_debugSource` 를 없앴으므로 소스 위치가 필요한 기능은 `_debugStack` 으로 확인
+- [x] **React 19**: fiber 구조(`dependencies.firstContext`, 훅 체인, `PerformedWork` 플래그), StrictMode 재실행 함수 이름, `__REACT_DEVTOOLS_GLOBAL_HOOK__` 등록 시점이 18과 같은지. React 19 는 `_debugSource` 를 없앴으므로 소스 위치가 필요한 기능은 `_debugStack` 으로 확인
 - [ ] **webpack production 빌드**: `process.env.NODE_ENV === 'production'` 분기가 접혀 패널 코드가 번들에서 빠지는지(번들 크기, `react-data-xray` 문자열 검색)
-- [ ] **webpack·Next.js dev**: import 순서(react-dom 보다 먼저)가 지켜지는지, 호출 스택 필터가 webpack 의 모듈 경로에서도 rdx 프레임만 빼는지
+- [x] **webpack·Next.js dev**: import 순서(react-dom 보다 먼저)가 지켜지는지, 호출 스택 필터가 webpack 의 모듈 경로에서도 rdx 프레임만 빼는지
 - [ ] **Vite production 빌드**: rolldown 으로는 확인함(dsi 시절, 41바이트). 리팩터링 뒤 다시 확인
 - [ ] **오래된 브라우저**: 컴파일 대상(ES2020)에 맞는지
 

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Fiber } from '../../fiber/types.js';
+import { flushQueue } from '../../scheduler/idleQueue.js';
 import { createRecord, finishRecord, registerBody } from '../../requests/store.js';
 import { renderAdvice } from '../advice.js';
 import { groupRenders, sortRenderGroups, type RenderGroup } from '../groups.js';
-import { causeOf, findRecentResponse } from '../networkCause.js';
+import { causeOf, findRecentResponse, justArrived } from '../networkCause.js';
 import { changedState, sameContent } from '../renderReason.js';
 import { summarize } from '../summary.js';
 import { RENDER_REASONS, type RenderEntry, type RenderReason, type RenderSummary } from '../types.js';
@@ -43,6 +44,7 @@ describe('networkCause', () => {
     const record = createRecord('fetch', 'GET', url);
     finishRecord(record, 200);
     registerBody(record, body);
+    flushQueue(); // 본문 등록은 미뤄 둔다
     return record;
   };
 
@@ -54,6 +56,13 @@ describe('networkCause', () => {
     expect(findRecentResponse([body.item], arrived + 5000)).toBeUndefined();
     expect(findRecentResponse([body.item], arrived - 1)).toBeUndefined();
     expect(findRecentResponse([1, null, document.createElement('div')], arrived)).toBeUndefined();
+  });
+
+  it('justArrived: now 이후에 도착한 기록은 최근 20개 창을 쓰지 않는다', () => {
+    const real = respond('/api/real', { r: 1 });
+    const now = real.startedAt + real.durationMs + 10;
+    for (let i = 0; i < 25; i++) respond(`/api/late${i}`, { l: i }).startedAt = now + 1000;
+    expect(justArrived(now)).toBe(real);
   });
 
   it('자기 변경값에 응답이 없으면 조상의 원인을 이어받되, 자기 state 변경 렌더는 이어받지 않고 응답 직후일 때만 시간으로 잇는다', () => {

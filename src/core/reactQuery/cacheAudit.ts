@@ -1,5 +1,6 @@
 import { findRootFibers, walkFibers } from '../fiber/tree.js';
-import { findDerivedOrigin, flushIndex } from '../inspect/derivedMatch.js';
+import { findDerivedOrigin, isIndexPending } from '../inspect/derivedMatch.js';
+import { isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
@@ -85,6 +86,8 @@ interface PendingFetch {
   queryKey: unknown;
   /** 데이터를 붙잡지 않는다(큰 응답이 2분 동안 남지 않게) */
   data: WeakRef<object>;
+  /** 출처를 못 찾은 점검 횟수 */
+  attempts?: number;
 }
 
 interface ClientHistory {
@@ -96,6 +99,8 @@ interface ClientHistory {
 }
 
 const MAX_KEYS = 2000;
+// 네트워크 출처가 없는 데이터를 영원히 다시 찾지 않게, 이만큼 못 찾으면 버린다.
+const MAX_ATTEMPTS = 3;
 
 const histories = new WeakMap<QueryClientLike, ClientHistory>();
 // 측정을 새로 시작한 시각. 그 전 기록은 점검에 쓰지 않는다(고치기 전 지적이 고친 뒤 보고서에 남지 않게).
@@ -107,6 +112,13 @@ export const resetCacheAudit = (): void => {
 };
 
 const describeRequest = (r: RequestRecord): string => `${r.method} ${r.url}`;
+
+// 본문을 읽을 수 없는 요청(Request 객체, Blob 등)은 같은 요청인지 알 수 없어 키 점검에서 뺀다.
+const comparable = (r: RequestRecord | undefined): RequestRecord | undefined => (r?.bodyUnreadable ? undefined : r);
+
+/** 같은 참조로 확실한 데이터의 요청 */
+const exactRequest = (data: unknown): RequestRecord | undefined =>
+  data !== null && typeof data === 'object' ? comparable(getOrigin(data)?.record) : undefined;
 
 // 배열의 출처를 항목으로 찾을 때 볼 항목 수
 const MAX_ITEMS_TO_MATCH = 5;
@@ -128,7 +140,7 @@ const originOfData = (data: object): Origin | undefined => {
 
 /** 쿼리 함수가 가져온 데이터의 요청. 같은 참조가 아니면(structural sharing 이 복사) 필드 값으로 찾되, 성공 직전에 끝난 요청만 */
 const fetchedRequest = (data: object, at: number): RequestRecord | undefined => {
-  const record = originOfData(data)?.record;
+  const record = comparable(originOfData(data)?.record);
   const finished = record ? record.startedAt + record.durationMs : -Infinity;
   return record && finished <= at && at - finished <= FETCH_WINDOW_MS ? record : undefined;
 };
@@ -169,16 +181,21 @@ const rememberKey = (history: ClientHistory, q: QueryLike): void => {
   if (history.keys.size > MAX_KEYS) history.keys.delete(history.keys.keys().next().value as string);
 };
 
-/** 미뤄 둔 성공 이벤트의 출처를 찾는다. 색인을 먼저 마쳐 방금 받은 응답이 빠지지 않게 한다. */
+/**
+ * 미뤄 둔 성공 이벤트의 출처를 찾는다. 큐를 비우지 않는다(주기적으로 불리므로): 등록이 끝난 것만 쓰고,
+ * 큐에 일이 남은 동안은 못 찾은 이벤트를 다음 점검으로 넘긴다.
+ */
 const resolvePending = (history: ClientHistory): void => {
   if (history.pending.length === 0) return;
-  flushIndex();
-  history.pending.forEach(({ at, queryHash, queryKey, data }) => {
-    const value = data.deref();
-    const record = value && fetchedRequest(value, at);
-    if (record) pushBounded(history.fetched, toFetched(at, queryHash, queryKey, record));
+  const unresolved: PendingFetch[] = [];
+  history.pending.forEach((p) => {
+    const value = p.data.deref();
+    const record = value && fetchedRequest(value, p.at);
+    if (record) pushBounded(history.fetched, toFetched(p.at, p.queryHash, p.queryKey, record));
+    // 색인이 아직 도는 동안의 실패는 세지 않는다(색인 뒤에야 찾는 파생 출처).
+    else if (value && (p.attempts = (p.attempts ?? 0) + (isIndexPending() ? 0 : 1)) < MAX_ATTEMPTS) unresolved.push(p);
   });
-  history.pending = [];
+  history.pending = isQueuePending() ? unresolved : [];
 };
 
 /** 앱에서 invalidateQueries 를 부른 위치. rdx 가 감싼 invalidateQueries 와 그 안쪽 프레임은 뺀다(앱 코드가 첫 줄에 오게). */
@@ -212,8 +229,7 @@ const watch = (client: QueryClientLike): void => {
   const now = Date.now();
   cache.getAll().forEach((q) => {
     rememberKey(history, q);
-    const data = q.state.data;
-    const record = data !== null && typeof data === 'object' ? getOrigin(data)?.record : undefined;
+    const record = exactRequest(q.state.data);
     if (record) pushBounded(history.fetched, toFetched(now, q.queryHash, q.queryKey, record));
   });
   cache.subscribe((event) => {
@@ -291,8 +307,7 @@ const refetchesOnEveryVisit = (q: QueryLike): boolean =>
 /** 지금 캐시의 데이터 출처. 데이터가 바뀌지 않아 기록(2분)이 지난 중복 캐시도 찾게 같은 참조인 것을 더한다. */
 const currentFetched = (queries: readonly QueryLike[], now: number): Fetched[] =>
   queries.flatMap((q) => {
-    const data = q.state.data;
-    const record = data !== null && typeof data === 'object' ? getOrigin(data)?.record : undefined;
+    const record = exactRequest(q.state.data);
     return record ? [toFetched(now, q.queryHash, q.queryKey, record)] : [];
   });
 

@@ -1,3 +1,4 @@
+import { enqueue } from '../scheduler/idleQueue.js';
 import { registerOrigins } from './origins.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import type { RequestRecord } from './types.js';
@@ -25,9 +26,17 @@ export const setCurrentLoad = (load: number): void => {
 // 기록이 바뀔 때마다 오른다. 기록에서 계산한 값을 다시 계산할지 판단할 때 쓴다.
 let version = 0;
 
+// 구독자 호출은 한 번에 묶어 큐에서 부른다(앱의 호출 경로에서 렌더를 일으키지 않는다).
+let notifyQueued = false;
 const notify = () => {
   version++;
-  listeners.forEach((listener) => listener());
+  if (notifyQueued) return;
+  notifyQueued = true;
+  enqueue(() => {
+    notifyQueued = false;
+    listeners.forEach((listener) => listener());
+    return true;
+  });
 };
 
 export const subscribe = (listener: () => void): (() => void) => {
@@ -64,7 +73,11 @@ export const createRecord = (
     durationMs: 0,
     body: undefined,
   };
-  record.duplicateOf = detectDuplicate(record);
+  // 순서는 큐가 지키고, 판정은 startedAt 기준이라 늦어도 같다.
+  enqueue(() => {
+    if (!isStale(record)) record.duplicateOf = detectDuplicate(record);
+    return true;
+  });
   return record;
 };
 
@@ -84,10 +97,13 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
 
 /** 응답 원문을 상세 화면용으로 보관하고, 같은 요청의 직전 응답과 비교한다. */
 export const keepResponseText = (record: RequestRecord, text: string, { compare }: { compare: boolean }): void => {
-  if (isStale(record)) return;
-  record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (100KB 이후 생략)` : text;
-  if (compare) record.sameResponseAs = detectSameResponse(record, text);
-  notify();
+  enqueue(() => {
+    if (isStale(record)) return true;
+    record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (100KB 이후 생략)` : text;
+    if (compare) record.sameResponseAs = detectSameResponse(record, text);
+    notify();
+    return true;
+  });
 };
 
 /** 파싱된 응답 본문을 보관하고 그 안의 객체들을 출처와 함께 등록한다. */

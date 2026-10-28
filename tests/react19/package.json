@@ -1,0 +1,12 @@
+{
+  "name": "rdx-react19-test",
+  "private": true,
+  "description": "pnpm test:react19 가 쓰는 React 19 테스트 의존성. 루트의 react 18 과 섞이지 않게 따로 설치한다.",
+  "devDependencies": {
+    "@tanstack/react-query": "^5.104.5",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.3.3",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  }
+}

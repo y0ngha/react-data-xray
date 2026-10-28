@@ -41,9 +41,13 @@ export const findRecentResponse = (values: readonly unknown[], now: number): Req
 /** 방금(TIMING_WINDOW_MS 안) 도착한 응답 중 가장 최근 것 */
 export const justArrived = (now: number): RequestRecord | undefined => {
   const records = getRecords();
-  for (let i = records.length - 1; i >= Math.max(0, records.length - RECENT_RECORDS); i--) {
+  // 분석이 나중에 돌아 now 이후에 도착한 기록이 있을 수 있다. 그것들은 창을 쓰지 않게 건너뛴다.
+  let scanned = 0;
+  for (let i = records.length - 1; i >= 0 && scanned < RECENT_RECORDS; i--) {
     const arrived = records[i].startedAt + records[i].durationMs;
-    if (now >= arrived && now - arrived <= TIMING_WINDOW_MS) return records[i];
+    if (arrived > now) continue;
+    scanned++;
+    if (now - arrived <= TIMING_WINDOW_MS) return records[i];
   }
   return undefined;
 };

@@ -30,7 +30,9 @@
         "allow": [
           "__RDX__",
           "__REACT_DEVTOOLS_GLOBAL_HOOK__",
-          "_debugHookTypes"
+          "_debugHookTypes",
+          "_debugSource",
+          "_debugStack"
         ]
       }
     ]
@@ -48,6 +50,7 @@
       ],
       "rules": {
         "unicorn/consistent-function-scoping": "off",
+        "no-await-in-loop": "off",
         "react/jsx-no-constructed-context-values": "off"
       }
     }

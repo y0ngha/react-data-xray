@@ -12,11 +12,12 @@ import {
 } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { flushQueue } from '../../scheduler/idleQueue.js';
 import { DEFAULT_BODY, flush } from '../../../testing/fetchMock.js';
 import {
-  getCommits,
-  getRenderInfo,
-  getTopRenders,
+  getCommits as rawCommits,
+  getRenderInfo as rawInfo,
+  getTopRenders as rawTop,
   ignoreComponent,
   reportWindowMs,
   resetRenderStats,
@@ -26,6 +27,9 @@ import {
 import { renderAdvice } from '../advice.js';
 import { groupRenders } from '../groups.js';
 
+const getTopRenders = (...a: Parameters<typeof rawTop>) => (flushQueue(), rawTop(...a));
+const getCommits = () => (flushQueue(), rawCommits());
+const getRenderInfo = (...a: Parameters<typeof rawInfo>) => (flushQueue(), rawInfo(...a));
 const byName = () => Object.fromEntries(getTopRenders(200).map((e) => [e.name, e]));
 
 /** 누를 때마다 n 을 올리는 부모. 자식은 children 으로 받아 n 을 넘겨준다. */
@@ -180,6 +184,7 @@ describe('렌더 감시', () => {
     });
     render(<Counter>{() => <Hidden />}</Counter>);
     bump();
+    flushQueue();
     unsubscribe();
     expect(byName().Hidden).toBeUndefined();
     expect(getCommits().length).toBeGreaterThan(0);
@@ -234,10 +239,10 @@ describe('렌더의 네트워크 원인', () => {
     function Notices() {
       const [items, setItems] = useState<Array<{ id: number }>>([]);
       const runs = useRef(0);
-      // 이 effect 가 채우는 state 를 의존성에 넣은 실수. 테스트가 끝나도록 6번에서 멈춘다.
+      // 이 effect 가 채우는 state 를 읽고 의존성에도 넣은 실수(받은 개수를 서버에 알린다). 테스트가 끝나도록 6번에서 멈춘다.
       useEffect(() => {
         if (runs.current++ >= 6) return;
-        void fetch('/api/notices')
+        void fetch('/api/notices', { headers: { 'x-known-count': String(items.length) } })
           .then((r) => r.json())
           .then((json: typeof DEFAULT_BODY) => setItems(json.data.list.map((x) => ({ id: x.id }))));
       }, [items]);
@@ -271,7 +276,8 @@ describe('렌더의 네트워크 원인', () => {
     expect(getTopRenders(1, Date.now(), (e) => e.name === 'Quiet').map((e) => e.name)).toEqual(['Quiet']);
   });
 
-  it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유)과 자기를 그리는 JSX 위치를 남긴다', () => {
+  /** 부모(Counter) state 로 두 번 렌더된 Leaf 의 렌더 기록 */
+  const renderLeaf = () => {
     function Leaf() {
       return <em>leaf</em>;
     }
@@ -280,9 +286,76 @@ describe('렌더의 네트워크 원인', () => {
     }
     render(<Counter>{() => <Middle />}</Counter>);
     bump(2);
-    const leaf = getTopRenders(200).find((e) => e.name === 'Leaf')!;
-    expect(leaf.origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
-    expect(leaf.location).toMatch(/monitor\.test\.tsx:\d+$/);
+    return getTopRenders(200).find((e) => e.name === 'Leaf')!;
+  };
+  it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유)을 남긴다', () => {
+    expect(renderLeaf().origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
+  });
+
+  // React 18 은 _debugSource, React 19 는 _debugStack 에서 읽는다(pnpm test:react19 가 19 쪽을 본다).
+  it('자기를 그리는 JSX 위치(Middle 안의 <Leaf />)를 남긴다', () => {
+    expect(renderLeaf().location).toMatch(/monitor\.test\.tsx:\d+$/);
+  });
+});
+
+describe('분석 미루기', () => {
+  it('commit_defers_analysis: commit 직후엔 결과가 없고 flush 뒤 생기며 리스너는 1회', () => {
+    flushQueue();
+    let n = 0;
+    const off = subscribeCommits(() => n++);
+    render(<Counter>{() => null}</Counter>);
+    expect(rawTop()).toEqual([]);
+    expect(rawCommits().length).toBe(0);
+    flushQueue();
+    off();
+    expect(rawCommits().length).toBe(1);
+    expect(n).toBe(1);
+    expect(rawTop()[0].reasons).toMatchObject({ mount: 1 });
+  });
+
+  it('snapshot_survives_next_render: 연달아 렌더해도 첫 변경의 from/to 가 남는다', () => {
+    function Tick() {
+      const [n, setN] = useState(0);
+      return <button onClick={() => setN((v) => v + 10)}>tick {n}</button>;
+    }
+    render(<Tick />);
+    flushQueue();
+    resetRenderStats();
+    fireEvent.click(screen.getByText(/^tick/));
+    fireEvent.click(screen.getByText(/^tick/));
+    const t = getTopRenders();
+    const hooks = t.find((e) => e.name === 'Tick')!.events.map((e) => e.hooks);
+    expect(hooks[0]).toMatchObject([{ from: '0', to: '10' }]);
+    expect(hooks[1]).toMatchObject([{ from: '10', to: '20' }]);
+  });
+
+  it('inheritance_kept: 부모 state 렌더의 자식은 reason parent, origin 은 부모', () => {
+    const Kid = () => <i>kid</i>;
+    render(<Counter>{() => <Kid />}</Counter>);
+    bump();
+    const kid = getTopRenders(50).find((e) => e.name === 'Kid')!;
+    expect(kid.events[1]).toMatchObject({ reason: 'parent', origin: { name: 'Counter', reason: 'state' } });
+  });
+
+  it('unmount_before_flush: 분석 전에 언마운트돼 alternate 가 비워져도 같은 컴포넌트는 항목 하나', () => {
+    const { unmount } = render(<Counter>{() => null}</Counter>);
+    flushQueue();
+    bump();
+    unmount();
+    const counters = getTopRenders(50).filter((e) => e.name === 'Counter');
+    expect(counters.length).toBe(1);
+    expect(counters[0].events.map((e) => e.reason)).toEqual(['mount', 'state']);
+  });
+
+  it('listener_per_commit: commit 3번 → 리스너 3번, 순서대로', () => {
+    const seen: number[] = [];
+    const off = subscribeCommits(() => seen.push(rawCommits()[rawCommits().length - 1].id));
+    render(<Counter>{() => null}</Counter>);
+    bump(2);
+    flushQueue();
+    off();
+    expect(seen.length).toBe(3);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
   });
 });
 
@@ -369,5 +442,36 @@ describe('바뀐 state 와 렌더 시작점의 영향', () => {
     fireEvent.click(screen.getByText('count'));
     const page = groupRenders(getTopRenders(200), 0).find((g) => g.name === 'Page')!;
     expect(page.impact).toEqual({ renders: 8, unchanged: 4, unchangedComponents: 2, changedProps: ['Panel.left', 'Badge.left'] });
+  });
+
+  it('render_record_throw: 한 fiber 의 기록이 던져도 나머지와 commit·구독자 알림은 이어진다', () => {
+    const Ctx = createContext(0);
+    Object.defineProperty(Ctx, 'displayName', {
+      get: () => {
+        throw new Error('boom'); // context 가 바뀐 렌더 이유를 가릴 때 읽는다
+      },
+    });
+    const Boom = () => <i>{useContext(Ctx)}</i>;
+    const Good = ({ n }: { n: number }) => <b>{n}</b>;
+    let notified = 0;
+    const off = subscribeCommits(() => notified++);
+    render(
+      <Counter>
+        {(n) => (
+          <Ctx.Provider value={n}>
+            <Boom />
+            <Good n={n} />
+          </Ctx.Provider>
+        )}
+      </Counter>,
+    );
+    flushQueue();
+    bump();
+    flushQueue();
+    off();
+    expect(byName().Boom.events).toHaveLength(1); // 마운트만, 던진 갱신은 건너뜀
+    expect(byName().Good.events).toHaveLength(2);
+    expect(notified).toBe(2);
+    expect(getCommits()).toHaveLength(2);
   });
 });

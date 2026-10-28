@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { forwardRef, memo, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { mockFetch } from '../../../testing/fetchMock.js';
+import { flushQueue } from '../../scheduler/idleQueue.js';
 import { collectValues } from '../componentValues.js';
 import {
   componentRect,
@@ -11,6 +13,8 @@ import {
   hostNodesOf,
   isFrameworkDevtoolsRoot,
   isMemoized,
+  jsxLocationOf,
+  resolveJsxLocation,
   toCurrent,
   unionRect,
 } from '../tree.js';
@@ -146,5 +150,44 @@ describe('fiber tree', () => {
       { via: 'props', value: { a: 1 } },
       { via: 'state', value: { s: 2 } },
     ]);
+  });
+});
+
+describe('React 19 의 JSX 위치(_debugStack)', () => {
+  const fiberWithStack = (lines: string[]) => ({ _debugStack: { stack: ['Error: react-stack-top-frame', ...lines].join('\n') } }) as never;
+
+  it('React·라이브러리 프레임을 건너뛰고 JSX 를 쓴 앱 프레임을 src/... 부터로 줄인다(번들러 쿼리는 뗀다)', () => {
+    const fiber = fiberWithStack([
+      'at exports.jsxDEV (http://localhost:5173/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1:250:15)',
+      'at Middle (http://localhost:5173/src/components/Middle.tsx?t=1712:12:7)',
+      'at App (http://localhost:5173/src/App.tsx:5:3)',
+    ]);
+    expect(jsxLocationOf(fiber)).toBe('src/components/Middle.tsx:12');
+  });
+
+  it('Firefox·Safari 형식(fn@url:줄:열)도 읽는다', () => {
+    const fiber = fiberWithStack([
+      'jsxDEV@http://localhost:5173/node_modules/.vite/deps/react.js:1:1',
+      'Middle@http://localhost:5173/src/Middle.tsx:8:4',
+    ]);
+    expect(jsxLocationOf(fiber)).toBe('src/Middle.tsx:8');
+  });
+
+  it('_debugSource(React 18)가 있으면 그것을 쓰고, 둘 다 없으면 undefined', () => {
+    expect(jsxLocationOf({ _debugSource: { fileName: '/Users/me/project/src/A.tsx', lineNumber: 3 } } as never)).toBe('src/A.tsx:3');
+    expect(jsxLocationOf({} as never)).toBeUndefined();
+  });
+
+  it('dev 서버가 변환한 줄을 소스맵으로 원본 줄로 바꾼다', async () => {
+    const inlineMap = (map: object) => `data:application/json;base64,${btoa(JSON.stringify(map))}`;
+    // 변환된 3번째 줄 → 원본 10번째 줄(MAPPINGS 는 sourceMap 테스트와 같은 모양)
+    const code = `a\nb\nrender()\n//# sourceMappingURL=${inlineMap({ version: 3, sources: ['Middle.tsx'], mappings: ';;AASE' })}`;
+    mockFetch.mockImplementation(async () => new Response(code));
+    const fiber = fiberWithStack(['at Middle (http://localhost:3000/src/Middle.tsx:3:1)']);
+    const resolved = resolveJsxLocation(fiber);
+    flushQueue(); // 소스맵 해석은 유휴 큐에서 한다
+    await Promise.resolve();
+    flushQueue();
+    expect(await resolved).toBe('src/Middle.tsx:10');
   });
 });

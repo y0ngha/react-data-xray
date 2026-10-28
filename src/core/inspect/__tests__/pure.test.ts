@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { flushQueue } from '../../scheduler/idleQueue.js';
 import { clearRecords, createRecord, finishRecord, registerBody } from '../../requests/store.js';
 import type { RequestRecord } from '../../requests/types.js';
 
@@ -8,9 +9,10 @@ const respond = (url: string, body: unknown): RequestRecord => {
   const record = createRecord('fetch', 'GET', url);
   finishRecord(record, 200);
   registerBody(record, body);
+  flushIndex(); // 본문 등록과 색인은 미뤄 둔다
   return record;
 };
-import { findDerivedOrigin } from '../derivedMatch.js';
+import { findDerivedOrigin, flushIndex } from '../derivedMatch.js';
 import { findExactOrigins, isSameOrChildPath } from '../exactMatch.js';
 import { mergeHits } from '../mergeHits.js';
 import { guessByText, narrowToField } from '../textMatch.js';
@@ -27,6 +29,7 @@ describe('exactMatch', () => {
     const record = createRecord('fetch', 'GET', '/api/e');
     const body = { item: { id: 1 } };
     registerBody(record, body);
+    flushQueue();
     const circular: Record<string, unknown> = { node: document.createElement('div') };
     circular.self = circular;
     const element = { $$typeof: Symbol.for('react.element'), props: { item: body.item }, _owner: circular };
