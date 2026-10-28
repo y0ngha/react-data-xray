@@ -1,5 +1,6 @@
 import { renderAdvice } from '../../../core/render/advice.js';
 import type { RenderGroup } from '../../../core/render/groups.js';
+import { withHookPaths } from '../../../core/render/summary.js';
 import { RENDER_REASONS, RENDER_STORM } from '../../../core/render/types.js';
 import type { Hit } from '../../../core/inspect/types.js';
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
@@ -38,7 +39,7 @@ const StateHooks = ({ group }: { group: RenderGroup }) =>
   group.stateHooks.length > 0 ? (
     <Muted>
       바뀐 state:{' '}
-      {group.stateHooks
+      {withHookPaths(group.stateHooks, group.fiber)
         .map(
           (h) =>
             `${h.label} ${h.count}회${h.intervalMs ? ` (${(h.intervalMs / 1000).toFixed(1)}초마다)` : ''} · 최근 ${h.last.from} → ${h.last.to}`,

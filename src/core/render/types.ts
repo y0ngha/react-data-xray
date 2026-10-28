@@ -95,6 +95,8 @@ export interface MemoStats {
 export interface StateHookSummary {
   /** 화면 표시: "useState #3" */
   label: string;
+  /** 훅 순번(1부터). 커스텀 훅 경로를 붙일 때 쓴다. 클래스 state 는 없다. */
+  hookIndex?: number;
   count: number;
   /** 일정한 간격으로 바뀌었다면 그 간격(ms). 타이머(setInterval) 신호다. */
   intervalMs?: number;

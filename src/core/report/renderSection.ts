@@ -1,6 +1,7 @@
 import { renderAdvice } from '../render/advice.js';
 import { sortRenderGroups } from '../render/groups.js';
 import { getCommits, getRenderGroups, reportWindowMs } from '../render/monitor.js';
+import { withHookPaths } from '../render/summary.js';
 import { RENDER_REASONS } from '../render/types.js';
 import { endpointOf } from '../requests/requestKey.js';
 
@@ -128,7 +129,7 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       package: g.package,
       libraries: g.libraries,
       causedBy: g.origins,
-      stateChanges: g.stateHooks,
+      stateChanges: withHookPaths(g.stateHooks, g.fiber),
       startedRenders: g.impact && {
         ...g.impact,
         ...(g.impact.childMs !== undefined && { childMs: round1(g.impact.childMs), unchangedMs: round1(g.impact.unchangedMs ?? 0) }),

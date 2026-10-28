@@ -80,20 +80,29 @@ export const stateHookLabel = (fiber: Fiber, hookIndex: number): string => {
 };
 
 /** state 때문에 렌더된 기록에서, 값이 바뀐 훅별 횟수·간격·최근 변경 */
-const summarizeStateHooks = (events: RenderEntry['events'], fiber: unknown): StateHookSummary[] => {
-  const byHook = new Map<string, { times: number[]; last: { from: string; to: string } }>();
+// 커스텀 훅 경로(stateHookLabel)는 앱 컴포넌트 함수를 다시 불러야 구해서 여기서 붙이지 않는다(주기 경로). withHookPaths 가 상세·보고서에서 붙인다.
+const summarizeStateHooks = (events: RenderEntry['events']): StateHookSummary[] => {
+  const byHook = new Map<string, { times: number[]; last: { from: string; to: string }; hookIndex?: number }>();
   events.forEach((e) =>
     e.hooks?.forEach((h) => {
-      const label = h.type && h.type !== 'this.state' ? stateHookLabel(fiber as Fiber, h.index) : hookLabel(h);
+      const label = hookLabel(h);
       const prev = byHook.get(label);
-      byHook.set(label, { times: [...(prev?.times ?? []), e.time], last: { from: h.from, to: h.to } });
+      byHook.set(label, {
+        times: [...(prev?.times ?? []), e.time],
+        last: { from: h.from, to: h.to },
+        hookIndex: h.type && h.type !== 'this.state' ? h.index : undefined,
+      });
     }),
   );
   return [...byHook.entries()]
-    .map(([label, { times, last }]) => ({ label, count: times.length, intervalMs: regularInterval(times), last }))
+    .map(([label, { times, last, hookIndex }]) => ({ label, hookIndex, count: times.length, intervalMs: regularInterval(times), last }))
     .sort((a, b) => b.count - a.count)
     .slice(0, MAX_STATE_HOOKS);
 };
+
+/** 렌더 항목을 열 때와 보고서를 만들 때만 부른다: label 에 커스텀 훅 경로와 호출 위치를 붙인다. */
+export const withHookPaths = (hooks: readonly StateHookSummary[], fiber: unknown): StateHookSummary[] =>
+  hooks.map((h) => (h.hookIndex ? { ...h, label: stateHookLabel(fiber as Fiber, h.hookIndex) } : h));
 
 const memoStatsOf = (skipped: number, reasons: Record<RenderReason, number>, keys: string[]): MemoStats => {
   const rendered = Object.values(reasons).reduce((a, b) => a + b, 0) - reasons.mount;
@@ -129,7 +138,7 @@ export const summarize = (entry: RenderEntry, now: number, windowMs = WINDOW_MS)
     network: recent.filter((e) => e.cause).length,
     causes: countCauses(recent),
     origins: countOrigins(recent),
-    stateHooks: summarizeStateHooks(recent, entry.fiber),
+    stateHooks: summarizeStateHooks(recent),
     compiled: !!entry.compiled,
     memo,
   };
