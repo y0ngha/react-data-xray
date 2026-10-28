@@ -40,7 +40,7 @@ const countOrigins = (events: RenderEntry['events']): OriginCount[] => {
     if (!origin) return;
     const key = `${origin.name}|${origin.reason}`;
     const prev = byOrigin.get(key);
-    byOrigin.set(key, prev ? { ...prev, count: prev.count + 1 } : { ...origin, count: 1 });
+    byOrigin.set(key, prev ? { ...prev, count: prev.count + 1 } : { name: origin.name, reason: origin.reason, count: 1 });
   });
   return [...byOrigin.values()].sort((a, b) => b.count - a.count).slice(0, MAX_ORIGINS);
 };

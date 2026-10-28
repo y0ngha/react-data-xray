@@ -20,6 +20,18 @@ export interface RenderGroup extends RenderSummary {
   location?: string;
   /** 이 컴포넌트가 시작한 렌더가 하위에 미친 영향(시작한 적이 있을 때만) */
   impact?: OriginImpact;
+  /** 라이브러리 소유 컴포넌트면 그 패키지(그린 앱 컴포넌트를 못 찾았을 때만 목록에 따로 남는다) */
+  package?: string;
+  /** 이 앱 컴포넌트가 그려서 안쪽에서 렌더된 라이브러리 컴포넌트들 */
+  libraries?: LibraryRender[];
+}
+
+export interface LibraryRender {
+  package: string;
+  name: string;
+  instances: number;
+  renders: number;
+  avoidable: number;
 }
 
 const union = (a: readonly string[], b: readonly string[]): string[] => Array.from(new Set([...a, ...b]));
@@ -105,6 +117,9 @@ const depthOf = (fiber: unknown): number => {
   return depth;
 };
 
+// 시작한 컴포넌트는 그룹 키(이름 + 위치)로 모은다. 기록이 없으면 이름만으로 본다.
+const keyOfOrigin = (o: NonNullable<RenderEvent['origin']>): string => (o.from ? keyOf(o.from as RenderEntry) : locationKey(o.name));
+
 /**
  * 렌더를 시작한 컴포넌트별로, 하위가 얼마나 따라 렌더됐고 그중 값이 실제로 바뀐 props 는 무엇인지 모은다.
  * since 이후의 기록만 본다.
@@ -114,7 +129,8 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
   renders.forEach((entry) =>
     entry.events.forEach((e) => {
       if (e.time < since || !e.origin) return;
-      const cur = acc.get(e.origin.name) ?? {
+      const key = keyOfOrigin(e.origin);
+      const cur = acc.get(key) ?? {
         renders: 0,
         unchanged: 0,
         unchangedNames: new Set<string>(),
@@ -128,7 +144,7 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
         // 위에서 아래 순서로 보여 주려고 깊이를 같이 둔다.
         e.keys?.filter((k) => k !== 'children').forEach((k) => cur.changed.set(`${entry.name}.${k}`, depthOf(entry.fiber)));
       }
-      acc.set(e.origin.name, cur);
+      acc.set(key, cur);
     }),
   );
   return new Map(
@@ -144,19 +160,49 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
   );
 };
 
+const locationKey = (name: string, location?: string): string => `${name}|${location ?? ''}`;
+
+/** 앱 컴포넌트는 이름 + 그리는 위치, 라이브러리 컴포넌트는 패키지 + 이름 + 그린 앱 컴포넌트로 나눈다. */
+const keyOf = (e: RenderEntry): string =>
+  e.package
+    ? `${e.package}|${locationKey(e.name)}|${locationKey(e.owner?.name ?? '', e.owner?.location)}`
+    : locationKey(e.name, e.location);
+
+/** 라이브러리 그룹을 그린 앱 컴포넌트 그룹 아래로 접는다. 그 앱 그룹이 없으면 그대로 둔다. */
+const foldLibraries = (groups: Map<string, RenderGroup>, renders: ReadonlyArray<RenderEntry>): RenderGroup[] => {
+  const ownerKeys = new Map(renders.filter((e) => e.package).map((e) => [keyOf(e), locationKey(e.owner?.name ?? '', e.owner?.location)]));
+  return Array.from(groups.entries())
+    .filter(([key, g]) => {
+      const owner = g.package && groups.get(ownerKeys.get(key) ?? '');
+      if (!owner || owner.package) return true;
+      (owner.libraries ??= []).push({
+        package: g.package!,
+        name: g.name,
+        instances: g.instances,
+        renders: g.recent,
+        avoidable: g.avoidable,
+      });
+      return false;
+    })
+    .map(([, g]) => g);
+};
+
 /**
- * 같은 컴포넌트가 여러 개 렌더되면(목록의 행 등) 이름별로 합친다.
+ * 같은 컴포넌트가 여러 개 렌더되면(목록의 행 등) 이름과 그리는 위치별로 합친다. 라이브러리 내부 컴포넌트는 그린 앱 컴포넌트 아래로 접는다.
  * since 를 주면 그 이후 기록으로 각 컴포넌트가 시작한 렌더의 영향(impact)도 붙인다.
  */
 export const groupRenders = (renders: ReadonlyArray<RenderEntry & RenderSummary>, since?: number): RenderGroup[] => {
   const grouped = renders.reduce((acc, e) => {
-    const g = acc.get(e.name);
-    return acc.set(e.name, g ? merge(g, e) : { ...e, instances: 1 });
+    const key = keyOf(e);
+    const g = acc.get(key);
+    return acc.set(key, g ? merge(g, e) : { ...e, instances: 1 });
   }, new Map<string, RenderGroup>());
-  if (since === undefined) return Array.from(grouped.values());
+  const folded = foldLibraries(grouped, renders);
+  if (since === undefined) return folded;
   const impacts = originImpacts(renders, since);
+  const keyOfGroup = new Map(Array.from(grouped.entries(), ([key, g]) => [g, key]));
   // 그룹은 위에서 새로 만든 객체라 그대로 채워도 된다.
-  return Array.from(grouped.values(), (g) => Object.assign(g, { impact: impacts.get(g.name) }));
+  return folded.map((g) => Object.assign(g, { impact: impacts.get(keyOfGroup.get(g) ?? '') }));
 };
 
 export type RenderSort = 'avoidable' | 'count' | 'time';

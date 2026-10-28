@@ -3,6 +3,7 @@ import {
   isFrameworkDevtoolsRoot,
   isMemoized,
   jsxLocationOf,
+  libraryPackageOf,
   rememberRootContainer,
   resolveJsxLocation,
 } from '../fiber/tree.js';
@@ -44,16 +45,30 @@ let users = 0;
 // reset·감시 중단 때 올린다. 그 전에 걸린 분석 step 은 버린다.
 let epoch = 0;
 
+// 라이브러리 컴포넌트를 그린 가장 가까운 앱 컴포넌트. 그 entry 를 그대로 물려 두면 소스맵으로 바뀐 위치도 따라온다.
+const appOwnerOf = (fiber: Fiber): RenderEntry['owner'] => {
+  for (let f = fiber.return; f; f = f.return) {
+    if (!isComposite(f) || libraryPackageOf(f)) continue;
+    return (
+      entries.get(f) ?? (f.alternate ? entries.get(f.alternate) : undefined) ?? { name: getComponentName(f), location: jsxLocationOf(f) }
+    );
+  }
+  return undefined;
+};
+
 // alt·memoized·compiled 는 commit 시점 값이다. 언마운트되면 React 가 alternate·return·updateQueue 를 비운다.
 const entryOf = (fiber: Fiber, alt: Fiber | null, memoized: boolean, compiled: boolean): RenderEntry => {
   const existing = entries.get(fiber) ?? (alt ? entries.get(alt) : undefined);
-  const entry = existing ?? {
+  const pkg = existing ? undefined : libraryPackageOf(fiber);
+  const entry: RenderEntry = existing ?? {
     name: getComponentName(fiber),
     events: [],
     fiber,
     memoized,
     location: jsxLocationOf(fiber),
     compiled,
+    package: pkg,
+    owner: pkg ? appOwnerOf(fiber) : undefined,
   };
   if (!existing) {
     // React 19 의 위치는 변환된 코드 기준이라, 소스맵을 받는 대로 원본 줄로 바꾼다.
@@ -169,7 +184,10 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       inheritedBy[at] = {}; // 한 fiber 가 던져도 나머지와 commit 기록·구독자 알림은 이어간다
       try {
         const event = recordRender(p, now, p.parent < 0 ? {} : inheritedBy[p.parent]);
-        inheritedBy[at] = { cause: event.cause, origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason } };
+        inheritedBy[at] = {
+          cause: event.cause,
+          origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason, from: entries.get(p.fiber) },
+        };
       } catch {
         /* 이 fiber 만 건너뛴다 */
       }

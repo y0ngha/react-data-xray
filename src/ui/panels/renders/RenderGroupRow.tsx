@@ -22,6 +22,7 @@ const Headline = ({ group, showTime }: { group: RenderGroup; showTime: boolean }
     {showTime && <span style={{ color: color.muted }}> · {group.ms.toFixed(1)}ms</span>} &lt;{group.name}&gt;
     {group.instances > 1 && <span style={{ color: color.muted }}> × {group.instances}개</span>}
     {group.avoidable > 0 && <Badge color={color.review}>줄일 수 있음 {group.avoidable}</Badge>}
+    {group.package && <Badge color={color.muted}>{group.package}</Badge>}
     {group.location && <span style={{ color: color.muted }}> · {group.location}</span>}
   </div>
 );
@@ -61,6 +62,17 @@ const MemoStats = ({ group }: { group: RenderGroup }) =>
     <Muted>
       memo: 건너뜀 {group.memo.skipped}회 · 다시 렌더 {group.memo.rendered}회
       {group.memo.neverSkippedProps.length > 0 && ` · 매번 새 참조: ${group.memo.neverSkippedProps.join(', ')}`}
+    </Muted>
+  ) : null;
+
+/** 이 컴포넌트가 그린 라이브러리 내부 컴포넌트(축약된 이름이라 패키지와 함께 보여 준다) */
+const Libraries = ({ group }: { group: RenderGroup }) =>
+  group.libraries?.length ? (
+    <Muted>
+      안쪽 라이브러리:{' '}
+      {group.libraries
+        .map((l) => `${l.package} <${l.name}> ${l.renders}회${l.avoidable > 0 ? `(줄일 수 있음 ${l.avoidable})` : ''}`)
+        .join(' · ')}
     </Muted>
   ) : null;
 
@@ -107,6 +119,7 @@ export const RenderGroupRow = ({ group, source, stat, showTime }: RenderGroupRow
     <Headline group={group} showTime={showTime} />
     <Muted>{reasonSummary(group)}</Muted>
     <MemoStats group={group} />
+    <Libraries group={group} />
     <StateHooks group={group} />
     <Impact group={group} />
     <Origins group={group} />

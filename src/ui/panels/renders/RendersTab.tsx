@@ -90,7 +90,13 @@ export const RendersTab = ({
       {computed?.truncated && <Muted>인스턴스가 너무 많아 렌더 적은 {computed.droppedInstances}개는 뺐습니다.</Muted>}
       {computed && rows.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
       {rows.map(({ group, source }) => (
-        <RenderGroupRow key={group.name} group={group} source={source} stat={statOf(source)} showTime={showTime} />
+        <RenderGroupRow
+          key={`${group.name}|${group.location ?? ''}|${group.package ?? ''}`}
+          group={group}
+          source={source}
+          stat={statOf(source)}
+          showTime={showTime}
+        />
       ))}
     </div>
   );

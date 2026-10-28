@@ -31,6 +31,8 @@ export interface NetworkCause {
 export interface RenderOrigin {
   name: string;
   reason: RenderReason;
+  /** 시작한 컴포넌트의 기록. 같은 이름의 다른 위치 컴포넌트와 구분하는 데만 쓴다(보고서·집계 결과에는 싣지 않는다). */
+  from?: { name: string; location?: string; package?: string; owner?: { name: string; location?: string } };
 }
 
 /** state 때문에 렌더됐을 때, 값이 바뀐 훅 하나 */
@@ -71,6 +73,10 @@ export interface RenderEntry {
   memoized: boolean;
   /** 이 컴포넌트를 그리는 JSX 위치(dev 빌드가 기록할 때만) */
   location?: string;
+  /** 라이브러리 코드가 만든 element 를 그리는 컴포넌트면 그 패키지 이름(그리는 위치가 앱 코드가 아니다) */
+  package?: string;
+  /** 라이브러리 컴포넌트를 그린 가장 가까운 앱 컴포넌트 */
+  owner?: { name: string; location?: string };
   /** React Compiler 가 메모하는 컴포넌트인지. 그러면 React.memo 대신 구조를 바꾸라고 권한다. */
   compiled?: boolean;
   /** memo 가 부모의 렌더를 건너뛴 시각(최근 것만 남긴다) */

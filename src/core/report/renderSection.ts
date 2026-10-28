@@ -29,6 +29,10 @@ export interface RenderSection {
     };
     /** 이 컴포넌트를 그리는 JSX 위치(dev 빌드가 기록할 때) */
     renderedAt?: string;
+    /** 라이브러리 소유 컴포넌트를 그릴 앱 컴포넌트를 못 찾아 따로 남았을 때의 패키지 이름 */
+    package?: string;
+    /** 이 컴포넌트가 그려서 안쪽에서 렌더된 라이브러리 컴포넌트(패키지별) */
+    libraries?: Array<{ package: string; name: string; instances: number; renders: number; avoidable: number }>;
     /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상(이름·이유). 고칠 곳은 대개 이 조상이다 */
     causedBy: Array<{ name: string; reason: string; count: number }>;
     stateChanges: Array<{
@@ -95,6 +99,8 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
         context: g.contextKeys,
       },
       renderedAt: g.location,
+      package: g.package,
+      libraries: g.libraries,
       causedBy: g.origins,
       stateChanges: g.stateHooks,
       startedRenders: g.impact,
@@ -115,4 +121,5 @@ export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [
   'renders.truncated 가 true 면 렌더된 인스턴스가 5000개를 넘어 렌더 적은 인스턴스(droppedInstances 개)를 센 대상에서 뺀 것이다. 컴포넌트마다 최근 200회까지만 센다는 상한과는 별개다.',
   "stateChanges 의 label 은 dev 빌드면 훅을 부른 커스텀 훅 경로가 앞에 붙고(예: useCart › useState #2), 소스맵이 있으면 호출 위치가 뒤에 붙는다(src/x.ts:12). 없으면 '종류 #순서' 만 나온다.",
   'components[].memo 는 React.memo 컴포넌트가 부모 렌더를 건너뛴 횟수(skipped)와 다시 렌더된 횟수(rendered, 마운트 제외)다. skipped 가 0 이고 neverSkippedProps 가 있으면 그 props 가 렌더마다 새 참조라 memo 가 효과가 없는 것이다(advice 첫 줄).',
+  'components 는 같은 이름이라도 그리는 위치(renderedAt)가 다르면 따로 센다. 라이브러리 안쪽 컴포넌트(번들에서 축약된 이름)는 그린 앱 컴포넌트의 libraries 에 패키지 이름과 함께 접혀 있다. package 가 있는 줄은 그린 앱 컴포넌트를 못 찾은 것이다.',
 ];
