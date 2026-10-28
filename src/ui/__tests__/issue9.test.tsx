@@ -78,3 +78,19 @@ it('RdxDevtools: 배지에 올리면 내역이 뜨고, 항목을 누르면 그 �
   expect(screen.getByRole('complementary', { name: 'React Data X-ray' })).toBeTruthy();
   expect(screen.getByText('엔드포인트별')).toBeTruthy();
 });
+
+it('배지 내역에서 GET /api/b 를 누르면 요청 탭이 열리고 그 줄에 포커스가 있다', async () => {
+  await fetch('/api/a');
+  await fetch('/api/a');
+  await fetch('/api/b');
+  await fetch('/api/b');
+  render(<RdxDevtools />);
+  await act(flush);
+  const button = screen.getByRole('button', { name: /React Data X-ray 열기/ });
+  await waitFor(() => expect(button.textContent).toBe('RDX2'));
+  fireEvent.mouseEnter(button);
+  fireEvent.click(screen.getByRole('button', { name: 'GET /api/b' }));
+  const row = screen.getByRole('button', { name: 'GET /api/b' }).closest('div[tabindex="-1"]');
+  expect(row).toBeTruthy();
+  expect(document.activeElement).toBe(row);
+});

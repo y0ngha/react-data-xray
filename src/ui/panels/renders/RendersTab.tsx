@@ -12,6 +12,7 @@ import { reportWindowMs } from '../../../core/render/monitor.js';
 import { WINDOW_MS } from '../../../core/render/summary.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
+import { useFocusedItem } from '../../viewState.js';
 import { useNow } from '../../hooks/useNow.js';
 import { useRenderMonitoring } from '../../hooks/useRenderMonitoring.js';
 import { RenderGroupRow } from './RenderGroupRow.js';
@@ -67,6 +68,8 @@ export const RendersTab = ({
   const computed = useRenderGroups(now, scope, host, sourceOf, sort);
   // 정렬·자르기·출처 찾기는 useRenderGroups 가 유휴 큐에서 이미 했다.
   const rows = computed?.items ?? [];
+  const focus = useFocusedItem('renders');
+  const focusedIndex = focus ? rows.findIndex((r) => r.group.name === focus.key) : -1; // 같은 이름이 여럿이면 첫 줄
   const windowMs = reportWindowMs(now);
   const showTime = rows.some((r) => r.group.ms > 0);
   const statOf = (source: Hit | undefined) => (source ? statsByEndpoint.get(endpointOf(source.record)) : undefined);
@@ -82,7 +85,7 @@ export const RendersTab = ({
       </div>
       {computed?.truncated && <Muted>인스턴스가 너무 많아 렌더 적은 {computed.droppedInstances}개는 뺐습니다.</Muted>}
       {computed && rows.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
-      {rows.map(({ group, source }) => (
+      {rows.map(({ group, source }, i) => (
         <RenderGroupRow
           key={group.key ?? group.name}
           group={group}
@@ -90,6 +93,7 @@ export const RendersTab = ({
           stat={statOf(source)}
           showTime={showTime}
           windowMs={windowMs}
+          focus={i === focusedIndex ? focus : undefined}
         />
       ))}
     </div>

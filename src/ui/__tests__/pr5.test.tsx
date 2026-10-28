@@ -43,20 +43,17 @@ describe('FloatingButton 내역 (ponytail PR5-6, PR5-11)', () => {
 });
 
 describe('focusItem / useFocusedItem (ponytail PR5-7, #9)', () => {
-  it('그 탭이 뜬 뒤에도 한 번 받고, 다른 탭 것은 받지 않으며, 같은 항목을 다시 골라도 다시 받는다', () => {
+  it('그 탭이 뜬 뒤에도 받고, 다른 탭 것은 받지 않으며, 같은 항목을 다시 골라도 새 요청으로 받고, 탭이 닫히면 비운다', () => {
     focusItem('requests', 'GET /a'); // 탭이 아직 없을 때
-    const seen: Array<string | undefined> = [];
-    const { result } = renderHook(() => {
-      const key = useFocusedItem('requests');
-      seen.push(key);
-      return key;
-    });
-    expect(seen).toContain('GET /a');
-    expect(result.current).toBeUndefined();
-    seen.length = 0;
+    const first = renderHook(() => useFocusedItem('requests'));
+    expect(first.result.current?.key).toBe('GET /a');
+    const before = first.result.current;
     act(() => focusItem('renders', 'Comp'));
-    expect(seen.filter(Boolean)).toEqual([]);
+    expect(first.result.current).toBeUndefined(); // 요청은 하나뿐이라 다른 탭 것으로 바뀐다
     act(() => focusItem('requests', 'GET /a'));
-    expect(seen.filter(Boolean)).toEqual(['GET /a']);
+    expect(first.result.current?.key).toBe('GET /a');
+    expect(first.result.current).not.toBe(before);
+    first.unmount();
+    expect(renderHook(() => useFocusedItem('requests')).result.current).toBeUndefined();
   });
 });
