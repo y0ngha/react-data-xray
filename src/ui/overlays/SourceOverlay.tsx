@@ -45,7 +45,36 @@ const setText = (el: HTMLElement, text: string): void => {
 
 const paintMetrics = ({ box, metrics }: BoxElements, statOf: StatOf): void => {
   const text = statSummary(statOf(box.hit.record));
-  setText(metrics, text ? ` ${text}` : '');
+  setText(metrics, text ? ` 요청 ${text}` : '');
+};
+
+/**
+ * 겹친 박스의 라벨이 서로 붙으면 어느 박스 것인지 읽을 수 없다. 큰 박스부터 라벨 자리를 잡고,
+ * 먼저 잡힌 라벨과 겹치거나 닿는 라벨은 그 아래로 내린다. 위치를 다 쓴 뒤 한 번에 읽는다.
+ */
+const LABEL_GAP = 3;
+const separateLabels = (all: BoxElements[], rects: (DOMRect | null)[]): void => {
+  const placed: { left: number; right: number; top: number; bottom: number }[] = [];
+  const order = all.map((_, i) => i).filter((i) => rects[i]);
+  order.sort((a, b) => rects[b]!.width * rects[b]!.height - rects[a]!.width * rects[a]!.height);
+  for (const i of order) {
+    const rect = rects[i]!;
+    const { label } = all[i];
+    const left = rect.left;
+    const right = left + label.offsetWidth;
+    const height = label.offsetHeight;
+    let top = rect.top;
+    // 아래로 내리면 새로 겹치는 라벨이 생길 수 있어 겹침이 없을 때까지 되풀이한다(라벨 수가 상한).
+    for (let n = 0; n <= placed.length; n++) {
+      const hit = placed.find(
+        (p) => left < p.right + LABEL_GAP && p.left < right + LABEL_GAP && top < p.bottom + LABEL_GAP && p.top < top + height + LABEL_GAP,
+      );
+      if (!hit) break;
+      top = hit.bottom + LABEL_GAP;
+    }
+    label.style.top = `${top - rect.top}px`;
+    placed.push({ left, right, top, bottom: top + height });
+  }
 };
 
 const paintRenders = ({ box, root, label, count }: BoxElements, now: number): void => {
@@ -57,8 +86,8 @@ const paintRenders = ({ box, root, label, count }: BoxElements, now: number): vo
   const recent = render?.recent ?? 0;
   count.style.display = recent > 0 ? '' : 'none';
   count.style.color = recent >= RENDER_STORM ? '#7f1d1d' : '#000';
-  setText(count, recent > 0 ? `↻${recent}${render!.avoidable > 0 ? `(불필요 ${render!.avoidable})` : ''}` : '');
-  label.title = `클릭하면 요청 상세를 봅니다${render ? ` · 최근 10초 렌더 ${render.recent}회, 줄일 수 있는 렌더 ${render.avoidable}회` : ''}`;
+  setText(count, recent > 0 ? `렌더 ${recent}${render!.avoidable > 0 ? ` · 불필요 ${render!.avoidable}` : ''}` : '');
+  label.title = `클릭하면 요청 상세를 봅니다. 요청 ×N 은 이 요청의 호출 수, 렌더 N 은 이 응답을 쓰는 컴포넌트의 렌더 수입니다${render ? `. 이 응답을 쓰는 컴포넌트가 최근 10초에 ${render.recent}번 렌더됐고, 그중 ${render.avoidable}번은 값이 그대로였습니다` : ''}`;
 };
 
 /**
@@ -99,9 +128,18 @@ const useBoxPainter = (statOf: StatOf) => {
         // 위치를 모두 읽은 뒤에 쓴다. 읽고 쓰기를 번갈아 하면 박스마다 레이아웃을 다시 계산한다.
         const rects = all.map((els) => unionRect(els.box.nodes));
         all.forEach((els, i) => placeBox(els.root, rects[i]));
+        separateLabels(all, rects);
       }
       if (pending.renders) all.forEach((els) => paintRenders(els, now));
-      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestStatOf.current));
+      if (pending.metrics) {
+        all.forEach((els) => paintMetrics(els, latestStatOf.current));
+        // 지표 글자가 바뀌면 라벨 너비가 바뀐다.
+        if (!pending.position)
+          separateLabels(
+            all,
+            all.map((els) => unionRect(els.box.nodes)),
+          );
+      }
       Object.assign(pending, { position: false, renders: false, metrics: false });
     };
     const schedule = (kind: keyof typeof pending) => () => {
@@ -180,7 +218,7 @@ const SourceBox = memo(function SourceBox({ box, waste, onOpen, register }: Sour
           overflow: 'hidden',
         }}
       >
-        <b style={{ display: 'none', marginRight: 4 }} />
+        <b style={{ display: 'none', marginRight: 6 }} />
         {pathOf(box.hit.record.url)}
         <span data-metrics="" />
       </button>
