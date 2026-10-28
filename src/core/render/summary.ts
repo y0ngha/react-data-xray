@@ -4,6 +4,7 @@ import { endpointOf } from '../requests/requestKey.js';
 import {
   RENDER_REASONS,
   type NetworkCauseCount,
+  type MemoStats,
   type OriginCount,
   type RenderEntry,
   type RenderReason,
@@ -94,20 +95,32 @@ const summarizeStateHooks = (events: RenderEntry['events'], fiber: unknown): Sta
     .slice(0, MAX_STATE_HOOKS);
 };
 
+const memoStatsOf = (skipped: number, reasons: Record<RenderReason, number>, keys: string[]): MemoStats => {
+  const rendered = Object.values(reasons).reduce((a, b) => a + b, 0) - reasons.mount;
+  return { skipped, rendered, neverSkippedProps: skipped === 0 && rendered > 0 ? keys : [] };
+};
+
 /** 최근 windowMs(기본 10초) 렌더 요약 */
 export const summarize = (entry: RenderEntry, now: number, windowMs = WINDOW_MS): RenderSummary => {
   const recent = entry.events.filter((e) => e.time >= now - windowMs);
   const reasons = countReasons(recent.map((e) => e.reason));
   // 이미 React.memo 인데 부모 때문에 렌더됐다면(forceUpdate 등) memo 로는 줄일 수 없으니 세지 않는다.
   const avoidable = reasons['same-content'] + reasons['new-callback'] + (entry.memoized ? 0 : reasons.parent);
+  const sameContentKeys = keysOf(recent, 'same-content');
+  const callbackKeys = keysOf(recent, 'new-callback');
+  // React Compiler 의 메모는 건너뜀을 셀 수 없어 제외한다.
+  const memo =
+    entry.memoized && !entry.compiled
+      ? memoStatsOf((entry.skips ?? []).filter((t) => t >= now - windowMs).length, reasons, [...callbackKeys, ...sameContentKeys])
+      : undefined;
   return {
     recent: recent.length,
     last: entry.events[entry.events.length - 1]?.time ?? 0,
     ms: recent.reduce((sum, e) => sum + (e.ms ?? 0), 0),
     reasons,
     avoidable,
-    sameContentKeys: keysOf(recent, 'same-content'),
-    callbackKeys: keysOf(recent, 'new-callback'),
+    sameContentKeys,
+    callbackKeys,
     contextKeys: keysOf(recent, 'context'),
     memoized: entry.memoized,
     network: recent.filter((e) => e.cause).length,
@@ -115,5 +128,6 @@ export const summarize = (entry: RenderEntry, now: number, windowMs = WINDOW_MS)
     origins: countOrigins(recent),
     stateHooks: summarizeStateHooks(recent, entry.fiber),
     compiled: !!entry.compiled,
+    memo,
   };
 };

@@ -6,7 +6,7 @@ import {
   rememberRootContainer,
   resolveJsxLocation,
 } from '../fiber/tree.js';
-import { isComposite, PERFORMED_WORK, type Fiber } from '../fiber/types.js';
+import { isComposite, MEMO_COMPONENT, PERFORMED_WORK, SIMPLE_MEMO_COMPONENT, type Fiber } from '../fiber/types.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { listenToCommits } from './devtoolsHook.js';
 import { groupRenders, type RenderGroup } from './groups.js';
@@ -119,6 +119,20 @@ const snapshotOf = (f: Fiber): Fiber =>
 // 지난 렌더의 PerformedWork 플래그가 남아 있어, 들어가면 렌더하지 않은 것을 렌더로 센다.
 const wasRecreated = (fiber: Fiber): boolean => !fiber.alternate || fiber.child !== fiber.alternate.child;
 
+/**
+ * 부모가 렌더됐는데 이번 commit 에서 렌더하지 않은 memo 인지(bailout). 렌더한 simple memo 는 PerformedWork,
+ * compare 를 준 memo(tag 14)는 안쪽 컴포넌트가 따로 fiber 라 자식 서브트리를 그대로 썼는지로 본다.
+ */
+const bailedOutMemo = (f: Fiber): boolean =>
+  !!f.alternate &&
+  (f.tag === SIMPLE_MEMO_COMPONENT ? (f.flags & PERFORMED_WORK) === 0 : f.tag === MEMO_COMPONENT && f.child === f.alternate.child);
+
+// 건너뛴 memo 의 기록은 렌더된 컴포넌트와 같은 entry 에 둔다. tag 14 는 안쪽 컴포넌트의 entry 다.
+const skippedEntry = (f: Fiber): RenderEntry | undefined => {
+  const target = f.tag === MEMO_COMPONENT ? f.child : f;
+  return target ? (entries.get(target) ?? (target.alternate ? entries.get(target.alternate) : undefined)) : undefined;
+};
+
 const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   if (isFrameworkDevtoolsRoot(root.containerInfo)) return;
   rememberRootContainer(root);
@@ -126,19 +140,23 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   const now = Date.now();
   const pending: Pending[] = [];
   // commit 안에서는 렌더된 fiber 의 참조만 모으고, 분석은 큐에서 한다.
-  const visit = (fiber: Fiber | null, parent: number): void => {
+  const skippedFibers: Fiber[] = [];
+  // fresh: 이 fiber 들이 방금 렌더한 부모가 만든 것인지(건너뛴 memo 아래의 갱신 경로는 아니다)
+  const visit = (fiber: Fiber | null, parent: number, fresh: boolean): void => {
     for (let f = fiber; f; f = f.sibling) {
       if (ignoredTypes.has(f.type)) continue;
+      const bailed = bailedOutMemo(f);
+      if (bailed && fresh && parent >= 0) skippedFibers.push(f);
       const rendered = isComposite(f) && (f.flags & PERFORMED_WORK) !== 0;
       let next = parent;
       if (rendered) {
         next =
           pending.push({ fiber: f, snap: snapshotOf(f), alt: f.alternate, memoized: isMemoized(f), compiled: isCompiled(f), parent }) - 1;
       }
-      if (f.child && wasRecreated(f)) visit(f.child, next);
+      if (f.child && wasRecreated(f)) visit(f.child, next, bailed ? false : rendered || fresh);
     }
   };
-  if (wasRecreated(root.current)) visit(root.current.child, -1);
+  if (wasRecreated(root.current)) visit(root.current.child, -1, false);
   if (pending.length === 0) return;
   const inheritedBy: Inherited[] = [];
   let at = 0;
@@ -157,6 +175,13 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       }
     }
     if (at < pending.length) return false;
+    skippedFibers.forEach((f) => {
+      const entry = skippedEntry(f);
+      if (!entry) return;
+      (entry.skips ??= []).push(now);
+      if (entry.skips.length > MAX_EVENTS_PER_COMPONENT) entry.skips.shift();
+      active.add(entry);
+    });
     commits.push({ id: ++commitSeq, time: now, count: pending.length });
     if (commits.length > MAX_COMMITS) commits.shift();
     commitListeners.forEach((listener) => listener());
@@ -188,6 +213,7 @@ export const resetRenderStats = (): void => {
   measuredFrom = Date.now();
   active.forEach((entry) => {
     entry.events.length = 0;
+    if (entry.skips) entry.skips.length = 0;
   });
   epoch++;
   active.clear();
@@ -220,7 +246,7 @@ export const renderWindowStart = (now = Date.now()): number =>
 // 기록 끝, 창 안 첫 기록, 창 안 개수가 같으면 창 안 기록이 같다(기록은 시간순으로 쌓인다).
 const summaries = new WeakMap<
   RenderEntry,
-  { first?: RenderEvent; last?: RenderEvent; recent: number; windowMs: number; value: RenderSummary }
+  { first?: RenderEvent; last?: RenderEvent; recent: number; skips: number; windowMs: number; value: RenderSummary }
 >();
 
 const summaryOf = (entry: RenderEntry, now: number, windowMs: number): RenderSummary => {
@@ -230,10 +256,13 @@ const summaryOf = (entry: RenderEntry, now: number, windowMs: number): RenderSum
   const recent = at < 0 ? 0 : events.length - at;
   const first = at < 0 ? undefined : events[at];
   const last = events[events.length - 1];
+  // 건너뜀은 시각이 모두 창 안이고 개수가 같으면 같다고 본다(마지막 시각까지 같이 본다).
+  const skips = (entry.skips ?? []).filter((t) => t >= cutoff).length + (entry.skips?.[entry.skips.length - 1] ?? 0);
   const hit = summaries.get(entry);
-  if (hit && hit.first === first && hit.last === last && hit.recent === recent && hit.windowMs === windowMs) return hit.value;
+  if (hit && hit.first === first && hit.last === last && hit.recent === recent && hit.skips === skips && hit.windowMs === windowMs)
+    return hit.value;
   const value = summarize(entry, now, windowMs);
-  summaries.set(entry, { first, last, recent, windowMs, value });
+  summaries.set(entry, { first, last, recent, skips, windowMs, value });
   return value;
 };
 
@@ -241,12 +270,12 @@ const recentRenders = (now: number, keep: (entry: RenderEntry) => boolean, windo
   // 오래 렌더되지 않은 컴포넌트는 빼 둔다. 안 그러면 한 번이라도 렌더된 컴포넌트를 매번 다 요약한다.
   const keepFor = measuredFrom ? MAX_REPORT_WINDOW_MS : Math.max(WINDOW_MS, windowMs);
   active.forEach((e) => {
-    if ((e.events[e.events.length - 1]?.time ?? 0) < now - keepFor) active.delete(e);
+    if (Math.max(e.events[e.events.length - 1]?.time ?? 0, e.skips?.[e.skips.length - 1] ?? 0) < now - keepFor) active.delete(e);
   });
   return Array.from(active)
     .filter(keep)
     .map((e) => Object.assign({}, summaryOf(e, now, windowMs), e))
-    .filter((e) => e.recent > 0)
+    .filter((e) => e.recent > 0 || (e.memo?.skipped ?? 0) > 0)
     .sort((a, b) => b.recent - a.recent);
 };
 

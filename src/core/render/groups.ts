@@ -2,6 +2,7 @@ import { endpointOf } from '../requests/requestKey.js';
 import type { Fiber } from '../fiber/types.js';
 import {
   RENDER_REASONS,
+  type MemoStats,
   type NetworkCauseCount,
   type OriginCount,
   type OriginImpact,
@@ -62,6 +63,16 @@ const mergeStateHooks = (a: readonly StateHookSummary[], b: readonly StateHookSu
   return [...byLabel.values()].sort((x, y) => y.count - x.count).slice(0, 3);
 };
 
+const mergeMemo = (a?: MemoStats, b?: MemoStats): MemoStats | undefined => {
+  if (!a || !b) return a ?? b;
+  const skipped = a.skipped + b.skipped;
+  return {
+    skipped,
+    rendered: a.rendered + b.rendered,
+    neverSkippedProps: skipped === 0 ? union(a.neverSkippedProps, b.neverSkippedProps) : [],
+  };
+};
+
 const merge = (g: RenderGroup, e: RenderEntry & RenderSummary): RenderGroup => ({
   ...g,
   recent: g.recent + e.recent,
@@ -77,6 +88,7 @@ const merge = (g: RenderGroup, e: RenderEntry & RenderSummary): RenderGroup => (
   origins: mergeOrigins(g.origins, e.origins),
   stateHooks: mergeStateHooks(g.stateHooks, e.stateHooks),
   compiled: g.compiled || e.compiled,
+  memo: mergeMemo(g.memo, e.memo),
   location: g.location ?? e.location,
 });
 

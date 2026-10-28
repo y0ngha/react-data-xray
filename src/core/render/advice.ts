@@ -68,6 +68,12 @@ const parentAdvice = (g: RenderGroup): string | undefined => {
     : `props·state·context 가 그대로인데 ${origin} 를 따라 렌더됐습니다. React.memo 로 감싸면 줄일 수 있습니다. ${origin} 의 state 가 자주 바뀐다면 그 state 를 쓰는 곳으로 내리는 편이 더 근본적입니다.`;
 };
 
+/** memo 인데 한 번도 건너뛰지 못했고 렌더마다 새 참조가 내려오면, memo 가 효과 없다고 짚는다. */
+const memoAdvice = (g: RenderGroup): string | undefined =>
+  g.memo && g.memo.neverSkippedProps.length > 0
+    ? `React.memo 가 효과 없습니다: ${propsList(g.memo.neverSkippedProps)} 가 렌더마다 새 참조라 ${g.memo.rendered}번 모두 다시 렌더됐고 한 번도 건너뛰지 못했습니다. 함수는 부모에서 useCallback, 객체는 useMemo 로 참조를 유지하세요.`
+    : undefined;
+
 /**
  * 줄일 수 있거나 점검할 렌더가 있으면 어떻게 줄일지 알려 준다.
  * 렌더는 네트워크와 무관하게도 비효율적일 수 있으므로 네트워크 원인과 상관없이 판단한다.
@@ -75,6 +81,7 @@ const parentAdvice = (g: RenderGroup): string | undefined => {
  */
 export const renderAdvice = (g: RenderGroup): string[] =>
   [
+    memoAdvice(g),
     loopAdvice(g),
     colocationAdvice(g),
     timerAdvice(g),

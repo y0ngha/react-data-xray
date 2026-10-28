@@ -73,6 +73,16 @@ export interface RenderEntry {
   location?: string;
   /** React Compiler 가 메모하는 컴포넌트인지. 그러면 React.memo 대신 구조를 바꾸라고 권한다. */
   compiled?: boolean;
+  /** memo 가 부모의 렌더를 건너뛴 시각(최근 것만 남긴다) */
+  skips?: number[];
+}
+
+/** memo 컴포넌트가 부모 렌더를 건너뛴 횟수와 다시 렌더된 횟수(마운트 제외) */
+export interface MemoStats {
+  skipped: number;
+  rendered: number;
+  /** 한 번도 건너뛰지 못했을 때, 렌더마다 새 참조(새 콜백·내용이 같은 새 객체)로 내려온 props */
+  neverSkippedProps: string[];
 }
 
 /** 최근 구간에 값이 바뀐 상태 훅 하나의 요약 */
@@ -136,6 +146,8 @@ export interface RenderSummary {
   /** state 때문에 렌더됐다면 값이 바뀐 훅들(많은 순) */
   stateHooks: StateHookSummary[];
   compiled: boolean;
+  /** React.memo 컴포넌트일 때만 */
+  memo?: MemoStats;
 }
 
 export interface Commit {

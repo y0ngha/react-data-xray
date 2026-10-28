@@ -55,6 +55,15 @@ const Impact = ({ group }: { group: RenderGroup }) =>
     </Muted>
   ) : null;
 
+/** memo 가 부모 렌더를 몇 번 건너뛰었고 몇 번 다시 렌더됐는지 */
+const MemoStats = ({ group }: { group: RenderGroup }) =>
+  group.memo ? (
+    <Muted>
+      memo: 건너뜀 {group.memo.skipped}회 · 다시 렌더 {group.memo.rendered}회
+      {group.memo.neverSkippedProps.length > 0 && ` · 매번 새 참조: ${group.memo.neverSkippedProps.join(', ')}`}
+    </Muted>
+  ) : null;
+
 /** 렌더는 네트워크와 무관할 수 있다. 응답 객체로 근거가 확인된 것만 네트워크 원인으로 보여 준다. */
 const NetworkCauses = ({ group }: { group: RenderGroup }) => (
   <>
@@ -97,6 +106,7 @@ export const RenderGroupRow = ({ group, source, stat, showTime }: RenderGroupRow
   <div style={rowStyle}>
     <Headline group={group} showTime={showTime} />
     <Muted>{reasonSummary(group)}</Muted>
+    <MemoStats group={group} />
     <StateHooks group={group} />
     <Impact group={group} />
     <Origins group={group} />

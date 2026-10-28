@@ -19,6 +19,8 @@ export interface RenderSection {
     renders: number;
     avoidable: number;
     memoized: boolean;
+    /** React.memo 컴포넌트가 부모 렌더를 건너뛴 횟수와 다시 렌더된 횟수(마운트 제외) */
+    memo?: { skipped: number; rendered: number; neverSkippedProps: string[] };
     reasons: Record<string, number>;
     changedProps: {
       sameContent: string[];
@@ -85,6 +87,7 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       renders: g.recent,
       avoidable: g.avoidable,
       memoized: g.memoized,
+      memo: g.memo,
       reasons: nonZero(Object.fromEntries(RENDER_REASONS.map((r) => [r, g.reasons[r]]))),
       changedProps: {
         sameContent: g.sameContentKeys,
@@ -111,4 +114,5 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
 export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [
   'renders.truncated 가 true 면 렌더된 인스턴스가 5000개를 넘어 렌더 적은 인스턴스(droppedInstances 개)를 센 대상에서 뺀 것이다. 컴포넌트마다 최근 200회까지만 센다는 상한과는 별개다.',
   "stateChanges 의 label 은 dev 빌드면 훅을 부른 커스텀 훅 경로가 앞에 붙고(예: useCart › useState #2), 소스맵이 있으면 호출 위치가 뒤에 붙는다(src/x.ts:12). 없으면 '종류 #순서' 만 나온다.",
+  'components[].memo 는 React.memo 컴포넌트가 부모 렌더를 건너뛴 횟수(skipped)와 다시 렌더된 횟수(rendered, 마운트 제외)다. skipped 가 0 이고 neverSkippedProps 가 있으면 그 props 가 렌더마다 새 참조라 memo 가 효과가 없는 것이다(advice 첫 줄).',
 ];
