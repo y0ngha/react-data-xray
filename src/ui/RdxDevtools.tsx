@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { isWastefulStat } from '../core/requests/endpointStats.js';
 import type { RequestRecord } from '../core/requests/types.js';
 import { RequestActionsProvider, type Focus, type RequestActions } from './contexts.js';
 import { BUTTON_SIZE, FloatingButton } from './FloatingButton.js';
@@ -9,7 +10,7 @@ import { useElementPicker } from './hooks/useElementPicker.js';
 import { useHotkey, type Hotkey } from './hooks/useHotkey.js';
 import { useIgnoredEndpoints } from './hooks/useIgnoredEndpoints.js';
 import { useStoredState } from './hooks/useStoredState.js';
-import { BOXES_KEY, parseBool, parseTab, TAB_KEY } from './viewState.js';
+import { BOXES_KEY, focusItem, parseBool, parseTab, TAB_KEY } from './viewState.js';
 import { usePanelVisibility } from './hooks/usePanelVisibility.js';
 import { useCollapseForAppModal } from './hooks/useAppModalOpen.js';
 import { useOwnLayerPortal } from './hooks/useOwnLayer.js';
@@ -52,12 +53,13 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
-  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.wasteCount);
+  const wasteNames = useMemo(() => analysis.stats.filter(isWastefulStat).map((s) => s.endpoint), [analysis.stats]);
+  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.wasteCount, wasteNames);
   const { open, show, hide, popup, settings, updateDock, saveDock, changeDock } = usePanelVisibility();
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
   const portal = useOwnLayerPortal();
   // 앱 모달이 열리면 패널을 접는다(모달의 버튼을 가리지 않게).
-  const { collapsed, expand } = useCollapseForAppModal(open, settings.dock);
+  const { collapsed, expand, settings: panelSettings } = useCollapseForAppModal(open, settings);
 
   const startPicking = useCallback(() => {
     show();
@@ -101,7 +103,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const panel = (
     <Panel
-      settings={settings}
+      settings={panelSettings}
       buttonPosition={position}
       onResize={(patch) => updateDock(patch, { persist: false })}
       onResizeEnd={saveDock}
@@ -122,7 +124,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
           boxesVisible={boxesVisible}
           onToggleBoxes={() => setBoxesVisible((v) => !v)}
           wasteCount={scopedAnalysis.wasteCount}
-          dock={settings.dock}
+          dock={panelSettings.dock}
           onDock={changeDock}
           onClose={hide}
         />
@@ -151,7 +153,19 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
         {pickRect && <PickHighlight rect={pickRect} />}
         {open && settings.dock !== 'window' && panel}
         {open && settings.dock === 'window' && popup && createPortal(panel, popup.document.body)}
-        <FloatingButton position={position} issues={signal.issues} alert={signal.alert} handlers={handlers} />
+        <FloatingButton
+          position={position}
+          issues={signal.issues}
+          alert={signal.alert}
+          breakdown={{ waste: signal.wasteEndpoints, storming: signal.stormingNames }}
+          onSelect={(next, key) => {
+            show();
+            setSelected(null);
+            setTab(next);
+            if (next === 'requests' || next === 'renders') focusItem(next, key);
+          }}
+          handlers={handlers}
+        />
       </div>
     </RequestActionsProvider>,
   );

@@ -34,7 +34,7 @@ it('새 요청 몰림에 한 번만 알리고, 무시한 반복과 페이지 첫
   fakeAt(performance.timeOrigin + 10_000);
   burst('a');
   const { result, rerender } = renderHook(({ classOf }) => useProblemSignal(getRecords(), classOf, 2), { initialProps: { classOf: ok } });
-  expect(result.current).toEqual({ issues: 2, alert: false });
+  expect(result.current).toMatchObject({ issues: 2, alert: false });
   act(() => {
     vi.advanceTimersByTime(1000);
   });

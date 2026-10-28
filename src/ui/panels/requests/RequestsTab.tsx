@@ -5,6 +5,7 @@ import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Button } from '../../components/Button.js';
 import { useRequestActions } from '../../contexts.js';
+import { useFocusedItem } from '../../viewState.js';
 import { color } from '../../theme.js';
 import { CacheAuditView } from './CacheAuditView.js';
 import { EndpointRow } from './EndpointRow.js';
@@ -33,6 +34,13 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
     const own = records.filter((r) => r.route === route);
     return getEndpointStats(own, new Map(own.map((r) => [r.id, classOf(r)])));
   }, [route, stats, records, classOf]);
+  const focus = useFocusedItem('requests');
+  // 배지 내역에서 엔드포인트를 골라 왔으면 엔드포인트별 보기로 돌린다(그 줄이 보이게).
+  const [seenFocus, setSeenFocus] = useState(focus);
+  if (focus !== seenFocus) {
+    setSeenFocus(focus);
+    if (focus) setView('endpoints');
+  }
   const showEndpoint = (endpoint: string) => {
     setFilter(endpoint);
     setView('log');
@@ -67,6 +75,7 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
             stat={stat}
             ignored={ignored.has(stat.endpoint)}
             route={route}
+            focus={focus?.key === stat.endpoint ? focus : undefined}
             onSelect={showEndpoint}
             onToggleIgnore={onToggleIgnore}
           />

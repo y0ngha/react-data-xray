@@ -9,6 +9,8 @@ import { Muted } from '../../components/Muted.js';
 import { ClassBadge } from '../../request/ClassBadge.js';
 import { RequestLink } from '../../request/RequestLink.js';
 import { RequestTitle } from '../../request/RequestSummary.js';
+import { useReveal } from '../../hooks/useReveal.js';
+import type { FocusRequest } from '../../viewState.js';
 import { color, rowStyle } from '../../theme.js';
 import { REASON_LABEL } from './reasonLabels.js';
 
@@ -128,25 +130,30 @@ interface RenderGroupRowProps {
   showTime: boolean;
   /** 렌더를 센 구간(ms). 폭주 색을 10초 기준으로 환산하는 데 쓴다. */
   windowMs?: number;
+  /** 배지 내역에서 이 줄로 오라는 요청 */
+  focus?: FocusRequest;
 }
 
 /** 렌더 분석 한 줄: 횟수·시간·이유, 줄이는 방법, 네트워크 원인, 데이터 출처 */
-export const RenderGroupRow = ({ group, source, stat, showTime, windowMs = WINDOW_MS }: RenderGroupRowProps) => (
-  <div style={rowStyle}>
-    <Headline group={group} showTime={showTime} windowMs={windowMs} />
-    <Muted>{reasonSummary(group)}</Muted>
-    <MemoStats group={group} />
-    <Mounts group={group} />
-    <Libraries group={group} />
-    <StateHooks group={group} />
-    <Impact group={group} />
-    <Origins group={group} />
-    {renderAdvice(group).map((text) => (
-      <div key={text} style={{ color: color.review }}>
-        · {text}
-      </div>
-    ))}
-    <NetworkCauses group={group} />
-    {source && <DataSource source={source} stat={stat} />}
-  </div>
-);
+export const RenderGroupRow = ({ group, source, stat, showTime, windowMs = WINDOW_MS, focus }: RenderGroupRowProps) => {
+  const row = useReveal(focus);
+  return (
+    <div ref={row} tabIndex={-1} style={rowStyle}>
+      <Headline group={group} showTime={showTime} windowMs={windowMs} />
+      <Muted>{reasonSummary(group)}</Muted>
+      <MemoStats group={group} />
+      <Mounts group={group} />
+      <Libraries group={group} />
+      <StateHooks group={group} />
+      <Impact group={group} />
+      <Origins group={group} />
+      {renderAdvice(group).map((text) => (
+        <div key={text} style={{ color: color.review }}>
+          · {text}
+        </div>
+      ))}
+      <NetworkCauses group={group} />
+      {source && <DataSource source={source} stat={stat} />}
+    </div>
+  );
+};

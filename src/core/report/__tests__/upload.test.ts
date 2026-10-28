@@ -11,7 +11,7 @@ it('dev 서버 미들웨어가 표시 헤더로 답하면 보고서를 보내고
   installReportApi();
   await flush();
   await flush();
-  const upload = mockFetch.mock.calls.find(([input, init]) => input === REPORT_PATH && init?.method === 'POST');
+  const upload = mockFetch.mock.calls.find(([input, init]) => String(input).startsWith(`${REPORT_PATH}?tab=`) && init?.method === 'POST');
   expect(JSON.parse(String(upload?.[1]?.body))).toHaveProperty('requests.endpoints');
   expect(upload?.[1]?.credentials).toBe('omit');
   expect(isRenderMonitoring()).toBe(true);
