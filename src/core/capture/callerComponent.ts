@@ -1,7 +1,8 @@
 import { isLibraryFrame } from './libraryFrame.js';
 
 // 이름이 대문자로 시작해도 컴포넌트가 아닌 내장 객체 접두어
-const NOT_COMPONENT = /^(Object|Promise|Array|Function|Window|Module|XMLHttpRequest|Generator|AsyncFunction|Reflect|Proxy|Timeout|HTML\w*Element|Document|EventTarget|WebSocket|MessagePort)$/;
+const NOT_COMPONENT =
+  /^(Object|Promise|Array|Function|Window|Module|XMLHttpRequest|Generator|AsyncFunction|Reflect|Proxy|Timeout|HTML\w*Element|Document|EventTarget|WebSocket|MessagePort)$/;
 
 /** 스택 한 줄의 함수 이름. V8 "at A.m (url:1:2)"·"at async A (…)", Firefox·Safari "A@url:1:2". 이름 없는 줄은 undefined. */
 const functionOf = (line: string): string | undefined =>

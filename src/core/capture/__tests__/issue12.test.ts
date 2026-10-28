@@ -40,7 +40,11 @@ describe('요청의 경로와 컴포넌트 (#12)', () => {
       expect(componentOfStack('fetchIt@http://l/a.ts:1:2\nItemList@http://l/b.tsx:3:4')).toBe('ItemList');
     });
     it('DOM 수신자 이름은 컴포넌트가 아니고, Firefox 의 A/load@ 줄은 A 다', () => {
-      expect(componentOfStack('at HTMLButtonElement.onClick (http://l/a.ts:1:2)\nat Document.x (http://l/a.ts:1:2)\nat WebSocket.send (http://l/a.ts:1:2)')).toBeUndefined();
+      expect(
+        componentOfStack(
+          'at HTMLButtonElement.onClick (http://l/a.ts:1:2)\nat Document.x (http://l/a.ts:1:2)\nat WebSocket.send (http://l/a.ts:1:2)',
+        ),
+      ).toBeUndefined();
       expect(componentOfStack('ItemCard/load@http://l/a.ts:1:2')).toBe('ItemCard');
     });
     it('판정할 수 없으면 비운다', () => {
