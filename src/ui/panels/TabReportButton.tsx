@@ -32,11 +32,7 @@ export const TabReportButton = () => {
       <Button onClick={() => void copy()} title={`이 탭 보고서 경로 복사: ${path}`}>
         탭 {id}
       </Button>
-      {notice && (
-        <span role="status" style={{ color: color.muted, marginLeft: 4 }}>
-          {notice}
-        </span>
-      )}
+      {notice && <output style={{ color: color.muted, marginLeft: 4 }}>{notice}</output>}
     </span>
   );
 };

@@ -8,7 +8,12 @@ it('separateLabels: 라벨 크기를 모두 읽은 뒤에 위치를 쓴다 (PR5-
     const el = document.createElement('button');
     Object.defineProperty(el, 'offsetWidth', { get: () => (log.push('r'), 40) });
     Object.defineProperty(el, 'offsetHeight', { get: () => (log.push('r'), 12) });
-    Object.defineProperty(el.style, 'top', { get: () => '', set: () => void log.push('w') });
+    Object.defineProperty(el.style, 'top', {
+      get: () => '',
+      set: () => {
+        log.push('w');
+      },
+    });
     return { label: el } as never;
   };
   const rects = [new DOMRect(0, 0, 50, 20), new DOMRect(0, 0, 40, 20), new DOMRect(0, 0, 30, 20)];

@@ -5,9 +5,12 @@ import { getSnapshot, snapshotNames } from '../../../core/report/reportApi.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 
-const fmt = (row: Record<string, unknown>, skip: readonly string[]): string =>
+const REQUEST_LABELS: ReadonlySet<string> = new Set(['endpoint', 'status']);
+const RENDER_LABELS: ReadonlySet<string> = new Set(['name', 'status', 'renderedAt', 'package']);
+
+const fmt = (row: Record<string, unknown>, skip: ReadonlySet<string>): string =>
   Object.entries(row)
-    .filter(([k]) => !skip.includes(k))
+    .filter(([k]) => !skip.has(k))
     .map(([k, v]) => `${k} ${typeof v === 'number' && v > 0 ? '+' : ''}${String(v)}`)
     .join(' · ');
 
@@ -54,12 +57,12 @@ export const CompareReports = () => {
               ))}
               {result.requests.map((r) => (
                 <div key={r.endpoint}>
-                  {r.endpoint} {r.status ?? ''} {fmt(r, ['endpoint', 'status'])}
+                  {r.endpoint} {r.status ?? ''} {fmt(r, REQUEST_LABELS)}
                 </div>
               ))}
               {result.renders.map((r) => (
                 <div key={`${r.name}|${r.renderedAt ?? ''}|${r.package ?? ''}`}>
-                  &lt;{r.name}&gt; {r.renderedAt ?? r.package ?? ''} {r.status ?? ''} {fmt(r, ['name', 'status', 'renderedAt', 'package'])}
+                  &lt;{r.name}&gt; {r.renderedAt ?? r.package ?? ''} {r.status ?? ''} {fmt(r, RENDER_LABELS)}
                 </div>
               ))}
               {result.reactQuery.added.map((id) => (

@@ -67,12 +67,15 @@ describe('탭 id 충돌 (ponytail PR5-3)', () => {
   it('같은 id 를 쓰는 탭이 먼저 열려 있으면 나중에 열린 탭이 새 id 를 받는다', () => {
     const channels: FakeChannel[] = [];
     class FakeChannel {
-      onmessage: ((e: { data: unknown }) => void) | null = null;
+      handlers: Array<(e: { data: unknown }) => void> = [];
       constructor() {
         channels.push(this);
       }
+      addEventListener(_type: string, handler: (e: { data: unknown }) => void) {
+        this.handlers.push(handler);
+      }
       postMessage(data: unknown) {
-        channels.filter((c) => c !== this).forEach((c) => c.onmessage?.({ data }));
+        channels.filter((c) => c !== this).forEach((c) => c.handlers.forEach((h) => h({ data })));
       }
     }
     vi.stubGlobal('BroadcastChannel', FakeChannel);

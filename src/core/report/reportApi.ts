@@ -81,13 +81,14 @@ export const watchTabIdConflict = (): void => {
   (channel as { unref?: () => void }).unref?.();
   const born = Date.now();
   const token = newTabId();
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- BroadcastChannel 에는 targetOrigin 이 없다
   const hello = () => channel.postMessage({ id: getTabId(), born, token });
-  channel.onmessage = ({ data }: MessageEvent<{ id?: string; born?: number; token?: string } | null>) => {
+  channel.addEventListener('message', ({ data }: MessageEvent<{ id?: string; born?: number; token?: string } | null>) => {
     if (!data || data.token === undefined || data.token === token || data.id !== getTabId()) return;
     const mineIsLater = data.born! < born || (data.born === born && data.token < token);
     if (mineIsLater) writeStored(TAB_ID_KEY, newTabId(), 'session');
     else hello(); // 먼저 열린 쪽은 id 를 지키고, 뒤에 열린 쪽이 바꾸도록 알린다.
-  };
+  });
   hello();
 };
 
