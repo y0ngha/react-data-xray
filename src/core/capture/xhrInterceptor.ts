@@ -1,5 +1,6 @@
 import { createRecord, finishRecord, keepResponseText, registerBody } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
+import { attempt } from './attempt.js';
 import { isJson, isReadableText } from './contentType.js';
 import { parseRawHeaders } from './headers.js';
 import { rememberText } from './pendingTexts.js';
@@ -36,13 +37,15 @@ const onLoad = (xhr: XMLHttpRequest): void => {
 const listenOnce = (xhr: XMLHttpRequest): void => {
   if (listening.has(xhr)) return;
   listening.add(xhr);
-  xhr.addEventListener('load', () => onLoad(xhr));
+  xhr.addEventListener('load', () => attempt(() => onLoad(xhr)));
   // load 가 오지 않는 실패·취소·타임아웃도 목록에 남긴다.
   (['error', 'abort', 'timeout'] as const).forEach((type) =>
-    xhr.addEventListener(type, () => {
-      const record = current.get(xhr);
-      if (record) finishRecord(record, 0, type);
-    }),
+    xhr.addEventListener(type, () =>
+      attempt(() => {
+        const record = current.get(xhr);
+        if (record) finishRecord(record, 0, type);
+      }),
+    ),
   );
 };
 
@@ -54,24 +57,28 @@ export const interceptXhr = (): void => {
   const originalSetRequestHeader = proto.setRequestHeader;
 
   proto.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
-    opened.set(this, { method, url: String(url), headers: {} });
+    attempt(() => opened.set(this, { method, url: String(url), headers: {} }));
     return (originalOpen as (...args: unknown[]) => void).call(this, method, url, ...rest);
   } as typeof proto.open;
 
   proto.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
-    const request = opened.get(this);
-    if (request) request.headers[name.toLowerCase()] = value;
+    attempt(() => {
+      const request = opened.get(this);
+      if (request) request.headers[name.toLowerCase()] = value;
+    });
     return originalSetRequestHeader.call(this, name, value);
   };
 
   proto.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
-    const request = opened.get(this);
-    if (request) {
+    attempt(() => {
+      current.delete(this);
+      const request = opened.get(this);
+      if (!request) return;
       const record = annotateRequest(createRecord('xhr', request.method, request.url, serializeBody(body)));
       record.requestHeaders = Object.keys(request.headers).length > 0 ? { ...request.headers } : undefined;
       current.set(this, record);
       listenOnce(this);
-    }
+    });
     return originalSend.call(this, body);
   };
 };

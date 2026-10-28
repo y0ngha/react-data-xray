@@ -26,7 +26,7 @@ const redactText = (text: string | undefined): string | undefined => {
 };
 
 /** 쿼리에서 비밀값 이름의 값을 가린다(?token=…). */
-const redactUrl = (url: string): string =>
+export const redactUrl = (url: string): string =>
   url.replace(/([?&])([^=&#]+)=([^&#]*)/g, (all, sep: string, name: string) => (SENSITIVE.test(name) ? `${sep}${name}=${HIDDEN}` : all));
 
 /**

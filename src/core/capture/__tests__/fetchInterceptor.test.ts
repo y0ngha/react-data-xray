@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_BODY, flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { installCapture } from '../install.js';
 import { getOrigin } from '../../requests/origins.js';
-import { getRecords } from '../../requests/store.js';
+import { getRecords, subscribe } from '../../requests/store.js';
 
 describe('fetch 가로채기', () => {
   it('요청·응답 헤더, payload, 응답 원문을 기록하고 json() 결과를 출처로 등록한다', async () => {
@@ -22,6 +22,19 @@ describe('fetch 가로채기', () => {
     expect(record.responseHeaders).toMatchObject({ 'x-trace': 'abc' });
     expect(record.responseText).toBe(JSON.stringify(DEFAULT_BODY));
     expect(getOrigin(body.data.list[1])).toEqual({ record, path: '$.data.list[1]' });
+  });
+
+  it('기록하다 실패해도 앱의 fetch·json() 은 원래대로 끝난다', async () => {
+    const unsubscribe = subscribe(() => {
+      throw new Error('rdx 내부 실패');
+    });
+    try {
+      const body = await fetch('/api/broken').then((r) => r.json());
+      expect(body).toEqual(DEFAULT_BODY);
+      expect(JSON.parse('{"a":1}')).toEqual({ a: 1 });
+    } finally {
+      unsubscribe();
+    }
   });
 
   it('Next-Action 헤더(Server Action)는 action 으로 남겨, 같은 경로의 다른 함수 호출을 중복으로 세지 않는다', async () => {

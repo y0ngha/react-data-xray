@@ -6,6 +6,7 @@ import { RENDER_REASONS } from '../render/types.js';
 import { classifyRecords, isWaste } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
 import { endpointOf } from '../requests/requestKey.js';
+import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount, getRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
 import { groupBy } from '../../shared/collections.js';
@@ -147,7 +148,7 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
           sameResponses: s.sameResponses,
           review: s.review,
           callers: callersOf(own),
-          wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => r.url))).slice(0, MAX_EXAMPLES),
+          wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(0, MAX_EXAMPLES),
         };
       }),
     },
