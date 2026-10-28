@@ -1,5 +1,6 @@
 import { enqueue } from '../scheduler/idleQueue.js';
 import { registerOrigins } from './origins.js';
+import { repeatCauseOf } from './repeatCause.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import type { RequestRecord } from './types.js';
 
@@ -76,6 +77,12 @@ export const createRecord = (
   // 순서는 큐가 지키고, 판정은 startedAt 기준이라 늦어도 같다.
   enqueue(() => {
     if (!isStale(record)) record.duplicateOf = detectDuplicate(record);
+    // 보낸 컴포넌트는 앞서 걸린 annotate step 이 채우므로, 그 뒤로 한 번 더 미룬다.
+    if (record.duplicateOf)
+      enqueue(() => {
+        record.repeatCause = repeatCauseOf(record);
+        return true;
+      });
     return true;
   });
   return record;

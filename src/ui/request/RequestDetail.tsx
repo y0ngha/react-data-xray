@@ -66,6 +66,7 @@ const RepeatInfo = ({ record }: { record: RequestRecord }) => (
     <ClassBadge record={record} />
     {record.duplicateOf && <Muted>앞선 요청 #{record.duplicateOf}</Muted>}
     {record.sameResponseAs && <Muted>같은 응답 #{record.sameResponseAs}</Muted>}
+    {record.repeatCause && <Muted>다시 나간 이유: {record.repeatCause.detail}</Muted>}
   </div>
 );
 

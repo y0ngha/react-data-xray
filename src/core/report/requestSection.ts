@@ -44,6 +44,8 @@ export interface RequestSection {
     review: number;
     /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수. route·component 는 알 때만 있다 */
     callers: Caller[];
+    /** 중복 요청이 다시 나간 이유별 수(의존성 변경·재마운트·StrictMode). 알 수 있는 것만 있다 */
+    repeatCauses?: Array<{ kind: 'deps' | 'remount' | 'strict'; detail: string; count: number }>;
     /** 낭비로 판정된 요청의 URL 예(쿼리 포함) */
     wasteExamples: string[];
   }>;
@@ -110,6 +112,20 @@ const refetchReasonsOf = (own: readonly RequestRecord[], classes: ReadonlyMap<nu
   return Object.keys(counts).length > 0 ? counts : undefined;
 };
 
+const repeatCausesOf = (own: readonly RequestRecord[]) => {
+  const counts = new Map<string, { kind: 'deps' | 'remount' | 'strict'; detail: string; count: number }>();
+  own.forEach((r) => {
+    if (!r.repeatCause) return;
+    const key = `${r.repeatCause.kind}|${r.repeatCause.detail}`;
+    counts.set(key, { ...r.repeatCause, count: (counts.get(key)?.count ?? 0) + 1 });
+  });
+  return counts.size > 0
+    ? Array.from(counts.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, MAX_CALLERS)
+    : undefined;
+};
+
 export const buildRequestSection = (
   records: readonly RequestRecord[],
   classes: ReadonlyMap<number, RequestClass>,
@@ -133,6 +149,7 @@ export const buildRequestSection = (
         refetchReasons: refetchReasonsOf(own, classes),
         review: s.review,
         callers: callersOf(own),
+        repeatCauses: repeatCausesOf(own),
         wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
           0,
           MAX_EXAMPLES,
@@ -147,5 +164,6 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   'failedDuplicates 는 duplicates·sameResponses 중 실패 응답(4xx·5xx, 네트워크 오류)인 수다. 코드의 낭비가 아니라 재시도나 로컬 환경(백엔드 꺼짐) 문제일 수 있어 상태 코드부터 본다.',
   'refetchReasons 는 같은 응답으로 다시 받은 React Query 재조회의 원인별 수다. stale-elapsed(staleTime 이 지나 다시 받음)·after-invalidate(무효화했지만 바뀐 것 없음)는 확인할 반복이고 낭비로 세지 않는다(review). stale-zero(staleTime 0 이라 매번 받음)는 낭비(sameResponses)에 그대로 남으니 staleTime 을 늘린다. 새로고침 전 기록과의 같은 응답은 낭비로 세지 않는다.',
   'callers 의 route 는 요청을 보낸 시점의 경로(쿼리 제외), component 는 호출 스택의 대문자 이름 함수로 짐작한 보낸 컴포넌트다. 없으면 알 수 없는 것이다.',
+  'repeatCauses 는 중복(duplicates) 요청이 다시 나간 이유별 수다. deps(effect 의존성 #순번이 바뀜: 의존성 정리), remount(부모의 분기 변경으로 자식이 언마운트됐다 다시 마운트됨: 부모 분기 정리), strict(StrictMode 재실행, 고칠 것 없음). 없으면 알 수 없는 것이다.',
   'callers 의 queryKey·observer 는 React Query 가 보낸 요청의 쿼리 키와 useQuery 를 그린 컴포넌트다. noAppFrame 은 ky 의 타이머처럼 비동기 경계에서 스택이 끊겨 보낸 코드 위치를 모른다는 뜻이다(frame 은 라이브러리 내부이니 queryKey 로 찾는다).',
 ];
