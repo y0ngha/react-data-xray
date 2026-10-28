@@ -2,14 +2,14 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { memo, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getRenderGroups, resetRenderStats, setRenderMonitoring } from '../../../../core/render/monitor.js';
+import { getRenderGroups, renderGroupsSteps, resetRenderStats, setRenderMonitoring } from '../../../../core/render/monitor.js';
 import { summarize } from '../../../../core/render/summary.js';
 import { flushQueue } from '../../../../core/scheduler/idleQueue.js';
 import { RendersTab } from '../RendersTab.js';
 
 vi.mock('../../../../core/render/monitor.js', async (original) => {
   const real = await original<typeof import('../../../../core/render/monitor.js')>();
-  return { ...real, getRenderGroups: vi.fn<typeof real.getRenderGroups>(real.getRenderGroups) };
+  return { ...real, renderGroupsSteps: vi.fn<typeof real.renderGroupsSteps>(real.renderGroupsSteps) };
 });
 
 vi.mock('../../../../core/render/summary.js', async (original) => {
@@ -43,7 +43,7 @@ function Table({ size }: { size: number }) {
 beforeEach(() => {
   setRenderMonitoring(true);
   resetRenderStats();
-  vi.mocked(getRenderGroups).mockClear();
+  vi.mocked(renderGroupsSteps).mockClear();
 });
 afterEach(() => setRenderMonitoring(false));
 
@@ -57,17 +57,17 @@ describe('렌더 탭 비용(#32)', () => {
     await act(async () => {
       flushQueue();
     });
-    expect(getRenderGroups).not.toHaveBeenCalled();
+    expect(renderGroupsSteps).not.toHaveBeenCalled();
   });
 
   it('보이는 탭은 렌더 중이 아니라 유휴 큐에서 계산하고 결과를 그린다', async () => {
     render(<Table size={3} />);
     render(<RendersTab statsByEndpoint={new Map()} />);
-    expect(getRenderGroups).not.toHaveBeenCalled();
+    expect(renderGroupsSteps).not.toHaveBeenCalled();
     await act(async () => {
       flushQueue();
     });
-    expect(getRenderGroups).toHaveBeenCalled();
+    expect(renderGroupsSteps).toHaveBeenCalled();
     expect(screen.queryByText('계산 중')).toBeNull();
   });
 

@@ -1,3 +1,4 @@
+import { isLibraryFrame } from '../capture/libraryFrame.js';
 import { resolveStack } from '../capture/sourceMap.js';
 import { HOST_COMPONENT, HOST_ROOT, MEMO_COMPONENT, SIMPLE_MEMO_COMPONENT, type Fiber } from './types.js';
 
@@ -58,7 +59,7 @@ const jsxFrameOf = (fiber: Fiber): string | undefined =>
     .map((line) => line.trim())
     .find((line) => FRAME_LOCATION.test(line) && !LIBRARY_FRAME.test(line));
 
-const locationOfFrame = (frame: string): string | undefined => {
+export const locationOfFrame = (frame: string): string | undefined => {
   const match = FRAME_LOCATION.exec(frame);
   return match ? `${shortPath(match[1])}:${match[2]}` : undefined;
 };
@@ -72,6 +73,30 @@ export const jsxLocationOf = (fiber: Fiber): string | undefined => {
   if (source?.fileName) return source.lineNumber ? `${shortPath(source.fileName)}:${source.lineNumber}` : shortPath(source.fileName);
   const frame = jsxFrameOf(fiber);
   return frame && locationOfFrame(frame);
+};
+
+// React 19 의 _debugStack 맨 위에 있는 React 런타임 프레임(jsx 를 부른 쪽이 아니다)
+const RUNTIME_FRAME = /react-stack-top-frame|jsx-dev-runtime|jsx-runtime|react_jsx|\/react\/|\/react-dom\//;
+
+/** 번들 경로에서 패키지 이름: node_modules/@scope/pkg/ 의 마지막 것, Vite 사전 번들은 파일 이름(@mui_material → @mui/material) */
+const packageOfPath = (path: string): string => {
+  const dep = /\.vite\/deps\/([^/?:]+?)\.js/.exec(path)?.[1];
+  if (dep) return dep.startsWith('chunk-') ? '(번들)' : dep.replace(/^(@[^_]+)_/, '$1/');
+  return /^.*node_modules\/(@[^/]+\/[^/?:]+|[^/?:]+)\//.exec(path)?.[1] ?? '(번들)';
+};
+
+/**
+ * 이 컴포넌트의 element 를 라이브러리 코드가 만들었다면 그 패키지 이름(앱 코드가 만들었거나 알 수 없으면 undefined).
+ * React 18 은 _debugSource, React 19 는 _debugStack 의 맨 위 프레임을 본다.
+ */
+export const libraryPackageOf = (fiber: Fiber): string | undefined => {
+  const file = fiber._debugSource?.fileName;
+  if (file) return isLibraryFrame(file) ? packageOfPath(file) : undefined;
+  const top = fiber._debugStack?.stack
+    ?.split('\n')
+    .slice(1)
+    .find((line) => FRAME_LOCATION.test(line.trim()) && !RUNTIME_FRAME.test(line));
+  return top && isLibraryFrame(top) ? packageOfPath(top) : undefined;
 };
 
 /** React 19 의 JSX 위치를 소스맵으로 원본 줄로 바꾼다. 바꿀 것이 없으면(React 18, 소스맵 없음) undefined */

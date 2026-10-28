@@ -1,5 +1,6 @@
 import { renderAdvice } from '../../../core/render/advice.js';
 import type { RenderGroup } from '../../../core/render/groups.js';
+import { WINDOW_MS, withHookPaths } from '../../../core/render/summary.js';
 import { RENDER_REASONS, RENDER_STORM } from '../../../core/render/types.js';
 import type { Hit } from '../../../core/inspect/types.js';
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
@@ -16,12 +17,17 @@ const reasonSummary = (g: RenderGroup): string =>
     .map((r) => `${REASON_LABEL[r]} ${g.reasons[r]}`)
     .join(' · ');
 
-const Headline = ({ group, showTime }: { group: RenderGroup; showTime: boolean }) => (
+// RENDER_STORM 은 10초 기준이라, 더 긴 구간(reset 뒤 최대 120초)은 10초 몫으로 환산해 견준다.
+const isStorm = (group: RenderGroup, windowMs: number): boolean =>
+  group.recent / group.instances / Math.max(1, windowMs / WINDOW_MS) >= RENDER_STORM;
+
+const Headline = ({ group, showTime, windowMs }: { group: RenderGroup; showTime: boolean; windowMs: number }) => (
   <div>
-    <b style={{ color: group.recent / group.instances >= RENDER_STORM ? color.warn : color.text }}>{group.recent}회</b>
+    <b style={{ color: isStorm(group, windowMs) ? color.warn : color.text }}>{group.recent}회</b>
     {showTime && <span style={{ color: color.muted }}> · {group.ms.toFixed(1)}ms</span>} &lt;{group.name}&gt;
     {group.instances > 1 && <span style={{ color: color.muted }}> × {group.instances}개</span>}
     {group.avoidable > 0 && <Badge color={color.review}>줄일 수 있음 {group.avoidable}</Badge>}
+    {group.package && <Badge color={color.muted}>{group.package}</Badge>}
     {group.location && <span style={{ color: color.muted }}> · {group.location}</span>}
   </div>
 );
@@ -37,7 +43,7 @@ const StateHooks = ({ group }: { group: RenderGroup }) =>
   group.stateHooks.length > 0 ? (
     <Muted>
       바뀐 state:{' '}
-      {group.stateHooks
+      {withHookPaths(group.stateHooks, group.fiber)
         .map(
           (h) =>
             `${h.label} ${h.count}회${h.intervalMs ? ` (${(h.intervalMs / 1000).toFixed(1)}초마다)` : ''} · 최근 ${h.last.from} → ${h.last.to}`,
@@ -52,6 +58,36 @@ const Impact = ({ group }: { group: RenderGroup }) =>
     <Muted>
       이 컴포넌트가 일으킨 하위 렌더 {group.impact.renders}회 · 그중 값이 그대로 {group.impact.unchanged}회
       {group.impact.changedProps.length > 0 && ` · 값이 바뀐 props: ${group.impact.changedProps.join(' → ')}`}
+    </Muted>
+  ) : null;
+
+/** memo 가 부모 렌더를 몇 번 건너뛰었고 몇 번 다시 렌더됐는지 */
+const MemoStats = ({ group }: { group: RenderGroup }) =>
+  group.memo ? (
+    <Muted>
+      memo: 건너뜀 {group.memo.skipped}회 · 다시 렌더 {group.memo.rendered}회
+      {group.memo.neverSkippedProps.length > 0 && ` · 매번 새 참조: ${group.memo.neverSkippedProps.join(', ')}`}
+    </Muted>
+  ) : null;
+
+/** 마운트·언마운트 횟수와 재마운트. 재마운트는 마운트 effect 의 요청·구독·타이머가 다시 도는 신호다. */
+const Mounts = ({ group }: { group: RenderGroup }) =>
+  group.mounts ? (
+    <Muted>
+      마운트 {group.mounts.mounts}회 · 언마운트 {group.mounts.unmounts}회
+      {group.mounts.remounts.length > 0 &&
+        ` · 재마운트: ${group.mounts.remounts.map((r) => `${r.parent ? `<${r.parent}> 아래 ` : ''}${r.count}회${r.cause ? '(컴포넌트 타입이 렌더마다 새로 만들어짐)' : ''}`).join(' · ')}`}
+    </Muted>
+  ) : null;
+
+/** 이 컴포넌트가 그린 라이브러리 내부 컴포넌트(축약된 이름이라 패키지와 함께 보여 준다) */
+const Libraries = ({ group }: { group: RenderGroup }) =>
+  group.libraries?.length ? (
+    <Muted>
+      안쪽 라이브러리:{' '}
+      {group.libraries
+        .map((l) => `${l.package} <${l.name}> ${l.renders}회${l.avoidable > 0 ? `(줄일 수 있음 ${l.avoidable})` : ''}`)
+        .join(' · ')}
     </Muted>
   ) : null;
 
@@ -90,13 +126,18 @@ interface RenderGroupRowProps {
   source?: Hit;
   stat?: EndpointStat;
   showTime: boolean;
+  /** 렌더를 센 구간(ms). 폭주 색을 10초 기준으로 환산하는 데 쓴다. */
+  windowMs?: number;
 }
 
 /** 렌더 분석 한 줄: 횟수·시간·이유, 줄이는 방법, 네트워크 원인, 데이터 출처 */
-export const RenderGroupRow = ({ group, source, stat, showTime }: RenderGroupRowProps) => (
+export const RenderGroupRow = ({ group, source, stat, showTime, windowMs = WINDOW_MS }: RenderGroupRowProps) => (
   <div style={rowStyle}>
-    <Headline group={group} showTime={showTime} />
+    <Headline group={group} showTime={showTime} windowMs={windowMs} />
     <Muted>{reasonSummary(group)}</Muted>
+    <MemoStats group={group} />
+    <Mounts group={group} />
+    <Libraries group={group} />
     <StateHooks group={group} />
     <Impact group={group} />
     <Origins group={group} />

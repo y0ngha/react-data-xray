@@ -29,4 +29,35 @@ describe('previewValue 종류 표시 (#19)', () => {
     expect(previewValue(null)).toBe('null');
     expect(previewValue(undefined)).toBe('undefined');
   });
+  it('객체 안의 Map·Set 도 크기로 구별한다', () => {
+    expect(previewValue({ a: new Map([[1, 2]]) })).not.toBe(previewValue({ a: new Map() }));
+    expect(previewValue({ a: new Set([1]) })).toContain('Set(1)');
+  });
+  it('큰 Map·Set 은 앞 몇 개만 꺼내 복사하지 않는다', () => {
+    let pulled = 0;
+    class Big extends Set<number> {
+      override *[Symbol.iterator](): SetIterator<number> {
+        for (let i = 0; i < 100_000; i++) {
+          pulled++;
+          yield i;
+        }
+      }
+    }
+    const big = new Big();
+    big.add(1);
+    previewValue(big);
+    expect(pulled).toBeLessThanOrEqual(4);
+  });
+  it('toJSON 이 undefined 를 주거나 순환하는 클래스 인스턴스는 이름과 {…}', () => {
+    class Hidden {
+      toJSON() {
+        return undefined;
+      }
+    }
+    class Loop {
+      self = this;
+    }
+    expect(previewValue(new Hidden())).toBe('Hidden {…}');
+    expect(previewValue(new Loop())).toBe('Loop {…}');
+  });
 });

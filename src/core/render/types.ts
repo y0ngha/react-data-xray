@@ -31,6 +31,8 @@ export interface NetworkCause {
 export interface RenderOrigin {
   name: string;
   reason: RenderReason;
+  /** 시작한 컴포넌트의 기록. 같은 이름의 다른 위치 컴포넌트와 구분하는 데만 쓴다(보고서·집계 결과에는 싣지 않는다). */
+  from?: { name: string; location?: string; package?: string; owner?: { name: string; location?: string } };
 }
 
 /** state 때문에 렌더됐을 때, 값이 바뀐 훅 하나 */
@@ -71,14 +73,30 @@ export interface RenderEntry {
   memoized: boolean;
   /** 이 컴포넌트를 그리는 JSX 위치(dev 빌드가 기록할 때만) */
   location?: string;
+  /** 라이브러리 코드가 만든 element 를 그리는 컴포넌트면 그 패키지 이름(그리는 위치가 앱 코드가 아니다) */
+  package?: string;
+  /** 라이브러리 컴포넌트를 그린 가장 가까운 앱 컴포넌트 */
+  owner?: { name: string; location?: string };
   /** React Compiler 가 메모하는 컴포넌트인지. 그러면 React.memo 대신 구조를 바꾸라고 권한다. */
   compiled?: boolean;
+  /** memo 가 부모의 렌더를 건너뛴 시각(최근 것만 남긴다) */
+  skips?: number[];
+}
+
+/** memo 컴포넌트가 부모 렌더를 건너뛴 횟수와 다시 렌더된 횟수(마운트 제외) */
+export interface MemoStats {
+  skipped: number;
+  rendered: number;
+  /** 한 번도 건너뛰지 못했을 때, 렌더마다 새 참조(새 콜백·내용이 같은 새 객체)로 내려온 props */
+  neverSkippedProps: string[];
 }
 
 /** 최근 구간에 값이 바뀐 상태 훅 하나의 요약 */
 export interface StateHookSummary {
   /** 화면 표시: "useState #3" */
   label: string;
+  /** 훅 순번(1부터). 커스텀 훅 경로를 붙일 때 쓴다. 클래스 state 는 없다. */
+  hookIndex?: number;
   count: number;
   /** 일정한 간격으로 바뀌었다면 그 간격(ms). 타이머(setInterval) 신호다. */
   intervalMs?: number;
@@ -97,6 +115,9 @@ export interface OriginImpact {
   unchanged: number;
   /** 값이 그대로인데 렌더된 하위 컴포넌트 수(이름 기준) */
   unchangedComponents: number;
+  /** 따라 렌더된 하위의 렌더 시간 합과 그중 값이 그대로인 렌더의 합(ms). 시간 기록이 없으면 없다. */
+  childMs?: number;
+  unchangedMs?: number;
   /** 값이 실제로 바뀐 props: "AnalysisPanel.reanalyzeCooldownMs" (위에서 아래 순서) */
   changedProps: string[];
 }
@@ -120,6 +141,10 @@ export interface RenderSummary {
   last: number;
   /** 최근 10초 자기 자신의 렌더 시간 합(ms) */
   ms: number;
+  /** 시간(ms)이 기록된 렌더 수. 0 이면 dev 빌드가 시간을 주지 않은 것이라 ms 는 의미가 없다. */
+  timed?: number;
+  /** 줄일 수 있는 렌더의 시간 합(ms) */
+  avoidableMs?: number;
   reasons: Record<RenderReason, number>;
   /** 줄일 수 있는 렌더(same-content + new-callback + memo 가 아닌 컴포넌트의 parent) */
   avoidable: number;
@@ -136,6 +161,8 @@ export interface RenderSummary {
   /** state 때문에 렌더됐다면 값이 바뀐 훅들(많은 순) */
   stateHooks: StateHookSummary[];
   compiled: boolean;
+  /** React.memo 컴포넌트일 때만 */
+  memo?: MemoStats;
 }
 
 export interface Commit {
@@ -144,4 +171,8 @@ export interface Commit {
   time: number;
   /** 이 commit 에서 렌더된 컴포넌트 수 */
   count: number;
+  /** 이 commit 에서 렌더된 컴포넌트의 자기 렌더 시간 합(ms). 시간 기록이 없으면 없다. */
+  ms?: number;
+  /** 이 commit 을 시작한 컴포넌트(스스로 state·context 가 바뀌었거나 마운트된 가장 위 컴포넌트) */
+  startedBy?: string;
 }

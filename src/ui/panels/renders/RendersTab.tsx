@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
-import { sortRenderGroups, type RenderGroup, type RenderSort } from '../../../core/render/groups.js';
+import { type RenderGroup, type RenderSort } from '../../../core/render/groups.js';
 import type { Hit } from '../../../core/inspect/types.js';
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
@@ -8,7 +8,8 @@ import { isIndexPending } from '../../../core/inspect/derivedMatch.js';
 import { getRecords } from '../../../core/requests/store.js';
 import { inspectFiber } from '../../../core/inspect/inspect.js';
 import type { Fiber } from '../../../core/fiber/types.js';
-import { renderWindowStart } from '../../../core/render/monitor.js';
+import { reportWindowMs } from '../../../core/render/monitor.js';
+import { WINDOW_MS } from '../../../core/render/summary.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { useNow } from '../../hooks/useNow.js';
@@ -17,7 +18,6 @@ import { RenderGroupRow } from './RenderGroupRow.js';
 import { useRenderGroups } from './useRenderGroups.js';
 
 const REFRESH_MS = 1000;
-const MAX_GROUPS = 30;
 
 const SORTS: ReadonlyArray<{ sort: RenderSort; label: string; title?: string }> = [
   { sort: 'avoidable', label: '줄일 수 있는 렌더순', title: '줄일 수 있는 렌더(같은 내용 새 참조, 새 콜백, 부모 렌더)가 많은 순' },
@@ -44,12 +44,11 @@ const sourceOf = (group: RenderGroup): Hit | undefined => {
 };
 
 /** 지금 보는 구간. reset 했으면 reset 시각 이후(보고서와 같은 구간), 아니면 최근 10초 */
-const windowLabel = (now: number): string => {
-  const start = renderWindowStart(now);
-  if (now - start <= 10_000) return '최근 10초';
-  const t = new Date(start);
+const windowLabel = (now: number, windowMs: number): string => {
+  if (windowMs <= WINDOW_MS) return '최근 10초';
+  const t = new Date(now - windowMs);
   const hms = [t.getHours(), t.getMinutes(), t.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
-  return `${hms} 이후 ${Math.round((now - start) / 1000)}초`;
+  return `${hms} 이후 ${Math.round(windowMs / 1000)}초`;
 };
 
 /** 렌더 › 분석: reset 뒤에는 그 이후, 아니면 최근 10초 렌더를 컴포넌트별로 묶어 이유, 줄이는 방법, 네트워크 원인을 보여 준다. */
@@ -65,22 +64,16 @@ export const RendersTab = ({
   const now = useNow(REFRESH_MS);
   const [sort, setSort] = useState<RenderSort>('avoidable');
   const host = useRef<HTMLDivElement>(null);
-  const computed = useRenderGroups(now, scope, host, sourceOf);
-  // 정렬은 보이는 줄 수와 상관없이 전체 그룹에 하지만 그룹이 이미 합쳐져 있어 싸다. 기준이 바뀔 때만 다시 한다.
-  const rows = useMemo(() => {
-    const sorted = sortRenderGroups(
-      (computed?.items ?? []).map((c) => c.group),
-      sort,
-    ).slice(0, MAX_GROUPS);
-    const sourceByGroup = new Map((computed?.items ?? []).map((c) => [c.group, c.source]));
-    return sorted.map((group) => ({ group, source: sourceByGroup.get(group) }));
-  }, [computed, sort]);
+  const computed = useRenderGroups(now, scope, host, sourceOf, sort);
+  // 정렬·자르기·출처 찾기는 useRenderGroups 가 유휴 큐에서 이미 했다.
+  const rows = computed?.items ?? [];
+  const windowMs = reportWindowMs(now);
   const showTime = rows.some((r) => r.group.ms > 0);
   const statOf = (source: Hit | undefined) => (source ? statsByEndpoint.get(endpointOf(source.record)) : undefined);
   return (
     <div ref={host}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-        <Muted>렌더 분석 · {windowLabel(now)} ·</Muted>
+        <Muted>렌더 분석 · {windowLabel(now, windowMs)} ·</Muted>
         {SORTS.map((s) => (
           <Button key={s.sort} active={sort === s.sort} onClick={() => setSort(s.sort)} title={s.title}>
             {s.label}
@@ -90,7 +83,14 @@ export const RendersTab = ({
       {computed?.truncated && <Muted>인스턴스가 너무 많아 렌더 적은 {computed.droppedInstances}개는 뺐습니다.</Muted>}
       {computed && rows.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
       {rows.map(({ group, source }) => (
-        <RenderGroupRow key={group.name} group={group} source={source} stat={statOf(source)} showTime={showTime} />
+        <RenderGroupRow
+          key={group.key ?? group.name}
+          group={group}
+          source={source}
+          stat={statOf(source)}
+          showTime={showTime}
+          windowMs={windowMs}
+        />
       ))}
     </div>
   );
