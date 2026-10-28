@@ -23,6 +23,8 @@ export interface Fiber {
   dependencies?: { firstContext: ContextDependency | null } | null;
   /** dev 빌드(React 18)가 기록하는, 이 컴포넌트를 그리는 JSX 의 위치 */
   _debugSource?: { fileName?: string; lineNumber?: number } | null;
+  /** dev 빌드(React 19)가 기록하는, 이 element 를 만든 시점의 호출 스택(Error). _debugSource 를 대신한다. */
+  _debugStack?: { stack?: string } | null;
   /** dev 빌드가 기록하는, 이 컴포넌트가 부른 훅 종류(useState, useEffect…)의 순서 */
   _debugHookTypes?: string[] | null;
   /** React 19 는 React Compiler 가 만든 메모 캐시를 여기(memoCache)에 둔다. */

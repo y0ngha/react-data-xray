@@ -288,19 +288,13 @@ describe('렌더의 네트워크 원인', () => {
     bump(2);
     return getTopRenders(200).find((e) => e.name === 'Leaf')!;
   };
-  const isReact19 = process.env.RDX_REACT_MAJOR === '19';
-
   it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유)을 남긴다', () => {
     expect(renderLeaf().origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
   });
 
-  it.runIf(!isReact19)('React 18 에서는 자기를 그리는 JSX 위치를 남긴다', () => {
+  // React 18 은 _debugSource, React 19 는 _debugStack 에서 읽는다(pnpm test:react19 가 19 쪽을 본다).
+  it('자기를 그리는 JSX 위치(Middle 안의 <Leaf />)를 남긴다', () => {
     expect(renderLeaf().location).toMatch(/monitor\.test\.tsx:\d+$/);
-  });
-
-  // React 19 는 JSX 위치(_debugSource)를 없앴다. 위치만 비고 나머지는 같다.
-  it.runIf(isReact19)('React 19 에서는 JSX 위치가 비어 있다', () => {
-    expect(renderLeaf().location).toBeUndefined();
   });
 });
 

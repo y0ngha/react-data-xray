@@ -1,4 +1,11 @@
-import { getComponentName, isFrameworkDevtoolsRoot, isMemoized, jsxLocationOf, rememberRootContainer } from '../fiber/tree.js';
+import {
+  getComponentName,
+  isFrameworkDevtoolsRoot,
+  isMemoized,
+  jsxLocationOf,
+  rememberRootContainer,
+  resolveJsxLocation,
+} from '../fiber/tree.js';
 import { isComposite, PERFORMED_WORK, type Fiber } from '../fiber/types.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { listenToCommits } from './devtoolsHook.js';
@@ -45,6 +52,14 @@ const entryOf = (fiber: Fiber, alt: Fiber | null, memoized: boolean, compiled: b
     location: jsxLocationOf(fiber),
     compiled,
   };
+  if (!existing) {
+    // React 19 의 위치는 변환된 코드 기준이라, 소스맵을 받는 대로 원본 줄로 바꾼다.
+    void resolveJsxLocation(fiber)
+      .then((location) => {
+        if (location) entry.location = location;
+      })
+      .catch(() => undefined);
+  }
   entries.set(fiber, entry);
   if (alt) entries.set(alt, entry);
   return entry;

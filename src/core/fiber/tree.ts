@@ -1,3 +1,4 @@
+import { resolveStack } from '../capture/sourceMap.js';
 import { HOST_COMPONENT, HOST_ROOT, MEMO_COMPONENT, SIMPLE_MEMO_COMPONENT, type Fiber } from './types.js';
 
 const FIBER_KEY_PREFIX = '__reactFiber$';
@@ -41,12 +42,44 @@ export const getComponentName = (fiber: Pick<Fiber, 'type'>): string => {
   return type?.displayName || type?.name || type?.render?.name || type?.type?.name || 'Anonymous';
 };
 
-/** 이 컴포넌트를 그리는 JSX 위치(src/... 부터, 줄 번호 포함). dev 빌드가 기록하지 않으면(React 19 등) undefined */
+/** 파일 경로·모듈 주소를 src/... 부터로 줄인다(번들러가 붙인 쿼리는 뗀다). */
+const shortPath = (path: string): string => path.split('?')[0].replace(/^.*?\/(src|app|pages|components)\//, '$1/');
+
+// React·라이브러리 프레임(사전 번들 포함)과 React 19 가 스택 맨 위에 붙이는 표식 프레임
+const LIBRARY_FRAME = /\/node_modules\/|\/\.vite\/deps\/|react-stack-top-frame/;
+// V8 "at fn (url:1:2)"·"at url:1:2", Firefox·Safari "fn@url:1:2" 의 주소와 줄
+const FRAME_LOCATION = /(?:\(|@|at )((?:[a-z]+:\/\/)?[^\s()@]+):(\d+):\d+\)?$/;
+
+/** React 19 의 _debugStack 에서, 이 element 를 만든(JSX 를 쓴) 앱 코드 프레임 */
+const jsxFrameOf = (fiber: Fiber): string | undefined =>
+  fiber._debugStack?.stack
+    ?.split('\n')
+    .slice(1)
+    .map((line) => line.trim())
+    .find((line) => FRAME_LOCATION.test(line) && !LIBRARY_FRAME.test(line));
+
+const locationOfFrame = (frame: string): string | undefined => {
+  const match = FRAME_LOCATION.exec(frame);
+  return match ? `${shortPath(match[1])}:${match[2]}` : undefined;
+};
+
+/**
+ * 이 컴포넌트를 그리는 JSX 위치(src/... 부터, 줄 번호 포함). React 18 은 _debugSource, React 19 는 _debugStack 에서 읽는다.
+ * React 19 의 줄은 dev 서버가 변환한 코드 기준이라, 원본 줄은 resolveJsxLocation 으로 따로 구한다. dev 빌드가 아니면 undefined
+ */
 export const jsxLocationOf = (fiber: Fiber): string | undefined => {
   const source = fiber._debugSource;
-  if (!source?.fileName) return undefined;
-  const file = source.fileName.replace(/^.*?\/(src|app|pages|components)\//, '$1/');
-  return source.lineNumber ? `${file}:${source.lineNumber}` : file;
+  if (source?.fileName) return source.lineNumber ? `${shortPath(source.fileName)}:${source.lineNumber}` : shortPath(source.fileName);
+  const frame = jsxFrameOf(fiber);
+  return frame && locationOfFrame(frame);
+};
+
+/** React 19 의 JSX 위치를 소스맵으로 원본 줄로 바꾼다. 바꿀 것이 없으면(React 18, 소스맵 없음) undefined */
+export const resolveJsxLocation = async (fiber: Fiber): Promise<string | undefined> => {
+  const frame = fiber._debugSource ? undefined : jsxFrameOf(fiber);
+  if (!frame) return undefined;
+  const resolved = await resolveStack(frame);
+  return resolved === frame ? undefined : locationOfFrame(resolved);
 };
 
 /** React.memo 로 감싼 컴포넌트인지(memo 의 안쪽 컴포넌트 포함) */

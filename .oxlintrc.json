@@ -31,7 +31,8 @@
           "__RDX__",
           "__REACT_DEVTOOLS_GLOBAL_HOOK__",
           "_debugHookTypes",
-          "_debugSource"
+          "_debugSource",
+          "_debugStack"
         ]
       }
     ]
