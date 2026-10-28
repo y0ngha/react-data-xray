@@ -1,6 +1,6 @@
 import { findRootFibers, walkFibers } from '../fiber/tree.js';
 import { findDerivedOrigin, isIndexPending } from '../inspect/derivedMatch.js';
-import { isQueuePending } from '../scheduler/idleQueue.js';
+import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
@@ -114,7 +114,7 @@ interface ClientHistory {
   keys: Map<string, unknown>;
   misses: Array<{ at: number; finding: CacheFinding }>;
   /** 직전 무효화(겹침 판정용, 짧은 시간만 남긴다) */
-  recent: Array<{ at: number; key: unknown; stack?: string }>;
+  recent: Array<{ at: number; key: unknown; error: Error }>;
   /** 쿼리 성공 기록(재조회 원인 판정용). 같은 응답이면 structural sharing 이 앞 데이터를 그대로 써 출처 매칭 기록(fetched)에 남지 않아 따로 둔다. */
   successes: Array<{ at: number; queryHash: string; data: WeakRef<object> }>;
   /** 무효화 기록(재조회 원인 판정용). 맞는 쿼리가 있었는지와 무관하게 전부 남긴다. */
@@ -245,8 +245,8 @@ const resolvePending = (history: ClientHistory): void => {
 };
 
 /** 앱에서 invalidateQueries 를 부른 위치. rdx 가 감싼 invalidateQueries 와 그 안쪽 프레임은 뺀다(앱 코드가 첫 줄에 오게). */
-const callerStack = (): string | undefined => {
-  const lines = (new Error().stack ?? '').split('\n').map((line) => line.trim());
+const callerStack = (error: Error): string | undefined => {
+  const lines = (error.stack ?? '').split('\n').map((line) => line.trim());
   const wrapper = lines.findIndex((line) => line.includes('invalidateQueries'));
   return (
     lines
@@ -266,33 +266,45 @@ const shapeOf = (key: unknown): string | undefined =>
 // 이 시간 안에 같은 쿼리를 덮는 무효화가 또 오면 겹친 것으로 본다(뒤의 무효화가 앞의 재조회를 취소한다).
 const OVERLAP_MS = 50;
 
-/** 앞 무효화와 같은 쿼리를 함께 덮으면 double-invalidate 로 남긴다 */
-const recordOverlap = (history: ClientHistory, key: unknown, seen: unknown[], at: number, stack: string | undefined): void => {
+/** 앞 무효화와 같은 쿼리를 함께 덮으면 double-invalidate 로 남긴다. 래퍼는 참조만 담고 판정은 유휴 큐에서 한다. */
+const recordOverlap = (history: ClientHistory, key: unknown, seen: unknown[], at: number, error: Error): void => {
   history.recent = history.recent.filter((r) => at - r.at <= OVERLAP_MS);
-  const first = history.recent.find((r) => seen.some((k) => partialMatch(r.key, k) && partialMatch(key, k)));
-  if (first)
-    pushBounded(history.misses, {
-      at,
-      finding: {
-        kind: 'double-invalidate',
-        keys: [keyText(first.key), keyText(key)],
-        requests: [],
-        stack,
-        stacks: [first.stack ?? '', stack ?? ''],
-      },
-    });
-  history.recent.push({ at, key, stack });
+  const earlier = history.recent.slice();
+  history.recent.push({ at, key, error });
+  enqueue(() => {
+    const first = earlier.find((r) => seen.some((k) => partialMatch(r.key, k) && partialMatch(key, k)));
+    if (first) {
+      const stack = callerStack(error);
+      pushBounded(history.misses, {
+        at,
+        finding: {
+          kind: 'double-invalidate',
+          keys: [keyText(first.key), keyText(key)],
+          requests: [],
+          stack,
+          stacks: [callerStack(first.error) ?? '', stack ?? ''],
+        },
+      });
+    }
+    return true;
+  });
 };
 
 const recordInvalidate = (history: ClientHistory, args: unknown[]): void => {
   const key = invalidatedKey(args);
-  if (key !== undefined) pushBounded(history.invalidations, { at: Date.now(), key });
+  const at = Date.now();
+  if (key === undefined) return;
+  pushBounded(history.invalidations, { at, key });
   const seen = [...history.keys.values()];
-  if (key !== undefined) recordOverlap(history, key, seen, Date.now(), callerStack());
-  if (key === undefined || seen.some((k) => partialMatch(key, k))) return;
-  const shape = shapeOf(key);
-  const kind = shape !== undefined && seen.some((k) => shapeOf(k) === shape) ? 'invalidate-unloaded' : 'invalidate-miss';
-  pushBounded(history.misses, { at: Date.now(), finding: { kind, keys: [keyText(key)], requests: [], stack: callerStack() } });
+  const error = new Error();
+  recordOverlap(history, key, seen, at, error);
+  enqueue(() => {
+    if (seen.some((k) => partialMatch(key, k))) return true;
+    const shape = shapeOf(key);
+    const kind = shape !== undefined && seen.some((k) => shapeOf(k) === shape) ? 'invalidate-unloaded' : 'invalidate-miss';
+    pushBounded(history.misses, { at, finding: { kind, keys: [keyText(key)], requests: [], stack: callerStack(error) } });
+    return true;
+  });
 };
 
 const SAMPLE_KEYS = 3;
@@ -547,7 +559,17 @@ const successOf = (record: RequestRecord): { client: QueryClientLike; history: C
  * - stale-elapsed: staleTime(>0)이 지난 뒤에 다시 받았다
  * 쿼리 성공 기록(2분)에 앞선 성공이 없으면(첫 요청, 오래된 요청) 알 수 없다. 사용자 조회·보고서에서 부른다.
  */
+const pinnedReasons = new WeakMap<RequestRecord, RefetchReason>();
 export const refetchReason = (record: RequestRecord): RefetchReason | undefined => {
+  // 한 번 정해진 원인은 고정한다: 성공 이력이 밀려나도 분류가 바뀌지 않고, 이력을 다시 훑지도 않는다.
+  const pinned = pinnedReasons.get(record);
+  if (pinned) return pinned;
+  const reason = computeRefetchReason(record);
+  if (reason) pinnedReasons.set(record, reason);
+  return reason;
+};
+
+const computeRefetchReason = (record: RequestRecord): RefetchReason | undefined => {
   const found = successOf(record);
   if (!found) return undefined;
   const { client, history, at } = found;
@@ -639,6 +661,7 @@ export const fetchCause = (record: RequestRecord): FetchCause | undefined => fet
 
 /** 겹친 무효화(double-invalidate)가 취소한 요청이면 두 무효화의 호출 위치(앞, 뒤). 요청 상세에 원인을 보이려고 쓴다. */
 export const overlapCancelOf = (record: RequestRecord): string[] | undefined => {
+  flushQueue(); // 사용자 조회(요청 상세): 미뤄 둔 겹침 판정을 지금 끝낸다
   for (const ref of watched) {
     const client = ref.deref();
     const history = client && histories.get(client);

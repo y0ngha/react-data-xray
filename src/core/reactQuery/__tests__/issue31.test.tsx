@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { getRecords } from '../../requests/store.js';
+import { flushQueue } from '../../scheduler/idleQueue.js';
 import { auditQueryCache, findQueryClients } from '../cacheAudit.js';
 
 const setup = async (seen: unknown[][]) => {
@@ -18,7 +19,10 @@ const setup = async (seen: unknown[][]) => {
   for (const queryKey of seen) await client.fetchQuery({ queryKey, queryFn: () => fetch('/api/x').then((r) => r.json()) });
   return client;
 };
-const audit = () => auditQueryCache(() => 'ok', getRecords());
+const audit = () => {
+  flushQueue();
+  return auditQueryCache(() => 'ok', getRecords());
+};
 
 describe('이슈 31: 같은 키 모양이면 invalidate-miss 가 아니다', () => {
   it('shape_seen: 같은 모양의 다른 값 무효화는 invalidate-unloaded, 모양이 다르면 invalidate-miss', async () => {

@@ -101,4 +101,16 @@ describe('이슈 28: 새로고침 경계', () => {
     const b = rec({ id: 2, load: 2, startedAt: 5000, sameResponseAs: 1 });
     expect(classifyRecords([a, b], new Set()).get(2)).toBe('same-response');
   });
+
+  it('한 번 정해진 원인은 성공 이력이 밀려나도 그대로다', async () => {
+    const { client, fetchOnce, last } = setup();
+    await fetchOnce(20);
+    await sleep(40);
+    await fetchOnce(20);
+    const r = await last();
+    expect(classifyRecords([r], new Set()).get(r.id)).toBe('stale-elapsed');
+    client.clear(); // 이력(쿼리 캐시)이 사라져도
+    expect(refetchReason(r)).toBe('stale-elapsed');
+    expect(classifyRecords([r], new Set()).get(r.id)).toBe('stale-elapsed');
+  });
 });
