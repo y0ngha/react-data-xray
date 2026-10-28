@@ -9,6 +9,7 @@ import {
 import { isComposite, PERFORMED_WORK, type Fiber } from '../fiber/types.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { listenToCommits } from './devtoolsHook.js';
+import { groupRenders, type RenderGroup } from './groups.js';
 import { causeOf } from './networkCause.js';
 import { reasonOf } from './renderReason.js';
 import { summarize, WINDOW_MS } from './summary.js';
@@ -20,6 +21,8 @@ const MAX_REPORT_WINDOW_MS = 120_000;
 // 마지막 reset 시각(한 번도 안 했으면 0)
 let measuredFrom = 0;
 const MAX_COMMITS = 500;
+// 보고서·렌더 탭이 합치는 인스턴스 상한(이름별로 합치기 전 기준). 넘으면 truncated 로 알린다.
+export const MAX_GROUPED_INSTANCES = 5000;
 
 /** React 19 의 React Compiler 는 컴포넌트마다 메모 캐시를 updateQueue.memoCache 에 둔다. */
 const isCompiled = (fiber: Fiber): boolean => !!(fiber.updateQueue as { memoCache?: unknown } | null | undefined)?.memoCache;
@@ -230,14 +233,7 @@ const summaryOf = (entry: RenderEntry, now: number, windowMs: number): RenderSum
   return value;
 };
 
-/** 최근 windowMs(기본 10초) 렌더가 있는 컴포넌트들(렌더 많은 순) */
-export const getTopRenders = (
-  limit = 20,
-  now = Date.now(),
-  /** 자르기 전에 거른다(분석 대상 안의 렌더만 볼 때). 자른 뒤에 거르면 대상 안의 렌더가 빠질 수 있다. */
-  keep: (entry: RenderEntry) => boolean = () => true,
-  windowMs = WINDOW_MS,
-): Array<RenderEntry & RenderSummary> => {
+const recentRenders = (now: number, keep: (entry: RenderEntry) => boolean, windowMs: number): Array<RenderEntry & RenderSummary> => {
   // 오래 렌더되지 않은 컴포넌트는 빼 둔다. 안 그러면 한 번이라도 렌더된 컴포넌트를 매번 다 요약한다.
   const keepFor = measuredFrom ? MAX_REPORT_WINDOW_MS : Math.max(WINDOW_MS, windowMs);
   active.forEach((e) => {
@@ -247,6 +243,32 @@ export const getTopRenders = (
     .filter(keep)
     .map((e) => Object.assign({}, summaryOf(e, now, windowMs), e))
     .filter((e) => e.recent > 0)
-    .sort((a, b) => b.recent - a.recent)
-    .slice(0, limit);
+    .sort((a, b) => b.recent - a.recent);
+};
+
+/** 최근 windowMs(기본 10초) 렌더가 있는 컴포넌트들(렌더 많은 순) */
+export const getTopRenders = (
+  limit = 20,
+  now = Date.now(),
+  /** 자르기 전에 거른다(분석 대상 안의 렌더만 볼 때). 자른 뒤에 거르면 대상 안의 렌더가 빠질 수 있다. */
+  keep: (entry: RenderEntry) => boolean = () => true,
+  windowMs = WINDOW_MS,
+): Array<RenderEntry & RenderSummary> => recentRenders(now, keep, windowMs).slice(0, limit);
+
+/**
+ * 이름별로 합친 렌더 그룹. 인스턴스를 먼저 자르면 목록 행이 일부만 남으므로 합친 뒤에 센다.
+ * 인스턴스가 MAX_GROUPED_INSTANCES 를 넘을 때만 렌더 적은 인스턴스를 버리고 truncated 로 알린다.
+ */
+export const getRenderGroups = (
+  now = Date.now(),
+  sinceMs = WINDOW_MS,
+  keep: (entry: RenderEntry) => boolean = () => true,
+): { groups: RenderGroup[]; truncated: boolean; droppedInstances: number } => {
+  const all = recentRenders(now, keep, sinceMs);
+  const droppedInstances = Math.max(0, all.length - MAX_GROUPED_INSTANCES);
+  return {
+    groups: groupRenders(all.slice(0, MAX_GROUPED_INSTANCES), now - sinceMs),
+    truncated: droppedInstances > 0,
+    droppedInstances,
+  };
 };

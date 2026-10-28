@@ -59,10 +59,10 @@ export const RendersTab = ({
   // 정렬은 보이는 줄 수와 상관없이 전체 그룹에 하지만 그룹이 이미 합쳐져 있어 싸다. 기준이 바뀔 때만 다시 한다.
   const rows = useMemo(() => {
     const sorted = sortRenderGroups(
-      (computed ?? []).map((c) => c.group),
+      (computed?.items ?? []).map((c) => c.group),
       sort,
     ).slice(0, MAX_GROUPS);
-    const sourceByGroup = new Map((computed ?? []).map((c) => [c.group, c.source]));
+    const sourceByGroup = new Map((computed?.items ?? []).map((c) => [c.group, c.source]));
     return sorted.map((group) => ({ group, source: sourceByGroup.get(group) }));
   }, [computed, sort]);
   const showTime = rows.some((r) => r.group.ms > 0);
@@ -77,6 +77,7 @@ export const RendersTab = ({
           </Button>
         ))}
       </div>
+      {computed?.truncated && <Muted>인스턴스가 너무 많아 렌더 적은 {computed.droppedInstances}개는 뺐습니다.</Muted>}
       {computed && rows.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
       {rows.map(({ group, source }) => (
         <RenderGroupRow key={group.name} group={group} source={source} stat={statOf(source)} showTime={showTime} />

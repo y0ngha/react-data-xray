@@ -2,14 +2,13 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { memo, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getTopRenders, resetRenderStats, setRenderMonitoring } from '../../../../core/render/monitor.js';
-import { groupRenders } from '../../../../core/render/groups.js';
+import { getRenderGroups, resetRenderStats, setRenderMonitoring } from '../../../../core/render/monitor.js';
 import { flushQueue } from '../../../../core/scheduler/idleQueue.js';
 import { RendersTab } from '../RendersTab.js';
 
 vi.mock('../../../../core/render/monitor.js', async (original) => {
   const real = await original<typeof import('../../../../core/render/monitor.js')>();
-  return { ...real, getTopRenders: vi.fn<typeof real.getTopRenders>(real.getTopRenders) };
+  return { ...real, getRenderGroups: vi.fn<typeof real.getRenderGroups>(real.getRenderGroups) };
 });
 
 const Cell = memo(function Cell({ n }: { n: number }) {
@@ -38,7 +37,7 @@ function Table({ size }: { size: number }) {
 beforeEach(() => {
   setRenderMonitoring(true);
   resetRenderStats();
-  vi.mocked(getTopRenders).mockClear();
+  vi.mocked(getRenderGroups).mockClear();
 });
 afterEach(() => setRenderMonitoring(false));
 
@@ -52,17 +51,17 @@ describe('렌더 탭 비용(#32)', () => {
     await act(async () => {
       flushQueue();
     });
-    expect(getTopRenders).not.toHaveBeenCalled();
+    expect(getRenderGroups).not.toHaveBeenCalled();
   });
 
   it('보이는 탭은 렌더 중이 아니라 유휴 큐에서 계산하고 결과를 그린다', async () => {
     render(<Table size={3} />);
     render(<RendersTab statsByEndpoint={new Map()} />);
-    expect(getTopRenders).not.toHaveBeenCalled();
+    expect(getRenderGroups).not.toHaveBeenCalled();
     await act(async () => {
       flushQueue();
     });
-    expect(getTopRenders).toHaveBeenCalled();
+    expect(getRenderGroups).toHaveBeenCalled();
     expect(screen.queryByText('계산 중')).toBeNull();
   });
 
@@ -71,7 +70,7 @@ describe('렌더 탭 비용(#32)', () => {
     act(() => fireEvent.click(screen.getByText('bump')));
     flushQueue();
     const now = Date.now();
-    const run = () => groupRenders(getTopRenders(500, now), now - 10_000);
+    const run = () => getRenderGroups(now, 10_000);
     run();
     const start = performance.now();
     run();

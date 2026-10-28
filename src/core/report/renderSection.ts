@@ -1,6 +1,6 @@
 import { renderAdvice } from '../render/advice.js';
-import { groupRenders, sortRenderGroups } from '../render/groups.js';
-import { getTopRenders, reportWindowMs } from '../render/monitor.js';
+import { sortRenderGroups } from '../render/groups.js';
+import { getRenderGroups, reportWindowMs } from '../render/monitor.js';
 import { RENDER_REASONS } from '../render/types.js';
 import { endpointOf } from '../requests/requestKey.js';
 
@@ -10,6 +10,9 @@ export interface RenderSection {
   monitoring: boolean;
   /** renders.components 가 센 구간(초) */
   windowSeconds: number;
+  /** 인스턴스가 너무 많아 렌더 적은 인스턴스를 센 대상에서 뺐는지와 그 수 */
+  truncated: boolean;
+  droppedInstances: number;
   components: Array<{
     name: string;
     instances: number;
@@ -69,13 +72,13 @@ const nonZero = (reasons: Record<string, number>): Record<string, number> =>
 
 export const buildRenderSection = (monitoring: boolean, now: number): RenderSection => {
   const windowMs = reportWindowMs(now);
-  const groups = sortRenderGroups(groupRenders(getTopRenders(500, now, undefined, windowMs), now - windowMs), 'avoidable').slice(
-    0,
-    MAX_RENDER_GROUPS,
-  );
+  const { groups: all, truncated, droppedInstances } = getRenderGroups(now, windowMs);
+  const groups = sortRenderGroups(all, 'avoidable').slice(0, MAX_RENDER_GROUPS);
   return {
     monitoring,
     windowSeconds: Math.round(windowMs / 1000),
+    truncated,
+    droppedInstances,
     components: groups.map((g) => ({
       name: g.name,
       instances: g.instances,
@@ -105,4 +108,6 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
 };
 
 // 새 howToRead 줄은 여기에 더한다.
-export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [];
+export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [
+  'renders.truncated 가 true 면 렌더된 인스턴스가 5000개를 넘어 렌더 적은 인스턴스(droppedInstances 개)를 센 대상에서 뺀 것이다. 컴포넌트마다 최근 200회까지만 센다는 상한과는 별개다.',
+];

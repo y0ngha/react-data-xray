@@ -3,12 +3,16 @@ import { useEffect, useState } from 'react';
 import type { Hit } from '../../../core/inspect/types.js';
 import type { Fiber } from '../../../core/fiber/types.js';
 import { isWithin } from '../../../core/fiber/tree.js';
-import { groupRenders, type RenderGroup } from '../../../core/render/groups.js';
-import { getTopRenders } from '../../../core/render/monitor.js';
+import type { RenderGroup } from '../../../core/render/groups.js';
+import { getRenderGroups } from '../../../core/render/monitor.js';
 import { WINDOW_MS } from '../../../core/render/summary.js';
 import { enqueue } from '../../../core/scheduler/idleQueue.js';
 
-const MAX_RENDERS = 500;
+export interface ComputedGroups {
+  items: GroupWithSource[];
+  truncated: boolean;
+  droppedInstances: number;
+}
 
 export interface GroupWithSource {
   group: RenderGroup;
@@ -30,16 +34,15 @@ export const useRenderGroups = (
   scope: Fiber | null,
   host: React.RefObject<HTMLElement | null>,
   sourceOf: (group: RenderGroup) => Hit | undefined,
-): GroupWithSource[] | null => {
-  const [result, setResult] = useState<GroupWithSource[] | null>(null);
+): ComputedGroups | null => {
+  const [result, setResult] = useState<ComputedGroups | null>(null);
   useEffect(() => {
     if (document.hidden || isHidden(host.current)) return undefined;
     let cancelled = false;
     enqueue(() => {
       if (cancelled) return true;
-      const renders = getTopRenders(MAX_RENDERS, now, (e) => !scope || isWithin(e.fiber as Fiber, scope));
-      const groups = groupRenders(renders, now - WINDOW_MS);
-      setResult(groups.map((group) => ({ group, source: sourceOf(group) })));
+      const { groups, truncated, droppedInstances } = getRenderGroups(now, WINDOW_MS, (e) => !scope || isWithin(e.fiber as Fiber, scope));
+      setResult({ items: groups.map((group) => ({ group, source: sourceOf(group) })), truncated, droppedInstances });
       return true;
     });
     return () => {
