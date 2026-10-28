@@ -32,7 +32,7 @@ const createHook = (): DevtoolsHook => {
  * React DevTools 와 같은 전역 훅의 commit 이벤트를 받는다.
  * react-dom 은 로드될 때 이 훅에 자신을 등록하므로, react-dom 보다 먼저 불러야 한다.
  */
-export const listenToCommits = (onCommit: (root: { current: Fiber }) => void): void => {
+export const listenToCommits = (onCommit: (root: { current: Fiber }) => void, onUnmount?: (fiber: Fiber) => void): void => {
   if (typeof window === 'undefined') return;
   const w = window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: DevtoolsHook };
   // React DevTools 와 react-dom 이 약속한 전역 이름이라 바꿀 수 없다(.oxlintrc 에서 허용).
@@ -45,5 +45,14 @@ export const listenToCommits = (onCommit: (root: { current: Fiber }) => void): v
       // 감시 실패가 앱 렌더를 깨면 안 된다.
     }
     return original(id, root, ...rest);
+  };
+  const originalUnmount = hook.onCommitFiberUnmount.bind(hook);
+  hook.onCommitFiberUnmount = (id, fiber, ...rest) => {
+    try {
+      onUnmount?.(fiber as Fiber);
+    } catch {
+      // 감시 실패가 앱 렌더를 깨면 안 된다.
+    }
+    return originalUnmount(id, fiber, ...rest);
   };
 };

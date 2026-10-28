@@ -10,6 +10,7 @@ import {
 import { isComposite, MEMO_COMPONENT, PERFORMED_WORK, SIMPLE_MEMO_COMPONENT, type Fiber } from '../fiber/types.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { listenToCommits } from './devtoolsHook.js';
+import { getMountStats, recordMounts, resetMounts, type MountRef } from './mounts.js';
 import { groupRenders, type RenderGroup } from './groups.js';
 import { causeOf } from './networkCause.js';
 import { reasonOf } from './renderReason.js';
@@ -148,6 +149,23 @@ const skippedEntry = (f: Fiber): RenderEntry | undefined => {
   return target ? (entries.get(target) ?? (target.alternate ? entries.get(target.alternate) : undefined)) : undefined;
 };
 
+// 이번 commit 이 지운 fiber 의 참조. React 가 곧 return 을 비우므로 부모는 그 자리에서 짚어 둔다.
+let unmounted: MountRef[] = [];
+// 지운 서브트리 안의 fiber 가 rdx 패널 것인지(후손은 뿌리가 정한 값을 그대로 쓴다).
+const deletedIgnored = new WeakMap<Fiber, boolean>();
+
+const onUnmount = (fiber: Fiber): void => {
+  if (users === 0) return;
+  let ignored = false;
+  if (fiber.return && deletedIgnored.has(fiber.return)) ignored = !!deletedIgnored.get(fiber.return);
+  else for (let f = fiber.return; f && !ignored; f = f.return) ignored = ignoredTypes.has(f.type);
+  deletedIgnored.set(fiber, ignored);
+  if (ignored || !isComposite(fiber)) return;
+  let parent = fiber.return;
+  while (parent && !isComposite(parent)) parent = parent.return;
+  unmounted.push({ fiber, parent: parent ?? undefined });
+};
+
 const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   if (isFrameworkDevtoolsRoot(root.containerInfo)) return;
   rememberRootContainer(root);
@@ -172,6 +190,27 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
     }
   };
   if (wasRecreated(root.current)) visit(root.current.child, -1, false);
+  // 새로 마운트된 것(alternate 가 없다). 부모는 그 서브트리를 새로 만든 가장 가까운 기존 컴포넌트다.
+  const mounted: MountRef[] = [];
+  pending.forEach((p) => {
+    if (p.alt) return;
+    let at = p.parent;
+    while (at >= 0 && !pending[at].alt) at = pending[at].parent;
+    mounted.push({
+      fiber: p.fiber,
+      parent: p.parent >= 0 ? pending[p.parent].fiber : undefined,
+      branch: at >= 0 ? pending[at].fiber : undefined,
+    });
+  });
+  const gone = unmounted;
+  unmounted = [];
+  if (gone.length > 0 || mounted.length > 0) {
+    const epochAtCommit = epoch;
+    enqueue(() => {
+      if (epochAtCommit === epoch) recordMounts(gone, mounted, now);
+      return true;
+    });
+  }
   if (pending.length === 0) return;
   const inheritedBy: Inherited[] = [];
   let at = 0;
@@ -207,7 +246,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   });
 };
 
-if (process.env.NODE_ENV !== 'production') listenToCommits(onCommit);
+if (process.env.NODE_ENV !== 'production') listenToCommits(onCommit, onUnmount);
 
 /** 렌더가 있었던 commit 마다 부른다. */
 export const subscribeCommits = (listener: () => void): (() => void) => {
@@ -222,6 +261,8 @@ export const setRenderMonitoring = (on: boolean): void => {
   epoch++;
   active.clear();
   commits.length = 0;
+  resetMounts();
+  unmounted = [];
 };
 
 export const isRenderMonitoring = (): boolean => users > 0;
@@ -236,6 +277,8 @@ export const resetRenderStats = (): void => {
   epoch++;
   active.clear();
   commits.length = 0;
+  resetMounts();
+  unmounted = [];
 };
 
 /** 이 컴포넌트와 그 하위는 세지 않는다(rdx 패널 자신). */
@@ -306,6 +349,12 @@ export const getTopRenders = (
   windowMs = WINDOW_MS,
 ): Array<RenderEntry & RenderSummary> => recentRenders(now, keep, windowMs).slice(0, limit);
 
+// 언마운트가 한 번이라도 있었을 때만 싣는다(마운트 횟수만으로는 목록 행마다 잡음이다). 이름 기준이라 같은 이름의 다른 위치와 같이 센다.
+const withMounts = (g: RenderGroup): RenderGroup => {
+  const mounts = getMountStats(g.name);
+  return mounts.unmounts > 0 ? { ...g, mounts } : g;
+};
+
 /**
  * 이름별로 합친 렌더 그룹. 인스턴스를 먼저 자르면 목록 행이 일부만 남으므로 합친 뒤에 센다.
  * 인스턴스가 MAX_GROUPED_INSTANCES 를 넘을 때만 렌더 적은 인스턴스를 버리고 truncated 로 알린다.
@@ -318,7 +367,7 @@ export const getRenderGroups = (
   const all = recentRenders(now, keep, sinceMs);
   const droppedInstances = Math.max(0, all.length - MAX_GROUPED_INSTANCES);
   return {
-    groups: groupRenders(all.slice(0, MAX_GROUPED_INSTANCES), now - sinceMs),
+    groups: groupRenders(all.slice(0, MAX_GROUPED_INSTANCES), now - sinceMs).map(withMounts),
     truncated: droppedInstances > 0,
     droppedInstances,
   };

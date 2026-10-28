@@ -65,6 +65,16 @@ const MemoStats = ({ group }: { group: RenderGroup }) =>
     </Muted>
   ) : null;
 
+/** 마운트·언마운트 횟수와 재마운트. 재마운트는 마운트 effect 의 요청·구독·타이머가 다시 도는 신호다. */
+const Mounts = ({ group }: { group: RenderGroup }) =>
+  group.mounts ? (
+    <Muted>
+      마운트 {group.mounts.mounts}회 · 언마운트 {group.mounts.unmounts}회
+      {group.mounts.remounts.length > 0 &&
+        ` · 재마운트: ${group.mounts.remounts.map((r) => `${r.parent ? `<${r.parent}> 아래 ` : ''}${r.count}회`).join(' · ')}`}
+    </Muted>
+  ) : null;
+
 /** 이 컴포넌트가 그린 라이브러리 내부 컴포넌트(축약된 이름이라 패키지와 함께 보여 준다) */
 const Libraries = ({ group }: { group: RenderGroup }) =>
   group.libraries?.length ? (
@@ -119,6 +129,7 @@ export const RenderGroupRow = ({ group, source, stat, showTime }: RenderGroupRow
     <Headline group={group} showTime={showTime} />
     <Muted>{reasonSummary(group)}</Muted>
     <MemoStats group={group} />
+    <Mounts group={group} />
     <Libraries group={group} />
     <StateHooks group={group} />
     <Impact group={group} />

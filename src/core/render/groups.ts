@@ -1,5 +1,6 @@
 import { endpointOf } from '../requests/requestKey.js';
 import type { Fiber } from '../fiber/types.js';
+import type { MountStats } from './mounts.js';
 import {
   RENDER_REASONS,
   type MemoStats,
@@ -24,6 +25,8 @@ export interface RenderGroup extends RenderSummary {
   package?: string;
   /** 이 앱 컴포넌트가 그려서 안쪽에서 렌더된 라이브러리 컴포넌트들 */
   libraries?: LibraryRender[];
+  /** 마운트·언마운트·재마운트 횟수(언마운트가 있었을 때만) */
+  mounts?: MountStats;
 }
 
 export interface LibraryRender {
