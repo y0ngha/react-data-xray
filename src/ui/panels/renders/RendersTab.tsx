@@ -1,25 +1,22 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
-import { groupRenders, sortRenderGroups, type RenderGroup, type RenderSort } from '../../../core/render/groups.js';
+import { sortRenderGroups, type RenderGroup, type RenderSort } from '../../../core/render/groups.js';
 import type { Hit } from '../../../core/inspect/types.js';
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
-import { getTopRenders } from '../../../core/render/monitor.js';
-import { WINDOW_MS } from '../../../core/render/summary.js';
 import { isIndexPending } from '../../../core/inspect/derivedMatch.js';
 import { getRecords } from '../../../core/requests/store.js';
 import { inspectFiber } from '../../../core/inspect/inspect.js';
 import type { Fiber } from '../../../core/fiber/types.js';
-import { isWithin } from '../../../core/fiber/tree.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { useNow } from '../../hooks/useNow.js';
 import { useRenderMonitoring } from '../../hooks/useRenderMonitoring.js';
 import { RenderGroupRow } from './RenderGroupRow.js';
+import { useRenderGroups } from './useRenderGroups.js';
 
 const REFRESH_MS = 1000;
 const MAX_GROUPS = 30;
-const MAX_RENDERS = 500;
 
 const SORTS: ReadonlyArray<{ sort: RenderSort; label: string; title?: string }> = [
   { sort: 'avoidable', label: '줄일 수 있는 렌더순', title: '줄일 수 있는 렌더(같은 내용 새 참조, 새 콜백, 부모 렌더)가 많은 순' },
@@ -57,12 +54,21 @@ export const RendersTab = ({
   useRenderMonitoring();
   const now = useNow(REFRESH_MS);
   const [sort, setSort] = useState<RenderSort>('avoidable');
-  const renders = getTopRenders(MAX_RENDERS, now, (e) => !scope || isWithin(e.fiber as Fiber, scope));
-  const groups = sortRenderGroups(groupRenders(renders, now - WINDOW_MS), sort).slice(0, MAX_GROUPS);
-  const showTime = groups.some((g) => g.ms > 0);
+  const host = useRef<HTMLDivElement>(null);
+  const computed = useRenderGroups(now, scope, host, sourceOf);
+  // 정렬은 보이는 줄 수와 상관없이 전체 그룹에 하지만 그룹이 이미 합쳐져 있어 싸다. 기준이 바뀔 때만 다시 한다.
+  const rows = useMemo(() => {
+    const sorted = sortRenderGroups(
+      (computed ?? []).map((c) => c.group),
+      sort,
+    ).slice(0, MAX_GROUPS);
+    const sourceByGroup = new Map((computed ?? []).map((c) => [c.group, c.source]));
+    return sorted.map((group) => ({ group, source: sourceByGroup.get(group) }));
+  }, [computed, sort]);
+  const showTime = rows.some((r) => r.group.ms > 0);
   const statOf = (source: Hit | undefined) => (source ? statsByEndpoint.get(endpointOf(source.record)) : undefined);
   return (
-    <div>
+    <div ref={host}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
         <Muted>렌더 분석 · 최근 10초 ·</Muted>
         {SORTS.map((s) => (
@@ -71,11 +77,10 @@ export const RendersTab = ({
           </Button>
         ))}
       </div>
-      {groups.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
-      {groups.map((group) => {
-        const source = sourceOf(group);
-        return <RenderGroupRow key={group.name} group={group} source={source} stat={statOf(source)} showTime={showTime} />;
-      })}
+      {computed && rows.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
+      {rows.map(({ group, source }) => (
+        <RenderGroupRow key={group.name} group={group} source={source} stat={statOf(source)} showTime={showTime} />
+      ))}
     </div>
   );
 };

@@ -209,6 +209,27 @@ export const getRenderInfo = (fiber: unknown, now = Date.now()): RenderSummary |
 export const reportWindowMs = (now = Date.now()): number =>
   measuredFrom ? Math.min(MAX_REPORT_WINDOW_MS, Math.max(WINDOW_MS, now - measuredFrom)) : WINDOW_MS;
 
+// 렌더 기록이 그대로인 컴포넌트는 지난 요약을 다시 쓴다(탭이 1초마다 수천 개를 처음부터 요약하지 않게).
+// 기록 끝, 창 안 첫 기록, 창 안 개수가 같으면 창 안 기록이 같다(기록은 시간순으로 쌓인다).
+const summaries = new WeakMap<
+  RenderEntry,
+  { first?: RenderEvent; last?: RenderEvent; recent: number; windowMs: number; value: RenderSummary }
+>();
+
+const summaryOf = (entry: RenderEntry, now: number, windowMs: number): RenderSummary => {
+  const { events } = entry;
+  const cutoff = now - windowMs;
+  const at = events.findIndex((e) => e.time >= cutoff);
+  const recent = at < 0 ? 0 : events.length - at;
+  const first = at < 0 ? undefined : events[at];
+  const last = events[events.length - 1];
+  const hit = summaries.get(entry);
+  if (hit && hit.first === first && hit.last === last && hit.recent === recent && hit.windowMs === windowMs) return hit.value;
+  const value = summarize(entry, now, windowMs);
+  summaries.set(entry, { first, last, recent, windowMs, value });
+  return value;
+};
+
 /** 최근 windowMs(기본 10초) 렌더가 있는 컴포넌트들(렌더 많은 순) */
 export const getTopRenders = (
   limit = 20,
@@ -224,7 +245,7 @@ export const getTopRenders = (
   });
   return Array.from(active)
     .filter(keep)
-    .map((e) => Object.assign(summarize(e, now, windowMs), e))
+    .map((e) => Object.assign({}, summaryOf(e, now, windowMs), e))
     .filter((e) => e.recent > 0)
     .sort((a, b) => b.recent - a.recent)
     .slice(0, limit);
