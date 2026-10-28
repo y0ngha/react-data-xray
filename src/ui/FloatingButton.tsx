@@ -1,9 +1,29 @@
-import type { MouseEvent, PointerEvent } from 'react';
+import { useState, type FocusEvent, type MouseEvent, type PointerEvent } from 'react';
 
 import type { Position } from './hooks/useDraggable.js';
+import type { Tab } from './panels/tabs.js';
 import { color, Z_PANEL } from './theme.js';
 
 export const BUTTON_SIZE = 44;
+
+export interface Breakdown {
+  waste: readonly string[];
+  storming: readonly string[];
+}
+
+const POPUP_WIDTH = 260;
+
+const itemStyle = {
+  display: 'block',
+  width: '100%',
+  padding: '2px 0',
+  border: 0,
+  background: 'none',
+  color: 'inherit',
+  font: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+} as const;
 
 interface FloatingButtonProps {
   position: Position;
@@ -11,6 +31,10 @@ interface FloatingButtonProps {
   issues: number;
   /** 방금 요청이 몰렸거나 렌더 폭주가 생겼다. 애니메이션 없이 색만 잠깐 바꾼다(움직임을 줄이는 설정에도 부담 없게) */
   alert: boolean;
+  /** 배지가 센 항목 이름. 주면 마우스를 올리거나 포커스할 때 내역을 보인다 */
+  breakdown?: Breakdown;
+  /** 내역의 항목을 눌렀을 때 그 탭으로 간다 */
+  onSelect?: (tab: Tab) => void;
   handlers: {
     onPointerDown: (e: PointerEvent) => void;
     onPointerMove: (e: PointerEvent) => void;
@@ -22,7 +46,7 @@ interface FloatingButtonProps {
 /** 끌어서 옮길 수 있는 RDX 버튼(표시만 한다. 드래그·클릭 처리는 useDraggable) */
 const borderColor = (issues: number, alert: boolean): string => (alert ? color.render : issues > 0 ? color.warn : color.accent);
 
-export const FloatingButton = ({ position, issues, alert, handlers }: FloatingButtonProps) => (
+const Rdx = ({ position, issues, alert, handlers }: Omit<FloatingButtonProps, 'breakdown' | 'onSelect'>) => (
   <button
     type="button"
     aria-label={`React Data X-ray 열기${issues > 0 ? ` (문제 ${issues}개)` : ''}`}
@@ -67,3 +91,70 @@ export const FloatingButton = ({ position, issues, alert, handlers }: FloatingBu
     )}
   </button>
 );
+
+/** 내역 창. 버튼에 붙여 둬서 마우스가 버튼에서 창으로 옮겨 가도 닫히지 않는다. */
+const BreakdownPopup = ({ position, breakdown, onSelect }: { position: Position; breakdown: Breakdown; onSelect: (tab: Tab) => void }) => {
+  const below = position.y < window.innerHeight / 2;
+  const section = (label: string, names: readonly string[], tab: Tab, show: (n: string) => string) =>
+    names.length > 0 && (
+      <div>
+        <strong>
+          {label} {names.length}
+        </strong>
+        {names.map((n) => (
+          <button key={n} type="button" style={itemStyle} onClick={() => onSelect(tab)}>
+            {show(n)}
+          </button>
+        ))}
+      </div>
+    );
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: Math.max(0, Math.min(position.x, window.innerWidth - POPUP_WIDTH)),
+        ...(below ? { top: position.y + BUTTON_SIZE } : { bottom: window.innerHeight - position.y }),
+        width: POPUP_WIDTH,
+        padding: 8,
+        border: `1px solid ${color.border}`,
+        borderRadius: 6,
+        background: color.bg,
+        color: color.text,
+        font: '12px ui-monospace, Menlo, monospace',
+        zIndex: Z_PANEL,
+      }}
+    >
+      {section('낭비 요청', breakdown.waste, 'requests', (n) => n)}
+      {section('렌더 폭주', breakdown.storming, 'renders', (n) => `<${n}>`)}
+      <div style={{ marginTop: 4, color: color.muted }}>렌더 폭주는 최근 10초 기준이라 시간이 지나면 빠집니다.</div>
+    </div>
+  );
+};
+
+export const FloatingButton = ({ breakdown, onSelect, ...rest }: FloatingButtonProps) => {
+  const [open, setOpen] = useState(false);
+  if (!breakdown || !onSelect) return <Rdx {...rest} />;
+  const close = () => setOpen(false);
+  return (
+    <div
+      role="presentation"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={close}
+      onFocus={() => setOpen(true)}
+      onBlur={(e: FocusEvent) => !e.currentTarget.contains(e.relatedTarget as Node | null) && close()}
+      onKeyDown={(e) => e.key === 'Escape' && close()}
+    >
+      <Rdx {...rest} />
+      {open && rest.issues > 0 && (
+        <BreakdownPopup
+          position={rest.position}
+          breakdown={breakdown}
+          onSelect={(tab) => {
+            close();
+            onSelect(tab);
+          }}
+        />
+      )}
+    </div>
+  );
+};

@@ -41,12 +41,14 @@ interface Signal {
 /**
  * RDX 버튼에 보여 줄 신호. 버튼은 패널을 닫아 둔 동안에도 알려야 하므로, 붙어 있는 동안 렌더 감시를 켠다.
  * - issues: 낭비 요청이 있는 엔드포인트 수 + 렌더 폭주 중인 컴포넌트 수
+ * - wasteEndpoints·stormingNames: 배지가 센 항목의 이름(내역 표시용)
  * - alert: 새 요청 몰림이 생겼거나 새 컴포넌트가 렌더 폭주에 들어왔다(그 1초 동안만 켜진다)
  */
 export const useProblemSignal = (
   records: readonly RequestRecord[],
   classOf: (r: RequestRecord) => RequestClass,
   wasteEndpoints: number,
+  wasteNames: readonly string[] = [],
 ) => {
   useRenderMonitoring();
   const [signal, setSignal] = useState<Signal>({ storming: new Set(), lastBurst: 0, alert: false });
@@ -64,5 +66,11 @@ export const useProblemSignal = (
       return { storming, lastBurst: Math.max(prev.lastBurst, burstEnd), alert: newStorm || newBurst };
     });
   }, TICK_MS);
-  return { issues: wasteEndpoints + signal.storming.size, alert: signal.alert };
+  // 배지 내역에 보일 이름. 폭주 이름은 시간 창 기준이라 시간이 지나면 빠진다.
+  return {
+    issues: wasteEndpoints + signal.storming.size,
+    alert: signal.alert,
+    wasteEndpoints: wasteNames,
+    stormingNames: [...signal.storming].sort(),
+  };
 };
