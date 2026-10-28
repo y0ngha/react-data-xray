@@ -51,6 +51,28 @@ const KeyedTable = () => {
   );
 };
 
+// 이름은 같고 본문이 다른 두 컴포넌트(객체 속성에 넣어 둘 다 이름이 Panel 이다)
+const PanelA = { Panel: () => <td>a</td> }.Panel;
+const PanelB = { Panel: () => <th>b</th> }.Panel;
+const Swapper = () => {
+  const [v, set] = useState(0);
+  useEffect(() => {
+    bump = () => set((n) => n + 1);
+  }, []);
+  const Panel = v % 2 === 0 ? PanelA : PanelB;
+  return (
+    <table>
+      <tbody>
+        <tr>
+          {Array.from({ length: ROWS }, (_, i) => (
+            <Panel key={i} />
+          ))}
+        </tr>
+      </tbody>
+    </table>
+  );
+};
+
 beforeEach(() => setRenderMonitoring(true));
 afterEach(() => {
   cleanup();
@@ -82,5 +104,18 @@ describe('타입이 바뀐 재마운트 (#33)', () => {
         ?.advice.join(),
     ).not.toContain('컴포넌트를 정의하지');
     expect(g.mounts?.remounts[0]).not.toHaveProperty('cause');
+  });
+
+  it('이름은 같고 정의가 다른 두 컴포넌트가 바뀐 것은 type-changed 가 아니고 처방도 없다', () => {
+    render(<Swapper />);
+    act(() => bump());
+    flushQueue();
+    const { remounts } = getMountStats('Panel');
+    expect(remounts.some((r) => r.cause === 'type-changed')).toBe(false);
+    expect(
+      buildRenderSection(true, Date.now())
+        .components.find((x) => x.name === 'Panel')
+        ?.advice.join(),
+    ).not.toContain('컴포넌트를 정의하지');
   });
 });

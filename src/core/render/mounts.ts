@@ -1,4 +1,4 @@
-import { getComponentName } from '../fiber/tree.js';
+import { getComponentName, jsxLocationOf } from '../fiber/tree.js';
 import type { Fiber } from '../fiber/types.js';
 
 export interface MountStats {
@@ -26,6 +26,7 @@ interface Place {
   live: number;
   lastUnmount?: number;
   lastUnmountType?: unknown;
+  lastUnmountLocation?: string;
 }
 
 interface Stat {
@@ -55,6 +56,25 @@ const placeOf = (s: Stat, parent: string): Place => {
   return p;
 };
 
+// memo·forwardRef 래퍼 안의 실제 함수
+const functionOf = (type: unknown): object | undefined => {
+  if (typeof type === 'function') return type;
+  if (!type || typeof type !== 'object') return undefined;
+  const wrapped = type as { type?: unknown; render?: unknown };
+  return functionOf(wrapped.type ?? wrapped.render);
+};
+
+/**
+ * 같은 정의에서 다시 만들어진 타입인지: 함수 본문이 같다. 함수를 못 얻는 타입(styled 같은 객체)은 element 의 소스 위치가 같을 때만 같다고 본다.
+ * 이름만 같은 다른 컴포넌트나 HMR 이 바꾼 타입은 렌더 중에 만든 것이 아니다.
+ */
+const sameDefinition = (a: unknown, aAt: string | undefined, b: unknown, bAt: string | undefined): boolean => {
+  const fa = functionOf(a);
+  const fb = functionOf(b);
+  if (fa && fb) return Function.prototype.toString.call(fa) === Function.prototype.toString.call(fb);
+  return aAt !== undefined && aAt === bAt;
+};
+
 const nameOf = (f?: Fiber): string => (f ? getComponentName(f) : '');
 
 /** 한 commit 의 언마운트를 먼저, 마운트를 나중에 반영한다(key 가 바뀌면 같은 commit 에서 둘 다 일어난다). */
@@ -66,6 +86,7 @@ export const recordMounts = (unmounted: readonly MountRef[], mounted: readonly M
     place.live = Math.max(0, place.live - 1);
     place.lastUnmount = now;
     place.lastUnmountType = r.fiber.type;
+    place.lastUnmountLocation = jsxLocationOf(r.fiber);
   });
   mounted.forEach((r) => {
     const s = statOf(getComponentName(r.fiber));
@@ -74,7 +95,11 @@ export const recordMounts = (unmounted: readonly MountRef[], mounted: readonly M
     const recent = place.lastUnmount !== undefined && now - place.lastUnmount <= REMOUNT_MS;
     const bump = (m: Map<string, number>) => m.set(nameOf(r.branch), (m.get(nameOf(r.branch)) ?? 0) + 1);
     // 타입이 바뀌었으면 형제가 많아도(표의 셀 수백 개) 모두 센다. 아니면 형제가 남아 있는 목록 항목은 재마운트가 아니다.
-    if (recent && place.lastUnmountType !== r.fiber.type) bump(s.typeRemounts);
+    const typeChanged =
+      recent &&
+      place.lastUnmountType !== r.fiber.type &&
+      sameDefinition(place.lastUnmountType, place.lastUnmountLocation, r.fiber.type, jsxLocationOf(r.fiber));
+    if (typeChanged) bump(s.typeRemounts);
     else if (recent && place.live === 0) bump(s.remounts);
     place.live++;
   });
