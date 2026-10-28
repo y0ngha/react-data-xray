@@ -1,6 +1,6 @@
 ---
 name: rdx-perf
-description: react-data-xray(rdx)로 React 화면의 낭비 요청과 불필요한 렌더를 재고, 원인을 코드에서 확인해 고친 뒤 다시 재서 전후를 비교한다. "이 화면 느려", "요청이 너무 많이 나가", "렌더가 너무 잦아", "rdx 보고서 보고 고쳐 줘", "성능 점검" 같은 요청에 쓴다. 앱에 rdx 가 붙어 있어야 한다.
+description: react-data-xray(rdx)로 React 화면의 낭비 요청과 불필요한 렌더를 재고, 원인을 코드에서 확인해 고친 뒤 다시 재서 전후를 비교한다. "이 화면 느려", "요청이 너무 많이 나가", "렌더가 너무 잦아", "rdx 보고서 보고 고쳐 줘", "성능 점검", "리렌더 줄여 줘", "API 중복 호출", "폴링 줄여 줘", "React Query 캐시 키 점검" 같은 요청에 쓴다. 앱에 rdx 가 붙어 있지 않으면 붙이는 방법부터 안내한다.
 ---
 
 # rdx 로 화면 성능 고치기
@@ -38,35 +38,12 @@ AI 로 빠르게 만든 화면은 실제 렌더·요청 비용을 확인하지 �
 
 ## 3. 결과 읽기
 
-`howToRead` 필드에도 같은 설명이 들어 있다.
+필드 뜻은 보고서의 `howToRead` 가 기준이다. 이 문서에 옮겨 적지 않으니(rdx 버전마다 필드가 늘어난다) 결과를 읽기 전에 먼저 읽는다.
+보는 순서만 정한다.
 
-### 요청 (`requests.endpoints`, 낭비 많은 순)
-
-| 필드 | 뜻 |
-|---|---|
-| `duplicates` | 2초 안에 같은 요청(메서드·URL·쿼리·본문)이 또 나감 |
-| `sameResponses` | 같은 요청의 직전 응답과 본문이 똑같음 |
-| `review` | 주기 요청·포커스 재요청. 의도일 수 있지만 점검할 반복 |
-| `ignored: true` | 사용자가 의도된 반복으로 지정함. 고치지 않는다 |
-| `callers` | 요청을 보낸 코드(호출 스택 앞 3줄, 소스맵으로 원본 위치). 같은 엔드포인트를 여러 화면이 부르면 위치별로 나뉜다 |
-| `restoredCount` | 그중 새로고침 전 페이지의 요청 수 |
-
-### React Query (`reactQuery.findings`)
-
-`duplicate-cache`(같은 요청을 다른 키로 캐시), `key-missing-param`(같은 키로 다른 요청), `invalidate-miss`(맞는 쿼리가 없던 무효화),
-`stale-zero`(staleTime 0 이라 같은 응답 재요청). 각 항목의 `fix` 를 따른다.
-
-### 렌더 (`renders.components`, 줄일 수 있는 렌더 많은 순)
-
-| 필드 | 뜻 |
-|---|---|
-| `avoidable` | 줄일 수 있는 렌더(같은 내용 새 참조, 새 콜백, memo 아닌 컴포넌트의 부모 따라 렌더) |
-| `causedBy` | 그 렌더를 시작한 조상과 이유(state·context·mount). **고칠 곳은 대개 이 조상이다** |
-| `renderedAt` | 이 컴포넌트를 그리는 JSX 위치 |
-| `networkCauses[].viaParent` | 조상이 응답으로 렌더돼서 따라 렌더된 횟수 |
-| `networkCauses[].fromSameResponse` | 직전과 똑같은 응답인데도 렌더된 횟수 |
-| `changedProps` | 같은 내용인데 새 참조로 온 props, 렌더마다 새로 만든 콜백, 바뀐 context |
-| `advice` | rdx 가 제안하는 고치는 방법 |
+1. `requests.endpoints`: 낭비 많은 순. `ignored: true` 는 사용자가 의도된 반복으로 지정한 것이라 고치지 않는다.
+2. `reactQuery.findings`: 각 항목의 `fix` 를 따른다.
+3. `renders.components`: 줄일 수 있는 렌더 많은 순. 고칠 곳은 대개 그 컴포넌트가 아니라 `causedBy` 의 조상이다.
 
 ## 4. 원인 확인(고치기 전에 반드시)
 
