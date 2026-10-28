@@ -4,6 +4,7 @@ import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
+import { lastRecordId } from '../requests/store.js';
 import type { Origin, RequestRecord } from '../requests/types.js';
 
 /**
@@ -116,7 +117,7 @@ interface ClientHistory {
   /** 직전 무효화(겹침 판정용, 짧은 시간만 남긴다) */
   recent: Array<{ at: number; key: unknown; error: Error }>;
   /** 쿼리 성공 기록(재조회 원인 판정용). 같은 응답이면 structural sharing 이 앞 데이터를 그대로 써 출처 매칭 기록(fetched)에 남지 않아 따로 둔다. */
-  successes: Array<{ at: number; queryHash: string; data: WeakRef<object> }>;
+  successes: Array<{ at: number; afterId: number; queryHash: string; data: WeakRef<object> }>;
   /** 무효화 기록(재조회 원인 판정용). 맞는 쿼리가 있었는지와 무관하게 전부 남긴다. */
   invalidations: Array<{ at: number; key: unknown }>;
   /** fetch 를 일으킬 수 있던 관찰자 이벤트(마운트, enabled 켜짐). 원인 판정은 조회할 때 한다. */
@@ -400,7 +401,7 @@ const watch = (client: QueryClientLike): void => {
       ) {
         const at = Date.now();
         pushBounded(history.pending, { at, queryHash: q.queryHash, queryKey: q.queryKey, data: new WeakRef(data) });
-        pushBounded(history.successes, { at, queryHash: q.queryHash, data: new WeakRef(data) });
+        pushBounded(history.successes, { at, afterId: lastRecordId(), queryHash: q.queryHash, data: new WeakRef(data) });
       }
     } catch {
       // 점검 실패가 앱의 캐시 동작을 막으면 안 된다.
@@ -545,7 +546,8 @@ const successOf = (record: RequestRecord): { client: QueryClientLike; history: C
     const at = history.successes.findIndex((s) => {
       const data = s.data.deref();
       const origin = data && originOfData(data)?.record;
-      return s.at >= record.startedAt && s.at <= end + SUCCESS_SLACK_MS && !!origin && requestKeyOf(origin) === requestKeyOf(record);
+      // 시작 순서는 id 로 가른다: 같은 응답이면 앞 요청의 성공도 출처가 같고, 시각(ms)으로는 이 요청 시작과 겹칠 수 있다.
+      return s.afterId >= record.id && s.at <= end + SUCCESS_SLACK_MS && !!origin && requestKeyOf(origin) === requestKeyOf(record);
     });
     if (at >= 0) return { client, history, at };
   }

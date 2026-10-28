@@ -12,6 +12,8 @@ const listeners = new Set<() => void>();
 let nextId = 1;
 // 이 id 보다 앞선 요청은 측정을 새로 시작(clearRecords)하기 전에 나간 것이라, 늦게 끝나도 넣지 않는다.
 let firstLiveId = 1;
+/** 지금까지 시작한 마지막 요청의 id. 같은 밀리초 안에서도 어느 일이 어느 요청 시작 뒤인지 가른다. */
+export const lastRecordId = (): number => nextId - 1;
 // 기록 상한을 넘어 버린 요청 수(측정을 새로 시작하면 0). 보고서가 수치가 잘렸는지 알린다.
 let dropped = 0;
 

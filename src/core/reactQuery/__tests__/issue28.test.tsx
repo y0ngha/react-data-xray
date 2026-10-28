@@ -1,6 +1,6 @@
 import { QueryClient, QueryObserver, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { classifyRecords } from '../../requests/classify.js';
@@ -66,6 +66,20 @@ describe('이슈 28: 의도된 재조회 구분', () => {
     const r = await last();
     expect(refetchReason(r)).toBe('after-invalidate');
     expect(classifyRecords([r], new Set()).get(r.id)).toBe('after-invalidate');
+  });
+
+  it('after-invalidate: 앞 성공·무효화·재조회가 같은 밀리초에 겹쳐도 앞 성공을 이 요청의 성공으로 보지 않는다', async () => {
+    const { client, fetchOnce, last } = setup();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      await fetchOnce(60_000);
+      await client.invalidateQueries({ queryKey: ['t28'] });
+      await fetchOnce(60_000);
+      const r = await last();
+      expect(refetchReason(r)).toBe('after-invalidate');
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('첫 요청이거나 React Query 를 거치지 않은 요청은 원인이 없다', async () => {
