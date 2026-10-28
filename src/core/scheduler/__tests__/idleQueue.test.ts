@@ -79,6 +79,17 @@ describe('idleQueue', () => {
     expect(isQueuePending()).toBe(false);
   });
 
+  it('requestIdleCallback 이 없으면(Safari) 바쁜 페이지와 같은 50ms 간격으로만 돈다', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('requestIdleCallback', undefined);
+    let ran = false;
+    enqueue(() => (ran = true));
+    vi.advanceTimersByTime(49);
+    expect(ran).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(ran).toBe(true);
+  });
+
   it('uses_idle_callback_when_present', () => {
     const ric = vi.fn<(cb: (d: { didTimeout: boolean; timeRemaining: () => number }) => void, o: { timeout: number }) => void>();
     vi.stubGlobal('requestIdleCallback', ric);

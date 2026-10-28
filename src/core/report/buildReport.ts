@@ -1,4 +1,4 @@
-import { flushIndex } from '../inspect/derivedMatch.js';
+import { queueIndex } from '../inspect/derivedMatch.js';
 import { flushQueue } from '../scheduler/idleQueue.js';
 import { auditQueryCache, CACHE_FINDING_TEXT, findQueryClients, type CacheFinding } from '../reactQuery/cacheAudit.js';
 import { renderAdvice } from '../render/advice.js';
@@ -122,7 +122,7 @@ const nonZero = (reasons: Record<string, number>): Record<string, number> =>
 export const buildReport = (monitoring: boolean, now = Date.now(), drain = true): RdxReport => {
   // 사용자가 직접 묻는 조회는 미뤄 둔 분석을 먼저 마친다.
   if (drain) {
-    flushIndex(); // 모든 기록의 색인 일을 큐에 올린 뒤
+    queueIndex(); // 모든 기록의 색인 일을 큐에 올린 뒤
     flushQueue();
   }
   const records = getRecords();

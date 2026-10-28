@@ -36,7 +36,7 @@ describe('React Query 캐시키 점검', () => {
     expect(isQueuePending()).toBe(true);
   });
 
-  it('출처를 못 찾는 이벤트는 큐에 일이 남아 있어도 3번 점검하면 버린다', async () => {
+  it('색인이 도는 동안의 못 찾음은 세지 않아, 점검이 여러 번 돌아도 색인이 끝나면 찾는다', async () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
     findQueryClients();
@@ -55,7 +55,7 @@ describe('React Query 캐시키 점검', () => {
     expect(isQueuePending()).toBe(true);
     hold = false;
     flushQueue();
-    expect(auditQueryCache(sameOrOk, getRecords()).find((f) => f.kind === 'key-missing-param')).toBeUndefined();
+    expect(auditQueryCache(sameOrOk, getRecords()).find((f) => f.kind === 'key-missing-param')).toBeDefined();
   });
 
   it('같은 요청을 서로 다른 키로 캐시하면 알린다', async () => {

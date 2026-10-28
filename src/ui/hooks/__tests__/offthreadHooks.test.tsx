@@ -26,7 +26,7 @@ vi.mock('../../../core/requests/store.js', () => ({
   getRecords: () => h.records,
 }));
 
-import { flushQueue } from '../../../core/scheduler/idleQueue.js';
+import { enqueue, flushQueue } from '../../../core/scheduler/idleQueue.js';
 import { useNow } from '../useNow.js';
 import { useOverlayBoxes } from '../useOverlayBoxes.js';
 import { useRecords } from '../useRecords.js';
@@ -97,6 +97,40 @@ describe('boxes_collected_in_queue', () => {
     expect(h.collect).toHaveBeenCalledTimes(1);
     expect(h.collect).toHaveBeenCalledWith(expect.any(Function), 4, undefined);
     expect(result.current).toEqual([]);
+    act(() => void flushQueue());
+    expect(h.collect).toHaveBeenCalledTimes(2);
+    expect(result.current).toEqual([box]);
+  });
+
+  it('덜 모았으면 다음 조각을 큐 뒤에 넣어, 뒤에 들어온 일이 먼저 돈다', () => {
+    vi.useFakeTimers();
+    h.collect.mockReturnValueOnce({ boxes: [], deferred: true }).mockReturnValue({ boxes: [box], deferred: false });
+    renderHook(() => useOverlayBoxes(true, null));
+    act(() => void vi.advanceTimersByTime(0));
+    let markerRan = false;
+    enqueue(() => (markerRan = true));
+    act(() => void flushQueue(0)); // 박스 수집 한 조각: 덜 모아 큐 뒤로 간다
+    expect(h.collect).toHaveBeenCalledTimes(1);
+    expect(markerRan).toBe(false);
+    act(() => void flushQueue(0)); // 그다음은 뒤에 들어온 일
+    expect(markerRan).toBe(true);
+    expect(h.collect).toHaveBeenCalledTimes(1);
+    act(() => void flushQueue());
+    expect(h.collect).toHaveBeenCalledTimes(2);
+  });
+
+  it('collectBoxes 가 던지는 사이 들어온 commit 은 다시 모은다', () => {
+    vi.useFakeTimers();
+    h.collect
+      .mockImplementationOnce(() => {
+        h.commit?.(); // 수집 중에 commit 이 들어온다
+        throw new Error('boom');
+      })
+      .mockReturnValue({ boxes: [box], deferred: false });
+    const { result } = renderHook(() => useOverlayBoxes(true, null));
+    act(() => void vi.advanceTimersByTime(0));
+    act(() => void flushQueue());
+    act(() => void vi.advanceTimersByTime(1000)); // 새 commit 없이도
     act(() => void flushQueue());
     expect(h.collect).toHaveBeenCalledTimes(2);
     expect(result.current).toEqual([box]);

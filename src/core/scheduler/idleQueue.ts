@@ -67,5 +67,6 @@ function schedule(): void {
   if (g.requestIdleCallback) {
     idleId = g.requestIdleCallback.call(globalThis, tick, { timeout: MAX_WAIT_MS });
     timer = setTimeout(() => tick(), MAX_WAIT_MS); // rIC 가 오래 안 불리는 바쁜 페이지의 보험
-  } else timer = setTimeout(() => tick(), 1);
+    // requestIdleCallback 이 없으면(Safari) 한가한지 알 수 없으므로, 바쁜 페이지와 같은 간격으로만 한 조각씩 돈다.
+  } else timer = setTimeout(() => tick(), MAX_WAIT_MS);
 }

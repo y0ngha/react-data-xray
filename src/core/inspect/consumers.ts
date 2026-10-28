@@ -1,7 +1,7 @@
 import { collectValues } from '../fiber/componentValues.js';
 import { componentRect, findRootFibers, getComponentName, hostNodesOf, walkFibers } from '../fiber/tree.js';
 import { isComposite } from '../fiber/types.js';
-import { flushIndex } from './derivedMatch.js';
+import { queueIndex } from './derivedMatch.js';
 import { flushQueue } from '../scheduler/idleQueue.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
@@ -31,9 +31,14 @@ const holdsResponseOf = (root: unknown, requestKey: string, maxDepth = MAX_DEPTH
  * 같은 요청(메서드·URL·payload)의 응답 객체를 props·훅 state 로 들고 있는 컴포넌트.
  * React Query 는 응답이 같으면 이전 객체를 재사용하므로, 이 요청 하나가 아니라 같은 요청의 이전 응답까지 함께 본다.
  */
-export const findConsumers = (record: RequestRecord, isOwnUi: (el: Element) => boolean): Consumer[] => {
-  flushIndex(); // 방금 도착한 큰 응답의 출처 등록이 남아 있지 않게
-  flushQueue(1000);
+export const findConsumers = (
+  record: RequestRecord,
+  isOwnUi: (el: Element) => boolean,
+  /** 방금 도착한 큰 응답의 출처 등록을 마치려고 큐를 비우는 시간 상한. 렌더 중에는 부르지 않는다(큐의 step 이 setState 할 수 있다). */
+  flushLimitMs = 1000,
+): Consumer[] => {
+  queueIndex();
+  flushQueue(flushLimitMs);
   const key = requestKeyOf(record);
   const consumers: Consumer[] = [];
   // 같은 객체(react-intl 의 IntlContext 값처럼 수천 컴포넌트가 함께 읽는 context 등)는 한 번만 훑는다.

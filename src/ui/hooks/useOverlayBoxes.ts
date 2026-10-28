@@ -41,29 +41,35 @@ export const useOverlayBoxes = (enabled: boolean, scope: Fiber | null): Box[] =>
       inflight = true;
       dirty = false;
       tries = 0;
-      enqueue(() => {
-        if (cancelled) return true;
-        let result: ReturnType<typeof collectBoxes>;
-        try {
-          result = collectBoxes(isOwnUi, BUDGET_MS, scope ?? undefined);
-        } catch {
-          // 던져도 inflight 가 남아 다시는 모으지 않는 일이 없게 한다. 다음 commit 이 평소대로 예약한다.
-          inflight = false;
-          return true;
-        }
-        const { boxes: next, deferred } = result;
-        // 트리가 계속 바뀌어 끝나지 않아도 무한히 잇지 않는다(직전 결과로 반영).
-        if (deferred && ++tries < MAX_TRIES) return false;
+      enqueue(step);
+    };
+    // 덜 모았으면 다음 조각을 큐 뒤에 다시 넣는다. 큐 머리를 붙잡으면 뒤의 분석·알림이 그만큼 밀린다.
+    const step = (): boolean => {
+      if (cancelled) return true;
+      let result: ReturnType<typeof collectBoxes>;
+      try {
+        result = collectBoxes(isOwnUi, BUDGET_MS, scope ?? undefined);
+      } catch {
+        // 던져도 inflight 가 남아 다시는 모으지 않는 일이 없게 하고, 그사이 들어온 commit 은 다시 모은다.
         inflight = false;
-        last = Date.now();
         if (dirty) schedule();
-        startTransition(() => setCollected({ scope, boxes: next }));
-        // 상한에 걸려 덜 모은 채면 commit 이 없어도 평소 간격 뒤에 다시 모은다.
-        if (deferred && !timer) timer = window.setTimeout(collect, COLLECT_MS);
-        // 응답 색인이 덜 끝났으면 commit 이 없어도 평소 간격 뒤에 한 번 더 모은다(색인 뒤에야 찾는 파생 출처).
-        if (isIndexPending() && !timer) timer = window.setTimeout(collect, COLLECT_MS);
         return true;
-      });
+      }
+      const { boxes: next, deferred } = result;
+      // 트리가 계속 바뀌어 끝나지 않아도 무한히 잇지 않는다(직전 결과로 반영).
+      if (deferred && ++tries < MAX_TRIES) {
+        enqueue(step);
+        return true;
+      }
+      inflight = false;
+      last = Date.now();
+      if (dirty) schedule();
+      startTransition(() => setCollected({ scope, boxes: next }));
+      // 상한에 걸려 덜 모은 채면 commit 이 없어도 평소 간격 뒤에 다시 모은다.
+      if (deferred && !timer) timer = window.setTimeout(collect, COLLECT_MS);
+      // 응답 색인이 덜 끝났으면 commit 이 없어도 평소 간격 뒤에 한 번 더 모은다(색인 뒤에야 찾는 파생 출처).
+      if (isIndexPending() && !timer) timer = window.setTimeout(collect, COLLECT_MS);
+      return true;
     };
     const schedule = () => {
       if (inflight) {

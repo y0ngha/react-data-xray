@@ -1,5 +1,5 @@
 import { findRootFibers, walkFibers } from '../fiber/tree.js';
-import { findDerivedOrigin } from '../inspect/derivedMatch.js';
+import { findDerivedOrigin, isIndexPending } from '../inspect/derivedMatch.js';
 import { isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
@@ -192,7 +192,8 @@ const resolvePending = (history: ClientHistory): void => {
     const value = p.data.deref();
     const record = value && fetchedRequest(value, p.at);
     if (record) pushBounded(history.fetched, toFetched(p.at, p.queryHash, p.queryKey, record));
-    else if (value && (p.attempts = (p.attempts ?? 0) + 1) < MAX_ATTEMPTS) unresolved.push(p);
+    // 색인이 아직 도는 동안의 실패는 세지 않는다(색인 뒤에야 찾는 파생 출처).
+    else if (value && (p.attempts = (p.attempts ?? 0) + (isIndexPending() ? 0 : 1)) < MAX_ATTEMPTS) unresolved.push(p);
   });
   history.pending = isQueuePending() ? unresolved : [];
 };

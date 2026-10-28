@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { findConsumers } from '../../core/inspect/consumers.js';
+import type { Consumer } from '../../core/inspect/types.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { groupBy } from '../../shared/collections.js';
 import { Button } from '../components/Button.js';
@@ -14,7 +15,12 @@ import { codeBlockStyle } from '../theme.js';
 export const ConsumerList = ({ record }: { record: RequestRecord }) => {
   const { hover } = useRequestActions();
   const [highlight, setHighlight] = useState(false);
-  const consumers = useMemo(() => findConsumers(record, isOwnUi), [record]);
+  // 찾기 전에 큐를 비우므로 렌더가 끝난 다음 프레임에 찾는다. 큐의 step 이 다른 컴포넌트의 state 를 바꿀 수 있다.
+  const [consumers, setConsumers] = useState<Consumer[]>([]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setConsumers(findConsumers(record, isOwnUi)));
+    return () => cancelAnimationFrame(frame);
+  }, [record]);
   const byName = Array.from(groupBy(consumers, (c) => c.name));
   // 상세를 떠나면 강조도 끈다.
   useEffect(() => () => hover(null), [hover]);

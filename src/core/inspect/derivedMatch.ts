@@ -79,19 +79,19 @@ const cache = {
   version: -1,
 };
 
-const STEP_CALLS = 64;
+// 한 step 에 쓰는 시간. next() 한 번은 노드 수백 개라, 횟수가 아니라 시간으로 끊어야 큐 조각(4ms)을 넘지 않는다.
+const STEP_MS = 1;
 const pending = new Set<RequestRecord>();
 
-/** 응답 하나의 색인을 공용 큐에 맡긴다. 한 step 은 next() 를 STEP_CALLS 번까지 부른다. */
+/** 응답 하나의 색인을 공용 큐에 맡긴다. 한 step 은 STEP_MS 동안 next() 를 부른다. */
 const enqueueIndex = (record: RequestRecord, work: Generator<void, void, void>): void => {
   pending.add(record);
   enqueue(() => {
     try {
       // 색인하는 사이 목록에서 밀려난 응답은 마저 하지 않는다.
       if (cache.segments.has(record)) {
-        for (let i = 0; i < STEP_CALLS; i++)
-          if (work.next().done) break;
-          else if (i === STEP_CALLS - 1) return false; // 아직 남음
+        const until = performance.now() + STEP_MS;
+        while (!work.next().done) if (performance.now() >= until) return false; // 아직 남음
       }
     } catch {
       // 던지면 이 응답은 포기한다(pending 에 남아 isIndexPending 이 영원히 참이 되지 않게)
@@ -123,9 +123,12 @@ export const isIndexPending = (): boolean => pending.size > 0;
 // 요소 클릭처럼 한 번 묻고 끝나는 조회가 기다릴 수 있는 시간. 막 도착한 큰 응답 여러 개를 한 번에 다 하면 수백 ms 멈춘다.
 const FLUSH_LIMIT_MS = 200;
 
+/** 아직 색인하지 않은 응답의 색인 일을 큐에 올린다. 큐는 부르는 쪽이 자기 상한으로 비운다. */
+export const queueIndex = (): void => void getSegments();
+
 /** 남은 색인을 FLUSH_LIMIT_MS 까지 지금 한다. 요소 클릭처럼 한 번 묻는 조회는 기다리지 않고 바로 답해야 한다. */
 export const flushIndex = (): void => {
-  getSegments();
+  queueIndex();
   flushQueue(FLUSH_LIMIT_MS);
 };
 
