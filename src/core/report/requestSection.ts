@@ -1,3 +1,4 @@
+import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
 import { endpointOf } from '../requests/requestKey.js';
@@ -38,6 +39,8 @@ export interface RequestSection {
     sameResponses: number;
     /** 낭비(duplicates·sameResponses)로 센 것 중 실패 응답(4xx·5xx, 네트워크 오류)인 수 */
     failedDuplicates: number;
+    /** 같은 응답 재조회의 React Query 원인별 수(staleTime 경과·staleTime 0·무효화 후). 알 수 있는 것만 있다 */
+    refetchReasons?: Partial<Record<RefetchReason, number>>;
     review: number;
     /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수. route·component 는 알 때만 있다 */
     callers: Caller[];
@@ -94,6 +97,19 @@ const callersOf = (records: readonly RequestRecord[]) => {
     .slice(0, MAX_CALLERS);
 };
 
+/** 같은 응답으로 분류된(낭비·확인 필요) 재조회의 원인별 수. 없으면 필드를 두지 않는다. */
+const refetchReasonsOf = (own: readonly RequestRecord[], classes: ReadonlyMap<number, RequestClass>) => {
+  const counts: Partial<Record<RefetchReason, number>> = {};
+  own
+    .filter((r) => r.sameResponseAs !== undefined && !r.duplicateOf)
+    .forEach((r) => {
+      const c = classes.get(r.id);
+      const reason = c === 'same-response' || c === 'stale-elapsed' || c === 'after-invalidate' ? refetchReason(r) : undefined;
+      if (reason) counts[reason] = (counts[reason] ?? 0) + 1;
+    });
+  return Object.keys(counts).length > 0 ? counts : undefined;
+};
+
 export const buildRequestSection = (
   records: readonly RequestRecord[],
   classes: ReadonlyMap<number, RequestClass>,
@@ -114,6 +130,7 @@ export const buildRequestSection = (
         duplicates: s.duplicates,
         sameResponses: s.sameResponses,
         failedDuplicates: s.failedDuplicates ?? 0,
+        refetchReasons: refetchReasonsOf(own, classes),
         review: s.review,
         callers: callersOf(own),
         wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
@@ -128,6 +145,7 @@ export const buildRequestSection = (
 // 새 howToRead 줄은 여기에 더한다.
 export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   'failedDuplicates 는 duplicates·sameResponses 중 실패 응답(4xx·5xx, 네트워크 오류)인 수다. 코드의 낭비가 아니라 재시도나 로컬 환경(백엔드 꺼짐) 문제일 수 있어 상태 코드부터 본다.',
+  'refetchReasons 는 같은 응답으로 다시 받은 React Query 재조회의 원인별 수다. stale-elapsed(staleTime 이 지나 다시 받음)·after-invalidate(무효화했지만 바뀐 것 없음)는 확인할 반복이고 낭비로 세지 않는다(review). stale-zero(staleTime 0 이라 매번 받음)는 낭비(sameResponses)에 그대로 남으니 staleTime 을 늘린다. 새로고침 전 기록과의 같은 응답은 낭비로 세지 않는다.',
   'callers 의 route 는 요청을 보낸 시점의 경로(쿼리 제외), component 는 호출 스택의 대문자 이름 함수로 짐작한 보낸 컴포넌트다. 없으면 알 수 없는 것이다.',
   'callers 의 queryKey·observer 는 React Query 가 보낸 요청의 쿼리 키와 useQuery 를 그린 컴포넌트다. noAppFrame 은 ky 의 타이머처럼 비동기 경계에서 스택이 끊겨 보낸 코드 위치를 모른다는 뜻이다(frame 은 라이브러리 내부이니 queryKey 로 찾는다).',
 ];

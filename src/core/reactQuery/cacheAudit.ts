@@ -110,6 +110,10 @@ interface ClientHistory {
   misses: Array<{ at: number; finding: CacheFinding }>;
   /** 직전 무효화(겹침 판정용, 짧은 시간만 남긴다) */
   recent: Array<{ at: number; key: unknown; stack?: string }>;
+  /** 쿼리 성공 기록(재조회 원인 판정용). 같은 응답이면 structural sharing 이 앞 데이터를 그대로 써 출처 매칭 기록(fetched)에 남지 않아 따로 둔다. */
+  successes: Array<{ at: number; queryHash: string; data: WeakRef<object> }>;
+  /** 무효화 기록(재조회 원인 판정용). 맞는 쿼리가 있었는지와 무관하게 전부 남긴다. */
+  invalidations: Array<{ at: number; key: unknown }>;
 }
 
 const MAX_KEYS = 2000;
@@ -117,6 +121,8 @@ const MAX_KEYS = 2000;
 const MAX_ATTEMPTS = 3;
 
 const histories = new WeakMap<QueryClientLike, ClientHistory>();
+// 지금까지 감시한 client(트리를 다시 걷지 않고 재조회 원인을 찾으려고). 사라진 client 는 붙잡지 않는다.
+const watched: Array<WeakRef<QueryClientLike>> = [];
 // 측정을 새로 시작한 시각. 그 전 기록은 점검에 쓰지 않는다(고치기 전 지적이 고친 뒤 보고서에 남지 않게).
 let auditFrom = 0;
 
@@ -254,6 +260,7 @@ const recordOverlap = (history: ClientHistory, key: unknown, seen: unknown[], at
 
 const recordInvalidate = (history: ClientHistory, args: unknown[]): void => {
   const key = invalidatedKey(args);
+  if (key !== undefined) pushBounded(history.invalidations, { at: Date.now(), key });
   const seen = [...history.keys.values()];
   if (key !== undefined) recordOverlap(history, key, seen, Date.now(), callerStack());
   if (key === undefined || seen.some((k) => partialMatch(key, k))) return;
@@ -289,8 +296,9 @@ const foldInvalidations = (findings: readonly CacheFinding[]): CacheFinding[] =>
 /** 처음 본 client 를 감시한다: 쿼리 성공을 기록하고, 무효화가 빗나가는지 본다. 원래 동작은 그대로 한다. */
 const watch = (client: QueryClientLike): void => {
   if (histories.has(client)) return;
-  const history: ClientHistory = { pending: [], fetched: [], keys: new Map(), misses: [], recent: [] };
+  const history: ClientHistory = { pending: [], fetched: [], keys: new Map(), misses: [], recent: [], successes: [], invalidations: [] };
   histories.set(client, history);
+  watched.push(new WeakRef(client));
   const cache = client.getQueryCache();
   // 찾기 전에 가져온 데이터: 같은 참조로 출처가 확실한 것만 기록으로 채운다(파생 매칭은 쓰지 않는다).
   const now = Date.now();
@@ -313,7 +321,9 @@ const watch = (client: QueryClientLike): void => {
         data !== null &&
         typeof data === 'object'
       ) {
-        pushBounded(history.pending, { at: Date.now(), queryHash: q.queryHash, queryKey: q.queryKey, data: new WeakRef(data) });
+        const at = Date.now();
+        pushBounded(history.pending, { at, queryHash: q.queryHash, queryKey: q.queryKey, data: new WeakRef(data) });
+        pushBounded(history.successes, { at, queryHash: q.queryHash, data: new WeakRef(data) });
       }
     } catch {
       // 점검 실패가 앱의 캐시 동작을 막으면 안 된다.
@@ -419,6 +429,7 @@ export const auditQueryCache = (
     const from = Math.max(now - HISTORY_MS, auditFrom);
     history.fetched = history.fetched.filter((f) => f.at >= from);
     history.misses = history.misses.filter((m) => m.at >= from);
+    history.successes = history.successes.filter((s) => s.at >= from);
     const queries = client.getQueryCache().getAll();
     fetched.push(...history.fetched, ...currentFetched(queries, now));
     others.push(
@@ -429,6 +440,69 @@ export const auditQueryCache = (
   const findings = keyFindings(fetched).concat(others);
   // 같은 종류·키·요청은 하나로 합친다(같은 키를 여러 번 무효화한 경우 등).
   return foldInvalidations(Array.from(new Map(findings.map((f) => [findingId(f), f])).values()));
+};
+
+/** 쿼리 재조회 원인. 같은 응답을 다시 받았을 때 낭비인지 의도인지 가르는 근거다. */
+export type RefetchReason = 'stale-elapsed' | 'stale-zero' | 'after-invalidate';
+
+// 무효화 호출이 요청을 보내기까지 걸리는 시간의 상한
+const INVALIDATE_TO_REQUEST_MS = 1000;
+// 요청이 끝난 뒤 쿼리 성공이 기록되기까지의 여유
+const SUCCESS_SLACK_MS = 200;
+
+const staleTimeOf = (q: QueryLike): number | undefined => {
+  const st = q.observers?.find((o) => typeof o.options?.staleTime === 'number')?.options?.staleTime ?? q.options?.staleTime;
+  return typeof st === 'number' ? st : undefined;
+};
+
+/**
+ * 이 요청이 React Query 쿼리의 재조회라면 그 원인. 앞선 성공(dataUpdatedAt)과 비교해 판정한다.
+ * - after-invalidate: 앞선 성공 뒤에 이 쿼리를 덮는 무효화가 직전에 있었다
+ * - stale-zero: 폴링이 아니고 모든 관찰자의 staleTime 이 0 이다(고칠 대상)
+ * - stale-elapsed: staleTime(>0)이 지난 뒤에 다시 받았다
+ * 쿼리 성공 기록(2분)에 앞선 성공이 없으면(첫 요청, 오래된 요청) 알 수 없다. 사용자 조회·보고서에서 부른다.
+ */
+export const refetchReason = (record: RequestRecord): RefetchReason | undefined => {
+  for (const ref of watched) {
+    const client = ref.deref();
+    const history = client && histories.get(client);
+    if (!client || !history) continue;
+    resolvePending(history);
+    // 이 요청이 끝난 직후의 쿼리 성공 중 데이터 출처가 이 요청과 같은 요청인 것
+    const end = record.startedAt + record.durationMs;
+    const at = history.successes.findIndex((s) => {
+      const data = s.data.deref();
+      const origin = data && originOfData(data)?.record;
+      return s.at >= record.startedAt && s.at <= end + SUCCESS_SLACK_MS && !!origin && requestKeyOf(origin) === requestKeyOf(record);
+    });
+    if (at < 0) continue;
+    const { queryHash } = history.successes[at];
+    const prev = history.successes
+      .slice(0, at)
+      .reverse()
+      .find((f) => f.queryHash === queryHash);
+    if (!prev) return undefined;
+    const key = history.keys.get(queryHash);
+    if (
+      history.invalidations.some(
+        (i) =>
+          i.at >= prev.at &&
+          i.at <= record.startedAt + 5 &&
+          record.startedAt - i.at <= INVALIDATE_TO_REQUEST_MS &&
+          partialMatch(i.key, key),
+      )
+    )
+      return 'after-invalidate';
+    const q = client
+      .getQueryCache()
+      .getAll()
+      .find((x) => x.queryHash === queryHash);
+    if (!q) return undefined;
+    if (refetchesOnEveryVisit(q)) return 'stale-zero';
+    const staleTime = staleTimeOf(q);
+    return staleTime !== undefined && staleTime > 0 && record.startedAt - prev.at >= staleTime ? 'stale-elapsed' : undefined;
+  }
+  return undefined;
 };
 
 /** 점검 결과 하나를 가리키는 문자열(화면 key, 합치기) */

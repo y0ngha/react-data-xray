@@ -1,3 +1,4 @@
+import { refetchReason } from '../../core/reactQuery/cacheAudit.js';
 import { CLASS_LABEL, isFailed, isWaste } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { Badge } from '../components/Badge.js';
@@ -12,5 +13,7 @@ export const ClassBadge = ({ record, short = false }: { record: RequestRecord; s
   if (c === 'ok') return null;
   const label = short ? shorten(CLASS_LABEL[c]) : CLASS_LABEL[c];
   // 색과 분류는 그대로 두고 표기만 더한다. 실패 응답의 중복은 코드가 아니라 재시도·환경 때문일 수 있다.
-  return <Badge color={classColor(c)}>{isWaste(c) && isFailed(record) ? `${label} · 실패 응답` : label}</Badge>;
+  // 같은 응답이 staleTime 0 때문이면 고칠 대상이라 원인을 붙인다(빨강 그대로).
+  const note = c === 'same-response' && refetchReason(record) === 'stale-zero' ? ' · staleTime 0' : '';
+  return <Badge color={classColor(c)}>{(isWaste(c) && isFailed(record) ? `${label} · 실패 응답` : label) + note}</Badge>;
 };

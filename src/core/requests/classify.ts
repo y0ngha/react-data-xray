@@ -1,11 +1,12 @@
 import { groupBy } from '../../shared/collections.js';
+import { refetchReason } from '../reactQuery/cacheAudit.js';
 import { endpointOf, requestKeyOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
 /**
  * 요청 하나를 세 단계로 나눈다.
  * - 낭비(빨강): duplicate, same-response
- * - 확인 필요(노랑): periodic, focus-refetch. 의도된 동작일 가능성이 높지만, 바뀌지 않는 데이터를
+ * - 확인 필요(노랑): periodic, focus-refetch, stale-elapsed(staleTime 이 지나 다시 받음), after-invalidate(무효화했지만 바뀐 것 없음). 의도된 동작일 가능성이 높지만, 바뀌지 않는 데이터를
  *   너무 자주 받거나 캐시 설정(staleTime)이 짧다는 신호일 수 있어 숨기지 않는다.
  * - 정상(회색): strict-mode(근거가 확실한 것만), reconnect-refetch, ignored(사용자가 지정)
  */
@@ -15,6 +16,8 @@ export type RequestClass =
   | 'periodic'
   | 'strict-mode'
   | 'focus-refetch'
+  | 'stale-elapsed'
+  | 'after-invalidate'
   | 'reconnect-refetch'
   | 'ignored'
   | 'ok';
@@ -25,6 +28,8 @@ export const CLASS_LABEL: Record<RequestClass, string> = {
   periodic: '주기 요청',
   'strict-mode': 'StrictMode 가능성',
   'focus-refetch': '포커스 재요청',
+  'stale-elapsed': '캐시 만료 후 재조회',
+  'after-invalidate': '무효화 후 바뀐 것 없음',
   'reconnect-refetch': '재연결 재요청',
   ignored: '무시함',
   ok: '',
@@ -34,7 +39,8 @@ export const CLASS_LABEL: Record<RequestClass, string> = {
 export const isFailed = (r: RequestRecord): boolean => !!r.error || r.status >= 400;
 
 export const isWaste = (c: RequestClass | undefined): boolean => c === 'duplicate' || c === 'same-response';
-export const needsReview = (c: RequestClass | undefined): boolean => c === 'periodic' || c === 'focus-refetch';
+export const needsReview = (c: RequestClass | undefined): boolean =>
+  c === 'periodic' || c === 'focus-refetch' || c === 'stale-elapsed' || c === 'after-invalidate';
 
 const PERIODIC_MIN_COUNT = 3;
 const PERIODIC_MIN_INTERVAL_MS = 1000;
@@ -77,7 +83,10 @@ interface ClassifyContext {
 
 /** 위에서부터 처음 맞는 규칙이 이긴다. 이유가 확실한 것부터 보고, 남은 것만 낭비로 둔다. */
 const classifyOne = (r: RequestRecord, { byId, periodicKeys, ignoredEndpoints }: ClassifyContext): RequestClass => {
-  const flagged = !!(r.duplicateOf || r.sameResponseAs);
+  // 새로고침 전 기록과 같은 응답은 캐시가 비어 당연히 받은 요청이라 낭비가 아니다(다른 페이지 로드의 기록과 비교한 것).
+  const sameAs = r.sameResponseAs === undefined ? undefined : byId.get(r.sameResponseAs);
+  const crossLoad = !!sameAs && (!!sameAs.restored || (sameAs.load ?? 0) !== (r.load ?? 0));
+  const flagged = !!(r.duplicateOf || (r.sameResponseAs && !crossLoad));
   if (!flagged) return 'ok';
   if (ignoredEndpoints.has(endpointOf(r))) return 'ignored';
   if (!r.bodyUnreadable && periodicKeys.has(periodicKeyOf(r))) return 'periodic';
@@ -88,7 +97,10 @@ const classifyOne = (r: RequestRecord, { byId, periodicKeys, ignoredEndpoints }:
   // 같은 시점의 중복 요청(여러 컴포넌트가 함께 다시 부름)은 여전히 낭비다.
   if (!r.duplicateOf && r.trigger === 'focus') return 'focus-refetch';
   if (!r.duplicateOf && r.trigger === 'reconnect') return 'reconnect-refetch';
-  return r.duplicateOf ? 'duplicate' : 'same-response';
+  if (r.duplicateOf) return 'duplicate';
+  // React Query 의 재조회면 원인으로 나눈다. staleTime 0 의 반복은 빨강 그대로다(고칠 대상).
+  const reason = refetchReason(r);
+  return reason === 'stale-elapsed' || reason === 'after-invalidate' ? reason : 'same-response';
 };
 
 /** 기록 전체를 한 번에 나눈다. 주기 판정은 같은 요청끼리 모아 봐야 해서 한 건씩은 할 수 없다. */
