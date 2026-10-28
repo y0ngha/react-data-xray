@@ -67,8 +67,6 @@ export const captureStack = (): Error => {
   }
 };
 
-export { queryContextOf } from './queryContext.js';
-
 const lastAt = { focus: 0, reconnect: 0 };
 
 /**

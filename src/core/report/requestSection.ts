@@ -5,7 +5,7 @@ import { endpointOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
-import { queryContextOf } from '../capture/requestContext.js';
+import { queryContextOf, type QueryContext } from '../capture/queryContext.js';
 import { groupBy } from '../../shared/collections.js';
 
 const MAX_CALLERS = 3;
@@ -77,13 +77,17 @@ const callerOf = (stack: string | undefined): string | undefined =>
     .map((line) => line.replace(/\?[^\s:)]*(?=:\d+:\d+)/g, ''))
     .join(' <- ') || undefined;
 
-const callersOf = (records: readonly RequestRecord[]) => {
+/**
+ * 같은 호출 위치(frame)에서 보낸 것끼리 센다. route·component·queryKey 로 더 쪼개면 상위 3 자르기가 순위를 왜곡하므로 첫 기록의 것을 붙인다.
+ * 스택이 끊겨 frame 이 라이브러리 내부인 요청은 호출한 곳을 queryKey 로 가른다.
+ */
+const callersOf = (records: readonly RequestRecord[], queryOf: (record: RequestRecord) => QueryContext | undefined) => {
   const counts = records.reduce((acc, r) => {
     const frame = callerOf(r.sourceStack ?? r.stack);
-    const query = queryContextOf(r);
+    const query = queryOf(r);
     const component = r.component ?? query?.observer; // 스택으로 모르면 useQuery 를 그린 컴포넌트가 보낸 곳이다
     if (!frame && !query) return acc;
-    const key = JSON.stringify([frame, r.route, component, query?.queryKey]);
+    const key = JSON.stringify([frame, !!r.noAppFrame, r.noAppFrame || !frame ? query?.queryKey : undefined]);
     const caller: Caller = acc.get(key) ?? {
       frame: frame ?? '',
       count: 0,
@@ -126,10 +130,15 @@ const repeatCausesOf = (own: readonly RequestRecord[]) => {
     : undefined;
 };
 
+/**
+ * queryOf 는 요청의 React Query 문맥을 찾는 함수다. 기본은 fiber 트리를 걸어 찾는다(사용자가 요청한 보고서).
+ * 5초 주기 업로드처럼 앱 경로 가까이서 돌 때는 knownQueryContextOf 를 넘겨 이미 찾아 둔 것만 쓴다.
+ */
 export const buildRequestSection = (
   records: readonly RequestRecord[],
   classes: ReadonlyMap<number, RequestClass>,
   ignored: ReadonlySet<string>,
+  queryOf: (record: RequestRecord) => QueryContext | undefined = queryContextOf,
 ): RequestSection => {
   const byEndpoint = groupBy(records, endpointOf);
   return {
@@ -148,7 +157,7 @@ export const buildRequestSection = (
         failedDuplicates: s.failedDuplicates ?? 0,
         refetchReasons: refetchReasonsOf(own, classes),
         review: s.review,
-        callers: callersOf(own),
+        callers: callersOf(own, queryOf),
         repeatCauses: repeatCausesOf(own),
         wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
           0,

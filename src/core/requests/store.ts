@@ -1,6 +1,6 @@
 import { enqueue } from '../scheduler/idleQueue.js';
 import { registerOrigins } from './origins.js';
-import { repeatCauseOf } from './repeatCause.js';
+import { repeatCauseStep } from './repeatCause.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import type { RequestRecord } from './types.js';
 
@@ -80,11 +80,14 @@ export const createRecord = (
   enqueue(() => {
     if (!isStale(record)) record.duplicateOf = detectDuplicate(record);
     // 보낸 컴포넌트는 앞서 걸린 annotate step 이 채우므로, 그 뒤로 한 번 더 미룬다.
-    if (record.duplicateOf)
+    if (record.duplicateOf) {
+      const step = repeatCauseStep(record);
       enqueue(() => {
-        record.repeatCause = repeatCauseOf(record);
-        return true;
+        const done = step();
+        if (done && record.repeatCause) notify(); // 요청 탭·상세가 다시 그리도록
+        return done;
       });
+    }
     return true;
   });
   return record;

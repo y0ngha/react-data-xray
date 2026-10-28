@@ -6,7 +6,13 @@ import { recordMounts, resetMounts } from '../../render/mounts.js';
 import { buildRequestSection } from '../../report/requestSection.js';
 import type { RequestRecord } from '../types.js';
 
-import { repeatCauseOf } from '../repeatCause.js';
+import { repeatCauseStep } from '../repeatCause.js';
+
+const repeatCauseOf = (record: RequestRecord) => {
+  const step = repeatCauseStep(record);
+  while (!step());
+  return record.repeatCause;
+};
 
 function Profile() {}
 function Child() {}
@@ -64,7 +70,7 @@ describe('중복 요청이 다시 나간 이유', () => {
     const fresh = fiber(Child, undefined, list);
     recordMounts([], [{ fiber: old, parent: list, branch: list }], 0);
     recordMounts([{ fiber: old, parent: list }], [{ fiber: fresh, parent: list, branch: list }], 100);
-    const cause = repeatCauseOf(rec({ component: 'Child' }));
+    const cause = repeatCauseOf(rec({ component: 'Child', startedAt: 200 }));
     expect(cause).toEqual({ kind: 'remount', detail: '<Child> 재마운트, 부모 <List> 의 분기 변경' });
   });
 

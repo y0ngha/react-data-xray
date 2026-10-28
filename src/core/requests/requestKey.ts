@@ -36,6 +36,10 @@ const maskIds = (path: string): string =>
 export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url' | 'action'>): string =>
   `${record.method} ${maskIds(pathOf(record.url))}${actionSuffix(record.action)}`;
 
+/** ID 묶기가 생기기 전에 저장한 엔드포인트("GET /items/5")를 지금 형식("GET /items/:id")으로 바꾼다. 이미 묶인 것은 그대로다. */
+export const maskEndpoint = (endpoint: string): string =>
+  endpoint.replace(/^(\S+ )(\S+)/, (_, method: string, path: string) => method + maskIds(path));
+
 /**
  * 쿼리스트링과 payload 까지 포함한 요청 단위. 중복·같은 응답 판정은 같은 요청끼리만 한다.
  * 파라미터 순서만 다른 URL 은 같은 요청으로 본다.

@@ -19,7 +19,13 @@ const MountNote = ({ name }: { name: string }) => {
   return (
     <Muted>
       마운트 {mounts} · 언마운트 {unmounts}
-      {remounts.map((r) => ` · 부모 <${r.parent || '루트'}> 때문에 재마운트 ×${r.count}`).join('')}
+      {remounts
+        .map((r) =>
+          r.cause === 'type-changed'
+            ? ` · 부모 <${r.parent || '루트'}> 가 렌더 중에 정의한 컴포넌트라 재마운트 ×${r.count}`
+            : ` · 부모 <${r.parent || '루트'}> 때문에 재마운트 ×${r.count}`,
+        )
+        .join('')}
     </Muted>
   );
 };

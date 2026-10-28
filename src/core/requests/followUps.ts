@@ -36,10 +36,7 @@ export const followUps = (
   return Array.from(groupBy(after, endpointOf), ([endpoint, list]) => ({
     endpoint,
     count: list.length,
-    ...(() => {
-      const queryKey = list.map(queryKeyOf).find((k) => k !== undefined);
-      return queryKey === undefined ? {} : { queryKey };
-    })(),
+    queryKey: list.map(queryKeyOf).find((k) => k !== undefined),
     sameResponse: list.filter((r) => r.sameResponseAs).length,
     periodic: list.some((r) => isPeriodic((startsOf.get(requestKeyOf(r)) ?? []).map((x) => x.startedAt))),
   })).sort((a, b) => b.count - a.count);

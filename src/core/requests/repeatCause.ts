@@ -1,4 +1,4 @@
-import { findRootFibers, getComponentName, walkFibers } from '../fiber/tree.js';
+import { findRootFibers, getComponentName } from '../fiber/tree.js';
 import { isComposite, type Fiber, type Hook } from '../fiber/types.js';
 import { getMountStats } from '../render/mounts.js';
 import { previewValue } from '../render/renderReason.js';
@@ -28,29 +28,70 @@ const changedDep = (fiber: Fiber): { effect: number; dep: number; prev: unknown;
   return undefined;
 };
 
-// shortcut: 가장 최근 렌더의 변경만 본다. 요청 뒤 한 번 더 렌더됐다면 놓칠 수 있다(유휴 큐가 곧 돌아 드물다).
-const depsCauseOf = (component: string): string | undefined => {
-  let found: string | undefined;
-  findRootFibers().forEach((root) =>
-    walkFibers(root, (f) => {
-      if (found) return false;
-      if (!isComposite(f) || !f.alternate || getComponentName(f) !== component) return;
+// 한 step 에서 보는 fiber 수. 시간은 공용 큐가 본다.
+const FIBERS_PER_STEP = 300;
+// 요청이 나가기 이만큼 안에 다시 마운트된 것만 원인으로 본다(mounts.ts 의 REMOUNT_MS 와 같다).
+const REMOUNT_WINDOW_MS = 5000;
+
+const PENDING = Symbol('pending');
+
+/**
+ * 컴포넌트의 fiber 를 FIBERS_PER_STEP 개씩 훑어 바뀐 의존성을 찾는다. 부를 때마다 이어서 훑고, 다 훑고도 없으면 undefined, 더 훑을 게 있으면 PENDING.
+ * shortcut: 가장 최근 렌더의 변경만 본다. 요청 뒤 한 번 더 렌더됐다면 놓칠 수 있다(유휴 큐가 곧 돌아 드물다).
+ */
+const depsSearch = (component: string) => {
+  let stack: Fiber[] | undefined;
+  return (): string | undefined | typeof PENDING => {
+    stack ??= findRootFibers().reverse();
+    for (let seen = 0; seen < FIBERS_PER_STEP; seen++) {
+      const f = stack.pop();
+      if (!f) return undefined;
+      if (f.sibling) stack.push(f.sibling);
+      if (f.child) stack.push(f.child);
+      if (!isComposite(f) || !f.alternate || getComponentName(f) !== component) continue;
       const c = changedDep(f);
-      if (c) found = `의존성 #${c.dep + 1} 변경 (${previewValue(c.prev)} → ${previewValue(c.next)}), ${c.effect}번째 effect`;
-    }),
-  );
-  return found;
+      if (c) return `의존성 #${c.dep + 1} 변경 (${previewValue(c.prev)} → ${previewValue(c.next)}), ${c.effect}번째 effect`;
+    }
+    return PENDING;
+  };
 };
 
-/** 중복 요청이 다시 나간 이유. 앱 경로가 아니라 유휴 큐에서 부른다. 알 수 없으면 undefined. */
-export const repeatCauseOf = (record: RequestRecord): RepeatCause | undefined => {
-  if (!record.duplicateOf) return undefined;
-  if (record.strictModeReplay) return { kind: 'strict', detail: 'StrictMode 가 개발 중에 effect 를 다시 실행했습니다' };
-  const component = record.component;
-  if (!component) return undefined;
-  const deps = depsCauseOf(component);
-  if (deps) return { kind: 'deps', detail: deps };
-  const remount = getMountStats(component).remounts[0];
-  if (remount) return { kind: 'remount', detail: `<${component}> 재마운트, 부모 <${remount.parent || '루트'}> 의 분기 변경` };
-  return undefined;
+const remountCauseOf = (record: RequestRecord, component: string): RepeatCause | undefined => {
+  const remount = getMountStats(component).remounts.find(
+    (r) => r.lastAt <= record.startedAt && record.startedAt - r.lastAt <= REMOUNT_WINDOW_MS,
+  );
+  if (!remount) return undefined;
+  const parent = `부모 <${remount.parent || '루트'}>`;
+  return {
+    kind: 'remount',
+    detail:
+      remount.cause === 'type-changed'
+        ? `<${component}> 재마운트, ${parent} 가 렌더 중에 컴포넌트를 정의해 타입이 매번 바뀜(렌더 중 컴포넌트 정의)`
+        : `<${component}> 재마운트, ${parent} 의 분기 변경`,
+  };
+};
+
+/** 중복 요청이 다시 나간 이유를 찾는 일. 부를 때마다 조금씩 하고, 끝나면 이유(없으면 undefined)를 돌려준다. */
+const repeatCauseSearch = (record: RequestRecord) => {
+  let deps: ReturnType<typeof depsSearch> | undefined;
+  return (): RepeatCause | undefined | typeof PENDING => {
+    if (!record.duplicateOf) return undefined;
+    if (record.strictModeReplay) return { kind: 'strict', detail: 'StrictMode 가 개발 중에 effect 를 다시 실행했습니다' };
+    const component = record.component;
+    if (!component) return undefined;
+    const found = (deps ??= depsSearch(component))();
+    if (found === PENDING) return PENDING;
+    return found ? { kind: 'deps', detail: found } : remountCauseOf(record, component);
+  };
+};
+
+/** record.repeatCause 를 채우는 큐 step. 끝나면 true. 앱 경로가 아니라 유휴 큐에서 부른다. */
+export const repeatCauseStep = (record: RequestRecord): (() => boolean) => {
+  const search = repeatCauseSearch(record);
+  return () => {
+    const cause = search();
+    if (cause === PENDING) return false;
+    record.repeatCause = cause;
+    return true;
+  };
 };
