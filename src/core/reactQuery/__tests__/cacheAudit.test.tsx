@@ -177,7 +177,11 @@ describe('React Query 캐시키 점검', () => {
     await screen.findByText('ready');
     await act(() => client.refetchQueries({ queryKey: ['config'] }));
     await act(flush);
-    await waitFor(() => expect(getRecords().some((r) => r.sameResponseAs)).toBe(true));
+    // 원문은 비동기로 읽혀 큐에 오르므로, 배경 구동을 기다리지 않고 기다리는 동안 큐를 직접 비운다.
+    await waitFor(() => {
+      flushQueue();
+      expect(getRecords().some((r) => r.sameResponseAs)).toBe(true);
+    });
     const dupOrOk = (r: RequestRecord): RequestClass => (r.sameResponseAs ? 'duplicate' : 'ok');
     expect(audit(dupOrOk, getRecords()).some((f) => f.kind === 'stale-zero')).toBe(true);
   });
@@ -190,7 +194,11 @@ describe('React Query 캐시키 점검', () => {
     await screen.findByText('ready');
     await act(() => client.refetchQueries({ queryKey: ['config'] }));
     await act(flush);
-    await waitFor(() => expect(getRecords().some((r) => r.sameResponseAs)).toBe(true));
+    // 원문은 비동기로 읽혀 큐에 오르므로, 배경 구동을 기다리지 않고 기다리는 동안 큐를 직접 비운다.
+    await waitFor(() => {
+      flushQueue();
+      expect(getRecords().some((r) => r.sameResponseAs)).toBe(true);
+    });
     expect(audit(sameOrOk, getRecords()).some((f) => f.kind === 'stale-zero')).toBe(true);
   });
 });

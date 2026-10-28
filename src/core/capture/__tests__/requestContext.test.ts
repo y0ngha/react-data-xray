@@ -59,10 +59,15 @@ describe('요청 문맥', () => {
   });
 
   it('whenSourcesResolved 는 맵을 받은 뒤에야 큐에 오르는 해석 step 도 직접 돌려 끝낸다', async () => {
+    // 배경 구동(유휴 콜백과 50ms 보험 타이머)을 막는다. 그래도 끝나면 whenSourcesResolved 가 직접 돌린 것이다.
     vi.stubGlobal(
       'requestIdleCallback',
       vi.fn(() => 1),
-    ); // 배경은 50ms 보험 타이머뿐이므로, 그보다 빨리 끝나야 직접 돌린 것이다
+    );
+    const realSetTimeout = globalThis.setTimeout;
+    const timers = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation(((fn: () => void, ms?: number) => (ms === 50 ? 0 : realSetTimeout(fn, ms))) as unknown as typeof setTimeout);
     const code = `a\nb\nload()\n//# sourceMappingURL=${inlineMap({ version: 3, sources: ['ctx-async.ts'], mappings: ';;AASE' })}`;
     const original = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation(async (input, init) => {
@@ -74,12 +79,11 @@ describe('요청 문맥', () => {
     Error.prepareStackTrace = () => 'Error\nat load (http://localhost:3000/src/ctx-async.ts:3:5)';
     try {
       await fetch('/api/async-map');
-      const start = performance.now();
       await whenSourcesResolved();
       expect(getRecords()[0].sourceStack).toBe('at load (src/ctx-async.ts:10:3)');
-      expect(performance.now() - start).toBeLessThan(40);
     } finally {
       Error.prepareStackTrace = prepare;
+      timers.mockRestore();
       vi.unstubAllGlobals();
     }
   });
