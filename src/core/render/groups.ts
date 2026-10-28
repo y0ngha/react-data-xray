@@ -92,6 +92,8 @@ const merge = (g: RenderGroup, e: RenderEntry & RenderSummary): RenderGroup => (
   ...g,
   recent: g.recent + e.recent,
   ms: g.ms + e.ms,
+  timed: (g.timed ?? 0) + (e.timed ?? 0),
+  avoidableMs: (g.avoidableMs ?? 0) + (e.avoidableMs ?? 0),
   avoidable: g.avoidable + e.avoidable,
   network: g.network + e.network,
   instances: g.instances + 1,
@@ -128,7 +130,18 @@ const keyOfOrigin = (o: NonNullable<RenderEvent['origin']>): string => (o.from ?
  * since 이후의 기록만 본다.
  */
 export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number): Map<string, OriginImpact> => {
-  const acc = new Map<string, { renders: number; unchanged: number; unchangedNames: Set<string>; changed: Map<string, number> }>();
+  const acc = new Map<
+    string,
+    {
+      renders: number;
+      unchanged: number;
+      unchangedNames: Set<string>;
+      changed: Map<string, number>;
+      timed: number;
+      ms: number;
+      unchangedMs: number;
+    }
+  >();
   renders.forEach((entry) =>
     entry.events.forEach((e) => {
       if (e.time < since || !e.origin) return;
@@ -138,10 +151,18 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
         unchanged: 0,
         unchangedNames: new Set<string>(),
         changed: new Map<string, number>(),
+        timed: 0,
+        ms: 0,
+        unchangedMs: 0,
       };
       cur.renders++;
+      if (e.ms !== undefined) {
+        cur.timed++;
+        cur.ms += e.ms;
+      }
       if (isUnchanged(e)) {
         cur.unchanged++;
+        cur.unchangedMs += e.ms ?? 0;
         cur.unchangedNames.add(entry.name);
       } else if (e.reason === 'props') {
         // 위에서 아래 순서로 보여 주려고 깊이를 같이 둔다.
@@ -157,6 +178,7 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
         renders: a.renders,
         unchanged: a.unchanged,
         unchangedComponents: a.unchangedNames.size,
+        ...(a.timed > 0 && { childMs: a.ms, unchangedMs: a.unchangedMs }),
         changedProps: [...a.changed.entries()].sort((x, y) => x[1] - y[1]).map(([prop]) => prop),
       },
     ]),

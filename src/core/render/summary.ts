@@ -106,6 +106,7 @@ export const summarize = (entry: RenderEntry, now: number, windowMs = WINDOW_MS)
   const reasons = countReasons(recent.map((e) => e.reason));
   // 이미 React.memo 인데 부모 때문에 렌더됐다면(forceUpdate 등) memo 로는 줄일 수 없으니 세지 않는다.
   const avoidable = reasons['same-content'] + reasons['new-callback'] + (entry.memoized ? 0 : reasons.parent);
+  const isAvoidable = (r: RenderReason): boolean => r === 'same-content' || r === 'new-callback' || (r === 'parent' && !entry.memoized);
   const sameContentKeys = keysOf(recent, 'same-content');
   const callbackKeys = keysOf(recent, 'new-callback');
   // React Compiler 의 메모는 건너뜀을 셀 수 없어 제외한다.
@@ -117,6 +118,8 @@ export const summarize = (entry: RenderEntry, now: number, windowMs = WINDOW_MS)
     recent: recent.length,
     last: entry.events[entry.events.length - 1]?.time ?? 0,
     ms: recent.reduce((sum, e) => sum + (e.ms ?? 0), 0),
+    timed: recent.filter((e) => e.ms !== undefined).length,
+    avoidableMs: recent.reduce((sum, e) => sum + (isAvoidable(e.reason) ? (e.ms ?? 0) : 0), 0),
     reasons,
     avoidable,
     sameContentKeys,

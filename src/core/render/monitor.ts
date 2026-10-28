@@ -214,6 +214,8 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   if (pending.length === 0) return;
   const inheritedBy: Inherited[] = [];
   let at = 0;
+  let totalMs: number | undefined;
+  let startedBy: string | undefined;
   const mine = epoch;
   // 위에서 아래로 내려가며, 가장 가까운 렌더된 조상의 네트워크 원인과 렌더를 시작한 조상을 자식에게 넘긴다.
   enqueue(() => {
@@ -223,6 +225,8 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       inheritedBy[at] = {}; // 한 fiber 가 던져도 나머지와 commit 기록·구독자 알림은 이어간다
       try {
         const event = recordRender(p, now, p.parent < 0 ? {} : inheritedBy[p.parent]);
+        if (event.ms !== undefined) totalMs = (totalMs ?? 0) + event.ms;
+        if (startedBy === undefined && STARTS_RENDER.has(event.reason)) startedBy = getComponentName(p.fiber);
         inheritedBy[at] = {
           cause: event.cause,
           origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason, from: entries.get(p.fiber) },
@@ -239,7 +243,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       if (entry.skips.length > MAX_EVENTS_PER_COMPONENT) entry.skips.shift();
       active.add(entry);
     });
-    commits.push({ id: ++commitSeq, time: now, count: pending.length });
+    commits.push({ id: ++commitSeq, time: now, count: pending.length, ms: totalMs, startedBy });
     if (commits.length > MAX_COMMITS) commits.shift();
     commitListeners.forEach((listener) => listener());
     return true;

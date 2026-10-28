@@ -441,7 +441,7 @@ describe('바뀐 state 와 렌더 시작점의 영향', () => {
     fireEvent.click(screen.getByText('count'));
     fireEvent.click(screen.getByText('count'));
     const page = groupRenders(getTopRenders(200), 0).find((g) => g.name === 'Page')!;
-    expect(page.impact).toEqual({ renders: 8, unchanged: 4, unchangedComponents: 2, changedProps: ['Panel.left', 'Badge.left'] });
+    expect(page.impact).toMatchObject({ renders: 8, unchanged: 4, unchangedComponents: 2, changedProps: ['Panel.left', 'Badge.left'] });
   });
 
   it('render_record_throw: 한 fiber 의 기록이 던져도 나머지와 commit·구독자 알림은 이어진다', () => {

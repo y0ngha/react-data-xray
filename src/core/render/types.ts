@@ -113,6 +113,9 @@ export interface OriginImpact {
   unchanged: number;
   /** 값이 그대로인데 렌더된 하위 컴포넌트 수(이름 기준) */
   unchangedComponents: number;
+  /** 따라 렌더된 하위의 렌더 시간 합과 그중 값이 그대로인 렌더의 합(ms). 시간 기록이 없으면 없다. */
+  childMs?: number;
+  unchangedMs?: number;
   /** 값이 실제로 바뀐 props: "AnalysisPanel.reanalyzeCooldownMs" (위에서 아래 순서) */
   changedProps: string[];
 }
@@ -136,6 +139,10 @@ export interface RenderSummary {
   last: number;
   /** 최근 10초 자기 자신의 렌더 시간 합(ms) */
   ms: number;
+  /** 시간(ms)이 기록된 렌더 수. 0 이면 dev 빌드가 시간을 주지 않은 것이라 ms 는 의미가 없다. */
+  timed?: number;
+  /** 줄일 수 있는 렌더의 시간 합(ms) */
+  avoidableMs?: number;
   reasons: Record<RenderReason, number>;
   /** 줄일 수 있는 렌더(same-content + new-callback + memo 가 아닌 컴포넌트의 parent) */
   avoidable: number;
@@ -162,4 +169,8 @@ export interface Commit {
   time: number;
   /** 이 commit 에서 렌더된 컴포넌트 수 */
   count: number;
+  /** 이 commit 에서 렌더된 컴포넌트의 자기 렌더 시간 합(ms). 시간 기록이 없으면 없다. */
+  ms?: number;
+  /** 이 commit 을 시작한 컴포넌트(스스로 state·context 가 바뀌었거나 마운트된 가장 위 컴포넌트) */
+  startedBy?: string;
 }
