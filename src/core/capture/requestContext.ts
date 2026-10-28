@@ -42,6 +42,21 @@ export const runtimeModuleUrl = (declared: string, stack: string | undefined): s
 
 const OWN_FRAME = ownFramePattern(runtimeModuleUrl(import.meta.url, new Error().stack));
 
+// StrictMode 재실행 프레임(React 19 의 doubleInvokeEffectsOnFiber)은 앱 코드보다 한참 아래에 있어,
+// V8 기본(10프레임)이면 가로채기·effect 프레임에 밀려 잘린다. 요청을 기록할 때만 이만큼 남긴다.
+const CAPTURE_FRAMES = 40;
+
+/** 지금 호출 스택을 담은 Error. 상한은 이 한 번만 올리고 되돌린다. */
+const captureStack = (): Error => {
+  const limit = Error.stackTraceLimit;
+  Error.stackTraceLimit = CAPTURE_FRAMES;
+  try {
+    return new Error();
+  } finally {
+    Error.stackTraceLimit = limit;
+  }
+};
+
 const lastAt = { focus: 0, reconnect: 0 };
 
 /**
@@ -79,7 +94,7 @@ const appStack = (raw: string): string | undefined =>
 /** 새 요청에 보낸 위치, StrictMode 재실행 여부, 자동 재요청 여부를 붙인다. */
 export const annotateRequest = (record: RequestRecord): RequestRecord => {
   record.trigger = triggerAt(record.startedAt); // 요청 시점의 포커스·재연결 상태여야 한다
-  const err = new Error(); // .stack 은 V8 이 늦게 만들므로 여기서 읽지 않는다
+  const err = captureStack(); // .stack 은 V8 이 늦게 만들므로 여기서 읽지 않는다
   enqueue(() => {
     const raw = err.stack ?? '';
     // 판정은 자르기 전 전체 스택으로 한다. React 내부 프레임은 앱 코드보다 한참 아래에 있다.

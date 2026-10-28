@@ -4,7 +4,8 @@
 
 ```bash
 pnpm install
-pnpm check          # 타입체크 → oxlint → react-doctor → 포맷 검사 → 테스트·커버리지(80% 이상)
+pnpm check          # 타입체크 → oxlint → react-doctor → 포맷 검사 → 테스트·커버리지(80% 이상) → React 19 테스트
+pnpm test:react19   # 같은 테스트를 React 19 로(의존성은 tests/react19 에 따로 설치)
 pnpm test           # 테스트만
 pnpm fmt            # 포맷 적용
 pnpm sync <앱 경로>  # 빌드해서 file: 로 연결한 앱의 node_modules 에 반영

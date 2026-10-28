@@ -10,17 +10,16 @@ Closes #
 
 ## rdx 점검
 
-- [ ] 앱 경로(React commit, fetch/XHR, res.json(), JSON.parse)에는 참조만 담고, 분석은 idle 큐(`enqueue`)로 미뤘다
+- [ ] 앱 경로(React commit, fetch/XHR, res.json(), JSON.parse)에는 참조만 담고, 분석은 유휴 큐(`enqueue`)로 미뤘다
 - [ ] 주기적으로 도는 화면은 큐를 비우지(`flushQueue`) 않고 그때까지 분석된 것만 보여 준다 (비우는 곳은 AGENTS.md 의 목록뿐)
 - [ ] 가로채기·commit 감시 코드는 `attempt()`/`try` 안에 있어 rdx 실패가 앱으로 새지 않는다
 - [ ] 토큰·쿠키 같은 비밀값이 보고서·저장소에 남지 않는다
-- [ ] React 18, 19 에서 확인했다
 
 <!-- 해당 없는 항목은 지우지 말고 "해당 없음"이라고 적는다 -->
 
 ## 확인
 
-- [ ] `pnpm check`
+- [ ] `pnpm check` (React 18 과 19 테스트를 모두 돌린다)
 - [ ] 화면이 바뀌면 전후 스크린샷이나 보고서
 
 ## 리뷰어가 볼 곳

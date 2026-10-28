@@ -287,7 +287,9 @@ describe('렌더의 네트워크 원인', () => {
     bump(2);
     const leaf = getTopRenders(200).find((e) => e.name === 'Leaf')!;
     expect(leaf.origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
-    expect(leaf.location).toMatch(/monitor\.test\.tsx:\d+$/);
+    // React 19 는 JSX 위치(_debugSource)를 없앴으므로 위치만 비고 나머지는 같다.
+    const location = process.env.RDX_REACT_MAJOR === '19' ? /^없음$/ : /monitor\.test\.tsx:\d+$/;
+    expect(leaf.location ?? '없음').toMatch(location);
   });
 });
 

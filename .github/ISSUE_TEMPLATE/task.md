@@ -2,7 +2,7 @@
 name: 작업
 about: 리팩터링, 문서, CI, 의존성처럼 동작을 바꾸지 않는 일
 title: "[작업] "
-labels: documentation
+labels: chore
 ---
 
 <!-- rdx-issue-template -->

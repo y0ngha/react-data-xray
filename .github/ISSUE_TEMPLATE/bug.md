@@ -24,6 +24,7 @@ labels: bug
 ## 환경
 
 - rdx 버전 또는 커밋:
+- 설치 방식 (npm / `file:` 연결 + `pnpm sync`):
 - React 버전:
 - 프레임워크·번들러 (Vite / Next.js App·Pages Router / webpack):
 - 브라우저:
@@ -36,6 +37,8 @@ labels: bug
 
 - [ ] rdx 를 켜면 앱이 느려지거나 동작이 바뀐다
 - [ ] rdx 화면만 틀린다 (앱은 그대로)
+
+<!-- 느려진다면: 성능 탭의 긴 작업(long task) 시간(ms)과 그때 받은 응답 크기 -->
 
 ## 해결 방향과 맥락
 

@@ -1,0 +1,7 @@
+packages:
+  # React 19 테스트 의존성(pnpm test:react19). 루트의 react 18 과 섞이지 않게 따로 둔다.
+  - tests/react19
+
+overrides:
+  # react-doctor(→ Sentry)가 끌어오는 OpenTelemetry 패키지들이 모두 받아들이는 버전으로 맞춘다(1.10 은 peer 범위 밖).
+  '@opentelemetry/api': ~1.9.1

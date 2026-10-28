@@ -24,7 +24,7 @@ labels: enhancement
 ## 앱 경로 비용
 
 <!-- 앱이 부르는 경로(React commit, fetch/XHR, res.json(), JSON.parse)에 동기 작업을 더하는가?
-     더한다면 idle 큐(src/core/scheduler/idleQueue.ts)로 미룰 수 있는가 -->
+     더한다면 유휴 큐(src/core/scheduler/idleQueue.ts)로 미룰 수 있는가 -->
 
 ## 검토한 대안과 맥락
 
