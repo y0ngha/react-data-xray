@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 
 import { clamp } from '../../shared/format.js';
-import type { DockSettings } from '../hooks/useDockSettings.js';
+import { DEFAULT_DOCK, type Dock, type DockSettings } from '../hooks/useDockSettings.js';
 import type { Position } from '../hooks/useDraggable.js';
 import { BUTTON_SIZE } from '../FloatingButton.js';
 import { color } from '../theme.js';
@@ -33,4 +33,11 @@ export const panelPlacement = (settings: DockSettings, button: Position, viewpor
         boxShadow: '0 4px 24px rgba(0,0,0,.4)',
       };
   }
+};
+
+/** 앱 모달과 겹치지 않는 도킹. 아래, 오른쪽 순으로 보고, 둘 다 겹치면 float(호출한 쪽이 접는다). 기본 크기 기준이다. */
+export const dockAvoiding = (modal: DOMRect, viewport: DOMRect): Dock => {
+  if (modal.bottom <= viewport.bottom - DEFAULT_DOCK.bottomHeight) return 'bottom';
+  if (modal.right <= viewport.right - DEFAULT_DOCK.rightWidth) return 'right';
+  return 'float';
 };

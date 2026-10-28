@@ -28,7 +28,7 @@ export const usePanelVisibility = () => {
   }, [closePopup, setOpen]);
   const changeDock = useCallback(
     (dock: Dock) => {
-      updateDock({ dock });
+      updateDock({ dock, chosen: true });
       if (dock === 'window') openPopup();
       else closePopup();
     },

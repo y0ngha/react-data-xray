@@ -57,7 +57,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
   const portal = useOwnLayerPortal();
   // 앱 모달이 열리면 패널을 접는다(모달의 버튼을 가리지 않게).
-  const { collapsed, expand } = useCollapseForAppModal(open, settings.dock);
+  const { collapsed, expand, settings: panelSettings } = useCollapseForAppModal(open, settings);
 
   const startPicking = useCallback(() => {
     show();
@@ -101,7 +101,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const panel = (
     <Panel
-      settings={settings}
+      settings={panelSettings}
       buttonPosition={position}
       onResize={(patch) => updateDock(patch, { persist: false })}
       onResizeEnd={saveDock}
@@ -122,7 +122,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
           boxesVisible={boxesVisible}
           onToggleBoxes={() => setBoxesVisible((v) => !v)}
           wasteCount={scopedAnalysis.wasteCount}
-          dock={settings.dock}
+          dock={panelSettings.dock}
           onDock={changeDock}
           onClose={hide}
         />
