@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import { queryContextOf } from '../../core/capture/requestContext.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { prettyText, queryParamsOf, truncate, valueAt } from '../../shared/format.js';
 import { Button } from '../components/Button.js';
@@ -66,6 +67,19 @@ const RepeatInfo = ({ record }: { record: RequestRecord }) => (
   </div>
 );
 
+// 스택이 끊겨도 React Query 를 거쳤으면 어느 훅이 불렀는지 보여 주고, 아니면 모른다고 밝힌다.
+const QueryCaller = ({ record }: { record: RequestRecord }) => {
+  const query = useMemo(() => queryContextOf(record), [record]);
+  if (query)
+    return (
+      <Muted>
+        React Query {query.queryKey}
+        {query.observer && ` · ${query.observer}`}
+      </Muted>
+    );
+  return record.noAppFrame ? <Muted>보낸 앱 코드를 찾지 못했습니다(비동기 경계에서 스택이 끊김)</Muted> : null;
+};
+
 /** 요청 상세: 컴포넌트가 쓰는 데이터, 쓰는 컴포넌트, 보낸 코드, Query, 헤더, 본문 */
 export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord; focus?: Focus; onBack: () => void }) => (
   <div>
@@ -82,6 +96,7 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
     )}
     {record.trigger && <Muted>{TRIGGER_TEXT[record.trigger]}</Muted>}
     <ConsumerList record={record} />
+    <QueryCaller record={record} />
     {record.stack && <StackSection stack={record.sourceStack ?? record.stack} />}
     <Section title="Query">
       <KeyValues values={queryParamsOf(record.url)} />

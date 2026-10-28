@@ -1,7 +1,7 @@
 import { isLibraryFrame } from './libraryFrame.js';
 
 // 이름이 대문자로 시작해도 컴포넌트가 아닌 내장 객체 접두어
-const NOT_COMPONENT = /^(Object|Promise|Array|Function|Window|Module|XMLHttpRequest|Generator|AsyncFunction|Reflect|Proxy)$/;
+const NOT_COMPONENT = /^(Object|Promise|Array|Function|Window|Module|XMLHttpRequest|Generator|AsyncFunction|Reflect|Proxy|Timeout)$/;
 
 /** 스택 한 줄의 함수 이름. V8 "at A.m (url:1:2)"·"at async A (…)", Firefox·Safari "A@url:1:2". 이름 없는 줄은 undefined. */
 const functionOf = (line: string): string | undefined =>
@@ -19,3 +19,7 @@ export const componentOfStack = (stack: string | undefined): string | undefined 
     .filter((line) => !isLibraryFrame(line))
     .map((line) => functionOf(line)?.split('.')[0])
     .find((name): name is string => !!name && /^[A-Z]/.test(name) && !NOT_COMPONENT.test(name));
+
+/** 스택에 앱 코드 프레임(위치가 있고 라이브러리·Node 내부가 아닌 줄)이 하나라도 있는지. ky 의 타이머 경로처럼 비동기 경계에서 끊기면 false. */
+export const hasAppFrame = (stack: string | undefined): boolean =>
+  !!stack?.split('\n').some((line) => /:\d+:\d+\)?$/.test(line.trim()) && !isLibraryFrame(line) && !/\bnode:/.test(line));
