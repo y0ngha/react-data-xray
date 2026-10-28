@@ -16,6 +16,7 @@
 ## 코드
 
 - rdx 는 앱 경로(React commit, fetch/XHR, `res.json()`, `JSON.parse`)에서 참조만 담고, 분석은 `src/core/scheduler/idleQueue.ts`
-  의 큐에서 조각으로 한다. 큐는 사용자 조회(요소 클릭, 요청 상세, 보고서)에서만 비운다.
+  의 큐에서 조각으로 한다. 큐를 그 자리에서 비우는 곳은 사용자 조회(요소 클릭, 요청 상세, 보고서)와 페이지를 떠날 때 기록 저장,
+  보고서 저장 전 소스맵 대기뿐이다. 주기적으로 도는 화면은 그때까지 분석된 것만 보여 준다.
 - 린트 경고는 코드를 고쳐 없앤다. React 의 dev 필드처럼 바꿀 수 없는 이름은 `.oxlintrc.json` 의 허용 목록에 넣는다.
 - 명령과 규칙은 [CONTRIBUTING.md](./CONTRIBUTING.md), 설계 판단은 [docs/CONTEXT.md](./docs/CONTEXT.md).

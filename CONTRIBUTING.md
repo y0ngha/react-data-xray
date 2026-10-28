@@ -28,6 +28,7 @@ pnpm sync <앱 경로>  # 빌드해서 file: 로 연결한 앱의 node_modules �
 
 - 고치기 전에 템플릿으로 이슈를 만들고, PR 은 템플릿으로 열어 `Closes #번호` 로 그 이슈를 닫습니다. 이유와 순서는 [AGENTS.md](./AGENTS.md#이슈-먼저)에 있습니다.
 - 테스트는 각 폴더의 `__tests__` 에 둡니다. 테스트 안에서 시나리오용 컴포넌트를 그 자리에서 정의하는 것은 의도된 패턴이라, 테스트 폴더에서만 `unicorn/consistent-function-scoping` 을 끕니다(`.oxlintrc.json`).
+- 테스트는 act·마이크로태스크를 한 번씩 순서대로 기다리는 일이 많아(응답 → state → effect 를 한 바퀴씩), 테스트 폴더에서만 `no-await-in-loop` 를 끕니다(`.oxlintrc.json`).
 - 테스트 픽스처는 rdx 가 관찰할 `useEffect + fetch` 패턴을 일부러 재현하므로, react-doctor 의 `no-fetch-in-effect` 도 테스트 폴더에서만 끕니다(`doctor.config.json`).
 - react-doctor 는 공급망 검사(의존성 목록을 외부로 보냄)와 사용 통계 전송을 끄고 실행합니다.
 - 컴파일 대상은 ES2020 입니다. `toSorted`·`toReversed` 같은 ES2023 메서드는 폴리필 없이 오래된 브라우저에서 깨지므로 쓰지 않고, 복사한 배열에서만 `sort`·`reverse` 합니다.

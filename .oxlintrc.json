@@ -49,6 +49,7 @@
       ],
       "rules": {
         "unicorn/consistent-function-scoping": "off",
+        "no-await-in-loop": "off",
         "react/jsx-no-constructed-context-values": "off"
       }
     }

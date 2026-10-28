@@ -239,18 +239,17 @@ describe('렌더의 네트워크 원인', () => {
     function Notices() {
       const [items, setItems] = useState<Array<{ id: number }>>([]);
       const runs = useRef(0);
-      // 이 effect 가 채우는 state 를 의존성에 넣은 실수. 테스트가 끝나도록 6번에서 멈춘다.
+      // 이 effect 가 채우는 state 를 읽고 의존성에도 넣은 실수(받은 개수를 서버에 알린다). 테스트가 끝나도록 6번에서 멈춘다.
       useEffect(() => {
-        if (runs.current++ >= 6 || items.length > 100) return;
-        void fetch('/api/notices')
+        if (runs.current++ >= 6) return;
+        void fetch('/api/notices', { headers: { 'x-known-count': String(items.length) } })
           .then((r) => r.json())
           .then((json: typeof DEFAULT_BODY) => setItems(json.data.list.map((x) => ({ id: x.id }))));
       }, [items]);
       return <p>{items.length}</p>;
     }
     render(<Notices />);
-    // act 를 한 번씩 순서대로 돌린다(응답 → state → effect → 다시 요청을 8바퀴).
-    await Array.from({ length: 8 }).reduce<Promise<void>>((prev) => prev.then(() => act(flush)), Promise.resolve());
+    for (let i = 0; i < 8; i++) await act(flush);
     const notices = groupRenders(getTopRenders(200), 0).find((g) => g.name === 'Notices')!;
     expect(notices.causes[0].record.url).toBe('/api/notices');
     expect(notices.causes[0].timing).toBeGreaterThanOrEqual(5);

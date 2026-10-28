@@ -22,7 +22,8 @@ jobs:
             echo "::error::PR 본문은 .github/pull_request_template.md 템플릿으로 써 주세요."
             exit 1
           fi
-          if ! grep -Eiq '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' <<<"$BODY"; then
+          # GitHub 이 이슈를 닫는 형식: Closes #12, Closes: #12, Fixes owner/repo#12, Resolves https://github.com/owner/repo/issues/12
+          if ! grep -Eiq '\b(close[sd]?|fix(e[sd])?|resolve[sd]?):? +([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+|\b(close[sd]?|fix(e[sd])?|resolve[sd]?):? +https://github\.com/[^ ]+/issues/[0-9]+' <<<"$BODY"; then
             echo "::error::PR 이 닫을 이슈를 'Closes #번호' 로 적어 주세요. 이슈가 없으면 먼저 만듭니다."
             exit 1
           fi

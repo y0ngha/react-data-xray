@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   commit: null as null | (() => void),
   store: null as null | (() => void),
   version: 0,
+  records: [] as unknown[],
 }));
 vi.mock('react', async (orig) => {
   const actual = await orig<typeof import('react')>();
@@ -22,12 +23,13 @@ vi.mock('../useRenderMonitoring.js', () => ({ useRenderMonitoring: () => undefin
 vi.mock('../../../core/requests/store.js', () => ({
   subscribe: (f: () => void) => ((h.store = f), () => undefined),
   getStoreVersion: () => h.version,
+  getRecords: () => h.records,
 }));
 
 import { flushQueue } from '../../../core/scheduler/idleQueue.js';
 import { useNow } from '../useNow.js';
 import { useOverlayBoxes } from '../useOverlayBoxes.js';
-import { useRecordsVersion } from '../useRecordsVersion.js';
+import { useRecords } from '../useRecords.js';
 
 beforeEach(() => void flushQueue()); // setup 이 남긴 step 이 큐 머리에 있으면 이 파일의 step 이 안 돈다
 
@@ -38,36 +40,39 @@ afterEach(() => {
   h.tr.mockClear();
 });
 
-describe('records_version_transition', () => {
-  it('store 변경이 몰려도 rAF 한 번에 transition 으로 한 번 올린다', () => {
+describe('records_transition', () => {
+  it('store 변경이 몰려도 rAF 한 번에 transition 으로 한 번 새 복사본을 받는다', () => {
     vi.useFakeTimers();
     const raf = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => setTimeout(() => cb(0), 0) as unknown as number);
-    const { result } = renderHook(() => useRecordsVersion());
+    const { result } = renderHook(() => useRecords());
+    const first = result.current;
     act(() => {
       h.store?.();
       h.store?.();
       h.store?.();
     });
     expect(raf).toHaveBeenCalledTimes(1);
-    expect(result.current).toBe(0);
+    expect(result.current).toBe(first);
     act(() => void vi.runAllTimers());
-    expect(result.current).toBe(1);
+    expect(result.current).not.toBe(first);
     expect(h.tr).toHaveBeenCalledTimes(1);
   });
 });
 
-describe('records_version_gap', () => {
+describe('records_gap', () => {
   it('렌더와 구독 사이에 store 가 바뀌었으면 구독 직후 갱신한다', () => {
     vi.useFakeTimers();
     vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => setTimeout(() => cb(0), 0) as unknown as number);
     h.version = 0;
+    let first: unknown;
     const { result } = renderHook(() => {
-      const v = useRecordsVersion();
+      const records = useRecords();
+      first ??= records;
       h.version = 1; // 렌더 뒤 effect 전에 store 가 바뀐 것을 흉내 낸다
-      return v;
+      return records;
     });
     act(() => void vi.runAllTimers());
-    expect(result.current).toBe(1);
+    expect(result.current).not.toBe(first);
   });
 });
 

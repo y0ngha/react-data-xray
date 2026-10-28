@@ -28,12 +28,10 @@ describe('앱 경로는 분석하지 않고, 큐가 같은 결과를 낸다', ()
       const view = render(<Widget />);
       await act(async () => {
         // 타이머를 쓰면 한가한 틱의 큐가 먼저 돌 수 있어, 마이크로태스크로만 기다린다.
-        const untilLoaded = async (left: number): Promise<void> => {
-          if (left === 0 || body) return;
+        for (let i = 0; i < 50; i++) {
+          if (body) break;
           await Promise.resolve();
-          return untilLoaded(left - 1);
-        };
-        await untilLoaded(50);
+        }
       });
       expect(view.getByText('loaded')).toBeTruthy();
       expect(getOrigin(body!)).toBeUndefined();
