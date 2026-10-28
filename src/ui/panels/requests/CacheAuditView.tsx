@@ -25,7 +25,9 @@ export const CacheAuditView = ({ records }: { records: readonly RequestRecord[] 
           </Muted>
           {f.requests.length > 0 && <Muted>요청: {f.requests.join(' · ')}</Muted>}
           <div>{CACHE_FINDING_TEXT[f.kind].fix}</div>
-          {f.stack && <Muted>{f.stack.split('\n').slice(1, 3).join(' ')}</Muted>}
+          {f.stacks
+            ? f.stacks.map((st, i) => <Muted key={`${i ? '뒤' : '앞'}${st}`}>{`${i ? '뒤' : '앞'}: ${st.split('\n')[0]}`}</Muted>)
+            : f.stack && <Muted>{f.stack.split('\n').slice(1, 3).join(' ')}</Muted>}
         </div>
       ))}
     </div>

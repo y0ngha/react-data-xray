@@ -12,12 +12,19 @@ import type { Origin, RequestRecord } from '../requests/types.js';
  * - key-missing-param: 같은 queryKey 로 서로 다른 요청을 가져왔다 → 쿼리 함수가 쓰는 값(파라미터)이 키에 빠졌다
  * - invalidate-miss: invalidateQueries 에 준 키와 맞는 쿼리가 이 화면에서 지금까지 없었다 → 무효화가 빗나간다
  * - invalidate-unloaded: 무효화 키의 모양(앞 두 문자열)은 본 적 있지만 그 값의 쿼리는 아직 없다 → 정상(상속 범위 무효화 등), 한 줄로 묶어 회색으로 보인다
+ * - double-invalidate: 짧은 시간 안에 같은 쿼리를 덮는 무효화를 두 번 불렀다 → 뒤가 앞의 재조회를 취소해 같은 요청이 두 번 나간다
  * - stale-zero: staleTime 이 0 이라 화면을 옮길 때마다 같은 응답을 다시 받는다 → staleTime 을 늘린다
  *
  * 앞의 둘은 QueryCache 를 구독해 "쿼리 함수가 실제로 가져온" 성공만 기록한다(setQueryData·initialData 처럼 직접 넣은
  * 데이터는 요청이 아니다). 점검할 때 캐시를 훑기만 하면 그사이의 변경을 놓친다.
  */
-export type CacheFindingKind = 'duplicate-cache' | 'key-missing-param' | 'invalidate-miss' | 'invalidate-unloaded' | 'stale-zero';
+export type CacheFindingKind =
+  | 'duplicate-cache'
+  | 'key-missing-param'
+  | 'invalidate-miss'
+  | 'invalidate-unloaded'
+  | 'double-invalidate'
+  | 'stale-zero';
 
 export interface CacheFinding {
   kind: CacheFindingKind;
@@ -27,6 +34,8 @@ export interface CacheFinding {
   requests: string[];
   /** invalidate-miss: invalidateQueries 를 부른 코드 위치 */
   stack?: string;
+  /** double-invalidate: 겹친 두 무효화의 호출 위치(앞, 뒤) */
+  stacks?: string[];
   /** invalidate-*: 같은 호출 위치에서 묶인 무효화 키 수(keys 는 앞의 몇 개만 남긴다) */
   count?: number;
 }
@@ -99,6 +108,8 @@ interface ClientHistory {
   /** 지금까지 만든 쿼리 키(queryHash → queryKey, 무효화 미스 판정용) */
   keys: Map<string, unknown>;
   misses: Array<{ at: number; finding: CacheFinding }>;
+  /** 직전 무효화(겹침 판정용, 짧은 시간만 남긴다) */
+  recent: Array<{ at: number; key: unknown; stack?: string }>;
 }
 
 const MAX_KEYS = 2000;
@@ -220,9 +231,31 @@ const shapeOf = (key: unknown): string | undefined =>
     ? keyText(key.slice(0, SHAPE_LEN))
     : undefined;
 
+// 이 시간 안에 같은 쿼리를 덮는 무효화가 또 오면 겹친 것으로 본다(뒤의 무효화가 앞의 재조회를 취소한다).
+const OVERLAP_MS = 50;
+
+/** 앞 무효화와 같은 쿼리를 함께 덮으면 double-invalidate 로 남긴다 */
+const recordOverlap = (history: ClientHistory, key: unknown, seen: unknown[], at: number, stack: string | undefined): void => {
+  history.recent = history.recent.filter((r) => at - r.at <= OVERLAP_MS);
+  const first = history.recent.find((r) => seen.some((k) => partialMatch(r.key, k) && partialMatch(key, k)));
+  if (first)
+    pushBounded(history.misses, {
+      at,
+      finding: {
+        kind: 'double-invalidate',
+        keys: [keyText(first.key), keyText(key)],
+        requests: [],
+        stack,
+        stacks: [first.stack ?? '', stack ?? ''],
+      },
+    });
+  history.recent.push({ at, key, stack });
+};
+
 const recordInvalidate = (history: ClientHistory, args: unknown[]): void => {
   const key = invalidatedKey(args);
   const seen = [...history.keys.values()];
+  if (key !== undefined) recordOverlap(history, key, seen, Date.now(), callerStack());
   if (key === undefined || seen.some((k) => partialMatch(key, k))) return;
   const shape = shapeOf(key);
   const kind = shape !== undefined && seen.some((k) => shapeOf(k) === shape) ? 'invalidate-unloaded' : 'invalidate-miss';
@@ -256,7 +289,7 @@ const foldInvalidations = (findings: readonly CacheFinding[]): CacheFinding[] =>
 /** 처음 본 client 를 감시한다: 쿼리 성공을 기록하고, 무효화가 빗나가는지 본다. 원래 동작은 그대로 한다. */
 const watch = (client: QueryClientLike): void => {
   if (histories.has(client)) return;
-  const history: ClientHistory = { pending: [], fetched: [], keys: new Map(), misses: [] };
+  const history: ClientHistory = { pending: [], fetched: [], keys: new Map(), misses: [], recent: [] };
   histories.set(client, history);
   const cache = client.getQueryCache();
   // 찾기 전에 가져온 데이터: 같은 참조로 출처가 확실한 것만 기록으로 채운다(파생 매칭은 쓰지 않는다).
@@ -355,6 +388,15 @@ const staleFindings = (queries: readonly QueryLike[], sameResponse: ReadonlySet<
       : [];
   });
 
+// 뒤 무효화가 취소한 요청: 겹친 시각 부근에 에러로 끝난(취소) 요청
+const CANCEL_SLACK_MS = 1000;
+const cancelledBy = (at: number, records: readonly RequestRecord[]): RequestRecord[] =>
+  records.filter((r) => r.error && r.startedAt <= at && r.startedAt + r.durationMs >= at - CANCEL_SLACK_MS);
+
+/** 취소된 요청이 있으면 requests 에 원인과 함께 남긴다 */
+const withCancelled = (m: { at: number; finding: CacheFinding }, records: readonly RequestRecord[]): CacheFinding =>
+  Object.assign({}, m.finding, { requests: cancelledBy(m.at, records).map((r) => `${describeRequest(r)} (무효화가 겹쳐 취소됨)`) });
+
 /** 지금 점검한다. classOf 는 같은 응답 재요청 판정에 쓴다. */
 export const auditQueryCache = (
   classOf: (r: RequestRecord) => RequestClass,
@@ -379,7 +421,10 @@ export const auditQueryCache = (
     history.misses = history.misses.filter((m) => m.at >= from);
     const queries = client.getQueryCache().getAll();
     fetched.push(...history.fetched, ...currentFetched(queries, now));
-    others.push(...staleFindings(queries, sameResponse), ...history.misses.map((m) => m.finding));
+    others.push(
+      ...staleFindings(queries, sameResponse),
+      ...history.misses.map((m) => (m.finding.kind === 'double-invalidate' ? withCancelled(m, records) : m.finding)),
+    );
   });
   const findings = keyFindings(fetched).concat(others);
   // 같은 종류·키·요청은 하나로 합친다(같은 키를 여러 번 무효화한 경우 등).
@@ -405,6 +450,10 @@ export const CACHE_FINDING_TEXT: Record<CacheFindingKind, { title: string; fix: 
   'invalidate-unloaded': {
     title: '아직 불러오지 않은 키를 무효화했습니다',
     fix: '같은 모양(앞 두 요소)의 쿼리는 있었고 이 값의 쿼리만 아직 없습니다. 상속 범위 무효화 같은 정상 동작이라 고칠 것은 없습니다.',
+  },
+  'double-invalidate': {
+    title: '같은 쿼리를 겹쳐 무효화했습니다',
+    fix: '넓은 무효화가 좁은 무효화를 덮습니다. 한쪽만 남기세요. 뒤의 무효화가 앞의 재조회를 취소하고 다시 받아 같은 요청이 두 번 나갑니다.',
   },
   'stale-zero': {
     title: 'staleTime 이 0 이라 같은 응답을 다시 받습니다',
