@@ -26,8 +26,20 @@ const post = (query: string, body = '{}', headers: Record<string, string> = {}) 
 
 describe('보고서 쓰기 보안', () => {
   it('path_traversal_rejected: tab/name 의 경로 글자는 400 이고 .rdx 밖에 쓰지 않는다', async () => {
-    for (const q of ['tab=..%2Fx', 'tab=%2e%2e', 'tab=a%00b', 'tab=a%5Cb', 'tab=%2Fetc', 'tab=index', 'name=..%2Fx', 'name=a%00', 'name=%2fabs', 'name=.gitignore', 'name=REPORT']) {
-      expect((await post(q)).status, q).toBe(400);
+    for (const q of [
+      'tab=..%2Fx',
+      'tab=%2e%2e',
+      'tab=a%00b',
+      'tab=a%5Cb',
+      'tab=%2Fetc',
+      'tab=index',
+      'name=..%2Fx',
+      'name=a%00',
+      'name=%2fabs',
+      'name=.gitignore',
+      'name=REPORT',
+    ]) {
+      expect({ q, status: (await post(q)).status }).toEqual({ q, status: 400 });
     }
     expect(await readdir(root)).toEqual([]);
   });

@@ -110,7 +110,7 @@ const readIndex = async (file: string): Promise<TabEntry[]> => {
     const list: unknown = JSON.parse(await readFile(file, 'utf8'));
     // 손상·조작된 항목(null, 숫자 아닌 시각, 잘못된 id)이 있어도 탭 저장이 계속 실패하지 않게 걸러 낸다.
     return Array.isArray(list)
-      ? (list as TabEntry[]).filter((t) => typeof t === "object" && t !== null && typeof t.id === "string" && Number.isFinite(t.updatedAt))
+      ? (list as TabEntry[]).filter((t) => typeof t === 'object' && t !== null && typeof t.id === 'string' && Number.isFinite(t.updatedAt))
       : [];
   } catch {
     return [];
@@ -125,10 +125,11 @@ const updateTabIndex = (folder: string, entry: TabEntry): Promise<unknown> => {
     const now = entry.updatedAt;
     const all = [...(await readIndex(indexFile)).filter((t) => t.id !== entry.id), entry];
     const stale = all.filter((t) => now - t.updatedAt > TAB_STALE_MS && isTabId(t.id) && t.id !== TABS_INDEX);
+    const staleSet = new Set(stale);
     await Promise.all(stale.map((t) => unlink(join(folder, reportFileFor(t.id))).catch(() => undefined)));
     await writeJson(
       indexFile,
-      all.filter((t) => !stale.includes(t)).sort((a, b) => b.updatedAt - a.updatedAt),
+      all.filter((t) => !staleSet.has(t)).sort((a, b) => b.updatedAt - a.updatedAt),
     );
   };
   indexQueue = indexQueue.then(run, run);
