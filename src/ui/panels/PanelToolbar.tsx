@@ -3,6 +3,7 @@ import { TabGroup } from '../components/TabGroup.js';
 import type { Dock } from '../hooks/useDockSettings.js';
 import { color } from '../theme.js';
 import { DockPicker } from './DockPicker.js';
+import { TabReportButton } from './TabReportButton.js';
 import { TAB_GROUPS, type Tab } from './tabs.js';
 
 interface PanelToolbarProps {
@@ -59,6 +60,7 @@ export const PanelToolbar = (props: PanelToolbarProps) => (
       )}
     </TabGroup>
     <span style={{ width: 8 }} />
+    <TabReportButton />
     <DockPicker dock={props.dock} onChange={props.onDock} />
     <Button onClick={props.onClose} title="닫기">
       ✕

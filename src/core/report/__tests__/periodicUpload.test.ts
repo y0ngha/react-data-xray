@@ -13,7 +13,9 @@ it('주기 업로드는 미뤄 둔 분석을 기다리지 않고, 사용자가 �
     enqueue(() => (ran = true));
     installReportApi();
     await vi.advanceTimersByTimeAsync(0);
-    expect(mockFetch.mock.calls.some(([input, init]) => input === REPORT_PATH && init?.method === 'POST')).toBe(true);
+    expect(mockFetch.mock.calls.some(([input, init]) => String(input).startsWith(`${REPORT_PATH}?tab=`) && init?.method === 'POST')).toBe(
+      true,
+    );
     expect(ran).toBe(false);
     expect(isQueuePending()).toBe(true);
     window.__RDX__!.report();

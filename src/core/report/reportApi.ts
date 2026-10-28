@@ -1,12 +1,26 @@
-import { isReportName, REPORT_HEADER, REPORT_PATH } from '../../shared/reportPath.js';
+import { isReportName, REPORT_HEADER, REPORT_PATH, reportFileFor, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
 import { getNativeFetch } from '../capture/nativeFetch.js';
 import { whenSourcesResolved } from '../capture/requestContext.js';
 import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../render/monitor.js';
 import { resetCacheAudit } from '../reactQuery/cacheAudit.js';
+import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { buildReport, type RdxReport } from './buildReport.js';
 
 const UPLOAD_MS = 5000;
+const TAB_ID_KEY = 'rdx:tabId';
+
+/** 이 탭의 id. 새로고침해도 같고(sessionStorage), 새 탭은 새로 만든다. */
+export const getTabId = (): string => {
+  const saved = readStored<string>(TAB_ID_KEY, (v) => (typeof v === 'string' && /^[\w-]{1,64}$/.test(v) ? v : undefined), '', 'session');
+  if (saved) return saved;
+  const id = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+  writeStored(TAB_ID_KEY, id, 'session');
+  return id;
+};
+
+/** 이 탭 보고서의 dev 서버 쪽 경로(프로젝트 루트 기준) */
+export const tabReportPath = (dir = '.rdx'): string => `${dir}/${reportFileFor(getTabId())}`;
 
 /** 브라우저 도구를 쓰는 AI·개발자가 부르는 창구 */
 export interface RdxApi {
@@ -111,14 +125,19 @@ const startUpload = async (): Promise<void> => {
   if ((await endpoint) !== 'ready') return;
   keepRenderMonitoring();
   let last = '';
+  let lastSent = 0;
   let failures = 0;
   let timer = 0;
   const upload = async () => {
     const { generatedAt, ...content } = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
     const key = JSON.stringify(content);
-    if (key === last) return;
+    const idle = key === last;
+    // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
+    if (idle && Date.now() - lastSent < TAB_HEARTBEAT_MS) return;
     const body = JSON.stringify({ generatedAt, ...content });
-    const res = await send(REPORT_PATH, {
+    const query = new URLSearchParams({ tab: getTabId(), path: location.pathname, title: document.title });
+    if (idle) query.set('idle', '1');
+    const res = await send(`${REPORT_PATH}?${query}`, {
       method: 'POST',
       credentials: 'omit',
       headers: { 'content-type': 'application/json' },
@@ -126,6 +145,7 @@ const startUpload = async (): Promise<void> => {
     }).catch(() => null);
     if (res?.ok) {
       last = key;
+      lastSent = Date.now();
       failures = 0;
       return;
     }

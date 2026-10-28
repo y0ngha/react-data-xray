@@ -1,9 +1,26 @@
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 
-import { DEFAULT_REPORT_NAME, isReportName, REPORT_HEADER, REPORT_PATH } from '../shared/reportPath.js';
+import {
+  DEFAULT_REPORT_NAME,
+  isReportName,
+  isTabId,
+  REPORT_HEADER,
+  REPORT_PATH,
+  reportFileFor,
+  TAB_STALE_MS,
+  TABS_INDEX,
+} from '../shared/reportPath.js';
+
+interface TabEntry {
+  id: string;
+  path: string;
+  title: string;
+  updatedAt: number;
+  file: string;
+}
 
 const MAX_BYTES = 5 * 1024 * 1024;
 // 동시에 들어온 보고서가 같은 임시 파일 이름을 쓰지 않게 붙이는 순번
@@ -78,6 +95,43 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on('error', reject);
   });
 
+// 탭 목록은 읽고 고쳐 쓰므로 한 번에 하나씩 처리한다.
+let indexQueue: Promise<unknown> = Promise.resolve();
+
+const writeJson = async (file: string, value: unknown): Promise<void> => {
+  // 임시 파일에 쓰고 이름을 바꾼다. 탭 여러 개가 동시에 보내거나 AI 가 읽는 도중이어도 잘린 JSON 을 보지 않는다.
+  const temp = `${file}.${process.pid}.${writeSeq++}.tmp`;
+  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`);
+  await rename(temp, file);
+};
+
+const readIndex = async (file: string): Promise<TabEntry[]> => {
+  try {
+    const list: unknown = JSON.parse(await readFile(file, 'utf8'));
+    return Array.isArray(list) ? (list as TabEntry[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+/** 탭 목록을 갱신하고, 오래 갱신이 없는 탭(닫힌 탭)의 파일은 지운다. */
+const updateTabIndex = (folder: string, entry: TabEntry): Promise<unknown> => {
+  const run = async () => {
+    const dir = join(folder, 'tabs');
+    const indexFile = join(dir, `${TABS_INDEX}.json`);
+    const now = entry.updatedAt;
+    const all = [...(await readIndex(indexFile)).filter((t) => t.id !== entry.id), entry];
+    const stale = all.filter((t) => now - t.updatedAt > TAB_STALE_MS && isTabId(t.id) && t.id !== TABS_INDEX);
+    await Promise.all(stale.map((t) => unlink(join(folder, reportFileFor(t.id))).catch(() => undefined)));
+    await writeJson(
+      indexFile,
+      all.filter((t) => !stale.includes(t)).sort((a, b) => b.updatedAt - a.updatedAt),
+    );
+  };
+  indexQueue = indexQueue.then(run, run);
+  return indexQueue;
+};
+
 const reply = (res: ServerResponse, status: number): void => {
   res.statusCode = status;
   res.end();
@@ -103,16 +157,30 @@ export const rdxReportMiddleware = (root = process.cwd(), { dir = '.rdx', allowe
     // window.__RDX__.snapshot(이름) 은 ?name= 으로 따로 저장한다. 파일 이름이 되므로 경로를 만들 수 있는 글자는 받지 않는다.
     const name = new URL(req.url ?? '', 'http://x').searchParams.get('name');
     if (name !== null && !isReportName(name)) return reply(res, 400);
+    const query = new URL(req.url ?? '', 'http://x').searchParams;
+    const tab = query.get('tab');
+    if (tab !== null && (!isTabId(tab) || tab === TABS_INDEX || name !== null)) return reply(res, 400);
     readBody(req)
       .then(async (text) => {
         const report: unknown = JSON.parse(text);
         await mkdir(folder, { recursive: true });
         // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다. 이미 있으면 그대로 둔다.
         await writeFile(join(folder, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined);
-        // 임시 파일에 쓰고 이름을 바꾼다. 탭 여러 개가 동시에 보내거나 AI 가 읽는 도중이어도 잘린 JSON 을 보지 않는다.
-        const temp = join(folder, `report.json.${process.pid}.${writeSeq++}.tmp`);
-        await writeFile(temp, `${JSON.stringify(report, null, 2)}\n`);
-        await rename(temp, join(folder, `${name ?? DEFAULT_REPORT_NAME}.json`));
+        if (tab !== null && typeof report === 'object' && report !== null) {
+          const entry: TabEntry = {
+            id: tab,
+            path: (query.get('path') ?? '').slice(0, 300),
+            title: (query.get('title') ?? '').slice(0, 200),
+            updatedAt: Date.now(),
+            file: reportFileFor(tab),
+          };
+          await mkdir(join(folder, 'tabs'), { recursive: true });
+          await writeJson(join(folder, entry.file), { tab: entry, ...report });
+          await updateTabIndex(folder, entry);
+          // 열려 있다는 알림만이면 "가장 최근에 바뀐 탭"을 바꾸지 않는다.
+          if (query.get('idle') === '1') return reply(res, 204);
+        }
+        await writeJson(join(folder, `${name ?? DEFAULT_REPORT_NAME}.json`), report);
         reply(res, 204);
       })
       .catch(() => reply(res, 400));
