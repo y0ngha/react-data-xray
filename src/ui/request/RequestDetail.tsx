@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 
 import { queryContextOf } from '../../core/capture/requestContext.js';
+import { followUps } from '../../core/requests/followUps.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { prettyText, queryParamsOf, truncate, valueAt } from '../../shared/format.js';
 import { Button } from '../components/Button.js';
@@ -80,6 +81,24 @@ const QueryCaller = ({ record }: { record: RequestRecord }) => {
   return record.noAppFrame ? <Muted>보낸 앱 코드를 찾지 못했습니다(비동기 경계에서 스택이 끊김)</Muted> : null;
 };
 
+// 변경 요청 뒤 1초 안에 다시 나간 조회. 근거는 시간 근접이고, React Query 면 queryKey 를 덧붙인다.
+const FollowUps = ({ record }: { record: RequestRecord }) => {
+  const list = useMemo(() => followUps(record, undefined, (r) => queryContextOf(r)?.queryKey), [record]);
+  if (!list.length) return null;
+  return (
+    <Section title="이 요청 뒤에 다시 받은 요청 (1초 안, 시간 근접)">
+      {list.map((f) => (
+        <div key={f.endpoint}>
+          {f.endpoint} ×{f.count}
+          {f.queryKey && <Muted>React Query {f.queryKey}</Muted>}
+          {f.sameResponse > 0 && <Muted>같은 응답 {f.sameResponse}건(무효화 범위가 넓을 수 있음)</Muted>}
+          {f.periodic && <Muted>주기 요청(변경과 무관할 수 있음)</Muted>}
+        </div>
+      ))}
+    </Section>
+  );
+};
+
 /** 요청 상세: 컴포넌트가 쓰는 데이터, 쓰는 컴포넌트, 보낸 코드, Query, 헤더, 본문 */
 export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord; focus?: Focus; onBack: () => void }) => (
   <div>
@@ -97,6 +116,7 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
     {record.trigger && <Muted>{TRIGGER_TEXT[record.trigger]}</Muted>}
     <ConsumerList record={record} />
     <QueryCaller record={record} />
+    <FollowUps record={record} />
     {record.stack && <StackSection stack={record.sourceStack ?? record.stack} />}
     <Section title="Query">
       <KeyValues values={queryParamsOf(record.url)} />
