@@ -1,5 +1,5 @@
 import { groupBy } from '../../shared/collections.js';
-import { refetchReason } from '../reactQuery/cacheAudit.js';
+import { pinnedRefetchReason } from '../reactQuery/refetchReason.js';
 import { endpointOf, requestKeyOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
@@ -58,7 +58,7 @@ export const isPeriodic = (starts: number[]): boolean => {
   return typical >= PERIODIC_MIN_INTERVAL_MS && intervals.every((d) => Math.abs(d - typical) <= typical * PERIODIC_TOLERANCE);
 };
 
-const isAborted = (record: RequestRecord | undefined): boolean => !!record?.error && /abort/i.test(record.error);
+export const isAborted = (record: RequestRecord | undefined): boolean => !!record?.error && /abort/i.test(record.error);
 
 /** 주기 판정은 같은 페이지 로드 안에서만 한다. 새로고침 앞뒤를 한 줄로 보면 그 사이 간격 때문에 주기가 깨진다. */
 const periodicKeyOf = (r: RequestRecord): string => `${r.load ?? 0}|${requestKeyOf(r)}`;
@@ -85,7 +85,8 @@ interface ClassifyContext {
 const classifyOne = (r: RequestRecord, { byId, periodicKeys, ignoredEndpoints }: ClassifyContext): RequestClass => {
   // 새로고침 전 기록과 같은 응답은 캐시가 비어 당연히 받은 요청이라 낭비가 아니다(다른 페이지 로드의 기록과 비교한 것).
   const sameAs = r.sameResponseAs === undefined ? undefined : byId.get(r.sameResponseAs);
-  const crossLoad = !!sameAs && (!!sameAs.restored || (sameAs.load ?? 0) !== (r.load ?? 0));
+  // restored 만으로는 가르지 않는다: 같은 이전 로드 안의 같은 응답 낭비까지 지워진다. 로드 번호가 다른 것만 경계다.
+  const crossLoad = !!sameAs && (sameAs.load ?? 0) !== (r.load ?? 0);
   const flagged = !!(r.duplicateOf || (r.sameResponseAs && !crossLoad));
   if (!flagged) return 'ok';
   if (ignoredEndpoints.has(endpointOf(r))) return 'ignored';
@@ -98,8 +99,8 @@ const classifyOne = (r: RequestRecord, { byId, periodicKeys, ignoredEndpoints }:
   if (!r.duplicateOf && r.trigger === 'focus') return 'focus-refetch';
   if (!r.duplicateOf && r.trigger === 'reconnect') return 'reconnect-refetch';
   if (r.duplicateOf) return 'duplicate';
-  // React Query 의 재조회면 원인으로 나눈다. staleTime 0 의 반복은 빨강 그대로다(고칠 대상).
-  const reason = refetchReason(r);
+  // React Query 의 재조회면 원인으로 나눈다. staleTime 0 의 반복은 빨강 그대로다(고칠 대상). 원인은 유휴 큐가 고정해 둔 값만 읽는다.
+  const reason = pinnedRefetchReason(r);
   return reason === 'stale-elapsed' || reason === 'after-invalidate' ? reason : 'same-response';
 };
 

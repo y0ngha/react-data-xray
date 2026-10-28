@@ -46,8 +46,14 @@ describe('React Query 캐시키 점검', () => {
       fetch(url)
         .then((r) => r.json())
         .then((j) => structuredClone(j));
-    await client.fetchQuery({ queryKey: ['list'], queryFn: queryFn('/api/list?page=1') });
-    await client.fetchQuery({ queryKey: ['list'], queryFn: queryFn('/api/list?page=2') });
+    await client.fetchQuery({
+      queryKey: ['list'],
+      queryFn: queryFn('/api/list?page=1'),
+    });
+    await client.fetchQuery({
+      queryKey: ['list'],
+      queryFn: queryFn('/api/list?page=2'),
+    });
     flushQueue();
     let hold = true;
     enqueue(() => !hold); // 색인을 붙잡아 두어, 점검마다 못 찾은 채 큐가 남게 한다
@@ -71,7 +77,10 @@ describe('React Query 캐시키 점검', () => {
     await screen.findByText('a');
     await screen.findByText('b');
     const found = audit(sameOrOk, getRecords()).find((f) => f.kind === 'duplicate-cache');
-    expect(found).toMatchObject({ keys: expect.arrayContaining(['["users"]', '["members"]']), requests: ['GET /api/users'] });
+    expect(found).toMatchObject({
+      keys: expect.arrayContaining(['["users"]', '["members"]']),
+      requests: ['GET /api/users'],
+    });
   });
 
   it('같은 키에 다른 요청의 데이터가 들어오면 키에 파라미터가 빠졌다고 알린다', async () => {
@@ -79,9 +88,15 @@ describe('React Query 캐시키 점검', () => {
     mockFetch.mockImplementation(async (input) => jsonResponse({ page: String(input), size: 20, total: 100 }));
     const client = new QueryClient();
     withClient(client, <p>app</p>);
-    await client.fetchQuery({ queryKey: ['list'], queryFn: load('/api/list?page=1') });
+    await client.fetchQuery({
+      queryKey: ['list'],
+      queryFn: load('/api/list?page=1'),
+    });
     audit(sameOrOk, getRecords());
-    await client.fetchQuery({ queryKey: ['list'], queryFn: load('/api/list?page=2') });
+    await client.fetchQuery({
+      queryKey: ['list'],
+      queryFn: load('/api/list?page=2'),
+    });
     const found = audit(sameOrOk, getRecords()).find((f) => f.kind === 'key-missing-param');
     expect(found?.requests).toEqual(['GET /api/list?page=1', 'GET /api/list?page=2']);
   });
@@ -92,15 +107,29 @@ describe('React Query 캐시키 점검', () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
     findQueryClients();
-    await client.fetchQuery({ queryKey: ['search'], queryFn: load('/api/search?q=aapl'), staleTime: 0 });
-    await client.fetchQuery({ queryKey: ['search'], queryFn: load('/api/search?q=msft'), staleTime: 0 });
+    await client.fetchQuery({
+      queryKey: ['search'],
+      queryFn: load('/api/search?q=aapl'),
+      staleTime: 0,
+    });
+    await client.fetchQuery({
+      queryKey: ['search'],
+      queryFn: load('/api/search?q=msft'),
+      staleTime: 0,
+    });
     const found = audit(sameOrOk, getRecords()).find((f) => f.kind === 'key-missing-param');
     expect(found?.requests).toEqual(['GET /api/search?q=aapl', 'GET /api/search?q=msft']);
   });
 
   it('본문이 다른 POST 는 다른 요청으로, 읽을 수 없는 본문은 점검에서 뺀다', async () => {
     // 조회마다 다른 데이터(같으면 structural sharing 이 이전 객체를 그대로 둔다)
-    mockFetch.mockImplementation(async (_input, init) => jsonResponse({ query: String(init?.body ?? 'stream'), size: 20, total: 100 }));
+    mockFetch.mockImplementation(async (_input, init) =>
+      jsonResponse({
+        query: String(init?.body ?? 'stream'),
+        size: 20,
+        total: 100,
+      }),
+    );
     const client = new QueryClient();
     withClient(client, <p>app</p>);
     findQueryClients();
@@ -109,9 +138,20 @@ describe('React Query 캐시키 점검', () => {
     await client.fetchQuery({ queryKey: ['gql'], queryFn: post('{"q":2}') });
     // Request 객체의 본문은 읽을 수 없다. 키를 제대로 나눴어도 같은 요청으로 보이면 안 된다.
     const unreadable = (q: number) => () =>
-      fetch(new Request('http://localhost/api/search', { method: 'POST', body: `{"q":${q}}` })).then((r) => r.json());
-    await client.fetchQuery({ queryKey: ['search', 1], queryFn: unreadable(1) });
-    await client.fetchQuery({ queryKey: ['search', 2], queryFn: unreadable(2) });
+      fetch(
+        new Request('http://localhost/api/search', {
+          method: 'POST',
+          body: `{"q":${q}}`,
+        }),
+      ).then((r) => r.json());
+    await client.fetchQuery({
+      queryKey: ['search', 1],
+      queryFn: unreadable(1),
+    });
+    await client.fetchQuery({
+      queryKey: ['search', 2],
+      queryFn: unreadable(2),
+    });
     const findings = audit(sameOrOk, getRecords());
     expect(findings.find((f) => f.kind === 'key-missing-param')?.requests).toEqual(['POST /api/graphql']);
     expect(findings.filter((f) => f.kind === 'duplicate-cache')).toEqual([]);
@@ -120,10 +160,16 @@ describe('React Query 캐시키 점검', () => {
   it('setQueryData 로 직접 넣은 데이터는 요청으로 세지 않는다(수정 응답으로 캐시를 갱신하는 정상 패턴)', async () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
-    await client.fetchQuery({ queryKey: ['todo', 1], queryFn: load('/api/todos/1') });
+    await client.fetchQuery({
+      queryKey: ['todo', 1],
+      queryFn: load('/api/todos/1'),
+    });
     audit(sameOrOk, getRecords());
     mockFetch.mockImplementationOnce(async () => jsonResponse({ id: 1, title: 'updated', done: true }));
-    const updated = await fetch('/api/todos/1', { method: 'PUT', body: '{}' }).then((r) => r.json());
+    const updated = await fetch('/api/todos/1', {
+      method: 'PUT',
+      body: '{}',
+    }).then((r) => r.json());
     client.setQueryData(['todo', 1], updated);
     expect(audit(sameOrOk, getRecords()).filter((f) => f.kind === 'key-missing-param')).toEqual([]);
   });
@@ -132,7 +178,10 @@ describe('React Query 캐시키 점검', () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
     findQueryClients();
-    await client.fetchQuery({ queryKey: ['reports', 7], queryFn: load('/api/reports/7') });
+    await client.fetchQuery({
+      queryKey: ['reports', 7],
+      queryFn: load('/api/reports/7'),
+    });
     client.removeQueries({ queryKey: ['reports'] });
     await client.invalidateQueries({ queryKey: ['reports'] });
     expect(audit(sameOrOk, getRecords()).filter((f) => f.kind === 'invalidate-miss')).toEqual([]);
@@ -142,9 +191,14 @@ describe('React Query 캐시키 점검', () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
     findQueryClients();
-    await client.fetchQuery({ queryKey: ['todos', { status: 'done', page: 1 }], queryFn: load('/api/todos?status=done&page=1') });
+    await client.fetchQuery({
+      queryKey: ['todos', { status: 'done', page: 1 }],
+      queryFn: load('/api/todos?status=done&page=1'),
+    });
     await client.invalidateQueries({ queryKey: ['todos', { status: 'done' }] });
-    await client.invalidateQueries({ queryKey: ['todos', { page: 1, status: 'done' }] });
+    await client.invalidateQueries({
+      queryKey: ['todos', { page: 1, status: 'done' }],
+    });
     await client.invalidateQueries({ queryKey: ['todos', { status: 'open' }] });
     expect(
       audit(sameOrOk, getRecords())
@@ -156,7 +210,10 @@ describe('React Query 캐시키 점검', () => {
   it('무효화한 키와 맞는 쿼리가 없으면 부른 위치와 함께 알리고, 무효화는 그대로 한다', async () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
-    await client.fetchQuery({ queryKey: ['todos', 1], queryFn: load('/api/todos/1') });
+    await client.fetchQuery({
+      queryKey: ['todos', 1],
+      queryFn: load('/api/todos/1'),
+    });
     expect(findQueryClients()).toContain(client);
     await client.invalidateQueries({ queryKey: ['todo'] });
     await client.invalidateQueries({ queryKey: ['todos'] });

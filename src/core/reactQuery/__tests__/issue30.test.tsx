@@ -6,9 +6,10 @@ import { flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { buildReactQuerySection } from '../../report/reactQuerySection.js';
 import { getRecords } from '../../requests/store.js';
 import type { RequestRecord } from '../../requests/types.js';
-import { fetchCause, findQueryClients, overlapCancelOf } from '../cacheAudit.js';
+import { fetchCauseDetail, findQueryClients, overlapCancelOf } from '../cacheAudit.js';
 import { describeFetchCause } from '../fetchCause.js';
 
+const fetchCause = (r: RequestRecord) => fetchCauseDetail(r)?.cause;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let n = 0;
 
@@ -82,10 +83,32 @@ describe('이슈 30: fetch 원인', () => {
     expect(fetchCause(await lastRequest())).toBe('mount');
   });
 
+  it('key-change: 이미 붙은 관찰자의 queryKey 가 바뀌면 mount 가 아니라 key-change', async () => {
+    const { client, key, queryFn, lastRequest, watch } = setup();
+    watch();
+    const a = [...key, 'a'];
+    const b = [...key, 'b'];
+    await client.fetchQuery({ queryKey: b, queryFn });
+    const o = new QueryObserver(client, {
+      queryKey: a,
+      queryFn,
+      staleTime: 60_000,
+    });
+    o.subscribe(() => {});
+    await sleep(20);
+    o.setOptions({ queryKey: b, queryFn, staleTime: 0 });
+    await sleep(20);
+    expect(fetchCause(await lastRequest())).toBe('key-change');
+  });
+
   it('invalidate: 무효화로 다시 받으면 invalidate', async () => {
     const { client, key, queryFn, lastRequest, watch } = setup();
     watch();
-    new QueryObserver(client, { queryKey: key, queryFn, staleTime: 60_000 }).subscribe(() => {});
+    new QueryObserver(client, {
+      queryKey: key,
+      queryFn,
+      staleTime: 60_000,
+    }).subscribe(() => {});
     await sleep(20);
     await client.invalidateQueries({ queryKey: key });
     expect(fetchCause(await lastRequest())).toBe('invalidate');
@@ -94,7 +117,12 @@ describe('이슈 30: fetch 원인', () => {
   it('interval: refetchInterval 로 다시 받으면 interval', async () => {
     const { client, key, queryFn, lastRequest, watch } = setup();
     watch();
-    const o = new QueryObserver(client, { queryKey: key, queryFn, staleTime: 60_000, refetchInterval: 30 });
+    const o = new QueryObserver(client, {
+      queryKey: key,
+      queryFn,
+      staleTime: 60_000,
+      refetchInterval: 30,
+    });
     const off = o.subscribe(() => {});
     await sleep(90);
     off();
@@ -104,7 +132,11 @@ describe('이슈 30: fetch 원인', () => {
   it('원인을 맞추지 못한 요청(수동 refetch)은 manual 로 단정하지 않고 undefined', async () => {
     const { client, key, queryFn, lastRequest, watch } = setup();
     watch();
-    const o = new QueryObserver(client, { queryKey: key, queryFn, staleTime: 60_000 });
+    const o = new QueryObserver(client, {
+      queryKey: key,
+      queryFn,
+      staleTime: 60_000,
+    });
     o.subscribe(() => {});
     await sleep(20);
     await o.refetch();
@@ -123,12 +155,25 @@ describe('이슈 30: 겹친 무효화로 취소된 요청', () => {
   it('overlapCancelOf: 취소된 요청에 두 무효화의 호출 위치가 나온다', async () => {
     const { client, key, queryFn, watch } = setup();
     watch();
-    await client.fetchQuery({ queryKey: [...key, 1], queryFn });
+    new QueryObserver(client, {
+      queryKey: [...key, 1],
+      queryFn,
+      staleTime: 60_000,
+    }).subscribe(() => {});
+    await sleep(20);
     await Promise.all([client.invalidateQueries({ queryKey: [...key, 1] }), client.invalidateQueries({ queryKey: key })]);
-    const cancelled = { id: 99999, error: 'aborted', startedAt: Date.now() - 20, durationMs: 15 } as RequestRecord;
-    const stacks = overlapCancelOf(cancelled);
-    expect(stacks).toHaveLength(2);
+    // 두 번째 무효화 시각에 진행 중이다가 abort 로 끝난 요청
+    const cancelled = {
+      id: 99999,
+      error: 'The operation was aborted',
+      startedAt: Date.now() - 20,
+      durationMs: 40,
+    } as RequestRecord;
+    expect(overlapCancelOf(cancelled)).toHaveLength(2);
     expect(overlapCancelOf({ ...cancelled, error: undefined })).toBeUndefined();
+    // abort 가 아닌 오류, 무효화 전에 이미 끝난 요청은 취소가 아니다
+    expect(overlapCancelOf({ ...cancelled, error: 'Failed to fetch' })).toBeUndefined();
+    expect(overlapCancelOf({ ...cancelled, durationMs: 5 })).toBeUndefined();
   });
 });
 
@@ -140,7 +185,11 @@ describe('이슈 30: 보고서 fetchCauses', () => {
     const r = await lastRequest();
     const section = buildReactQuerySection([r], new Map([[r.id, 'ok' as const]]));
     expect(section.fetchCauses).toHaveLength(1);
-    expect(section.fetchCauses?.[0]).toMatchObject({ cause: 'initial', count: 1, queryKey: JSON.stringify(key) });
+    expect(section.fetchCauses?.[0]).toMatchObject({
+      cause: 'initial',
+      count: 1,
+      queryKey: JSON.stringify(key),
+    });
     expect(section.fetchCauses?.[0].fix).toBeUndefined();
   });
 });

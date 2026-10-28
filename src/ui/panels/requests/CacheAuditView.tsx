@@ -18,10 +18,16 @@ export const CacheAuditView = ({ records }: { records: readonly RequestRecord[] 
     <div>
       {findings.map((f) => (
         <div key={findingId(f)} style={rowStyle}>
-          <div style={{ color: f.kind === 'invalidate-unloaded' ? color.muted : color.warn }}>{CACHE_FINDING_TEXT[f.kind].title}</div>
+          <div
+            style={{
+              color: f.kind === 'invalidate-unloaded' ? color.muted : color.warn,
+            }}
+          >
+            {CACHE_FINDING_TEXT[f.kind].title}
+          </div>
           <Muted>
             queryKey: {f.keys.join(' · ')}
-            {f.count ? ` · 키 ${f.count}개` : ''}
+            {f.count ? (f.kind === 'double-invalidate' ? ` · ${f.count}회` : ` · 키 ${f.count}개`) : ''}
           </Muted>
           {f.requests.length > 0 && <Muted>요청: {f.requests.join(' · ')}</Muted>}
           <div>{CACHE_FINDING_TEXT[f.kind].fix}</div>

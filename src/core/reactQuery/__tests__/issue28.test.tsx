@@ -23,7 +23,11 @@ const setup = () => {
   // 테스트마다 다른 URL 이라 앞선 테스트의 요청과 섞이지 않는다.
   const url = `/api/t28-${++n}`;
   const fetchOnce = (staleTime: number, key: unknown[] = ['t28', n]) =>
-    client.fetchQuery({ queryKey: key, staleTime, queryFn: () => fetch(url).then((r) => r.json()) });
+    client.fetchQuery({
+      queryKey: key,
+      staleTime,
+      queryFn: () => fetch(url).then((r) => r.json()),
+    });
   const last = async (): Promise<RequestRecord> => {
     await flush();
     const record = getRecords().find((r) => r.url === url && r.sameResponseAs !== undefined) ?? getRecords().find((r) => r.url === url)!;
@@ -49,7 +53,12 @@ describe('이슈 28: 의도된 재조회 구분', () => {
     const { client, fetchOnce, last } = setup();
     // 관찰자(staleTime 0)가 있어야 "화면을 옮길 때마다 받는" 쿼리로 본다.
     const key = ['t28', n];
-    new QueryObserver(client, { queryKey: key, enabled: false, staleTime: 0, queryFn: () => null }).subscribe(() => {});
+    new QueryObserver(client, {
+      queryKey: key,
+      enabled: false,
+      staleTime: 0,
+      queryFn: () => null,
+    }).subscribe(() => {});
     await fetchOnce(0, key);
     await sleep(5);
     await fetchOnce(0, key);
@@ -108,6 +117,12 @@ describe('이슈 28: 새로고침 경계', () => {
     const before = rec({ id: 1, restored: true, load: 1 });
     const after = rec({ id: 2, load: 2, startedAt: 100, sameResponseAs: 1 });
     expect(classifyRecords([before, after], new Set()).get(2)).toBe('ok');
+  });
+
+  it('로드 번호가 같으면 앞 기록이 restored 여도 같은 로드 안의 낭비다', () => {
+    const a = rec({ id: 1, load: 2, restored: true });
+    const b = rec({ id: 2, load: 2, startedAt: 5000, sameResponseAs: 1 });
+    expect(classifyRecords([a, b], new Set()).get(2)).toBe('same-response');
   });
 
   it('같은 페이지 로드 안의 같은 응답은 그대로 낭비다', () => {

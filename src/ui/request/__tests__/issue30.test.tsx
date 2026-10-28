@@ -7,13 +7,30 @@ import type { RequestRecord } from '../../../core/requests/types.js';
 const mocks = vi.hoisted(() => ({
   describeFetchCause: vi.fn<(r: RequestRecord, w: boolean) => unknown>(),
   overlapCancelOf: vi.fn<(r: RequestRecord) => string[] | undefined>(),
+  flushQueue: vi.fn<(limitMs?: number) => boolean>(() => true),
 }));
-vi.mock('../../contexts.js', () => ({ useRequestActions: () => ({ classOf: () => 'same-response' }) }));
-vi.mock('../../../core/reactQuery/fetchCause.js', () => ({ describeFetchCause: mocks.describeFetchCause }));
-vi.mock('../../../core/reactQuery/cacheAudit.js', () => ({ overlapCancelOf: mocks.overlapCancelOf }));
+vi.mock('../../../core/scheduler/idleQueue.js', () => ({
+  flushQueue: mocks.flushQueue,
+}));
+vi.mock('../../contexts.js', () => ({
+  useRequestActions: () => ({ classOf: () => 'same-response' }),
+}));
+vi.mock('../../../core/reactQuery/fetchCause.js', () => ({
+  describeFetchCause: mocks.describeFetchCause,
+}));
+vi.mock('../../../core/reactQuery/cacheAudit.js', () => ({
+  overlapCancelOf: mocks.overlapCancelOf,
+}));
 
 const { FetchCause } = await import('../FetchCause.js');
-const rec = { id: 1, kind: 'fetch', method: 'GET', url: '/a', startedAt: 0, durationMs: 1 } as RequestRecord;
+const rec = {
+  id: 1,
+  kind: 'fetch',
+  method: 'GET',
+  url: '/a',
+  startedAt: 0,
+  durationMs: 1,
+} as RequestRecord;
 
 describe('요청 상세 fetch 원인', () => {
   it('관찰자·원인·근거·처방을 보인다', () => {
@@ -45,5 +62,18 @@ describe('요청 상세 fetch 원인', () => {
     mocks.describeFetchCause.mockReturnValue(undefined);
     mocks.overlapCancelOf.mockReturnValue(undefined);
     expect(renderToStaticMarkup(<FetchCause record={rec} />)).toBe('');
+  });
+
+  it('미뤄 둔 분석을 먼저 마친 뒤(상한 1000ms) 원인과 취소를 구한다', () => {
+    mocks.flushQueue.mockClear();
+    mocks.describeFetchCause.mockClear();
+    mocks.overlapCancelOf.mockClear();
+    mocks.describeFetchCause.mockReturnValue(undefined);
+    mocks.overlapCancelOf.mockReturnValue(undefined);
+    renderToStaticMarkup(<FetchCause record={rec} />);
+    expect(mocks.flushQueue).toHaveBeenCalledWith(1000);
+    const flushed = mocks.flushQueue.mock.invocationCallOrder[0];
+    expect(flushed).toBeLessThan(mocks.describeFetchCause.mock.invocationCallOrder[0]);
+    expect(flushed).toBeLessThan(mocks.overlapCancelOf.mock.invocationCallOrder[0]);
   });
 });

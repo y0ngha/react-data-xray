@@ -6,6 +6,7 @@ export const FETCH_CAUSE_LABEL: Record<FetchCause, string> = {
   initial: '캐시 없음(첫 조회)',
   mount: '관찰자가 마운트돼 stale 이라 받음',
   enabled: '관찰자의 enabled 가 켜져 stale 이라 받음',
+  'key-change': '관찰자의 queryKey 가 바뀌어 stale 인 쿼리를 받음',
   invalidate: '무효화(invalidateQueries)',
   focus: '포커스·재연결',
   interval: 'refetchInterval',
@@ -15,6 +16,7 @@ export const FETCH_CAUSE_LABEL: Record<FetchCause, string> = {
 const FETCH_CAUSE_FIX: Partial<Record<FetchCause, string>> = {
   enabled: '`enabled` 전환마다 stale 이라 다시 받습니다. 이 관찰자에 `staleTime` 을 주거나 상위 화면의 캐시를 그대로 쓰세요.',
   mount: '마운트할 때마다 stale 이라 다시 받습니다. 이 관찰자에 `staleTime` 을 주거나 `refetchOnMount: false` 를 쓰세요.',
+  'key-change': 'queryKey 가 바뀔 때마다 stale 이라 다시 받습니다. 이 관찰자에 `staleTime` 을 주거나 `placeholderData` 로 이어 보이세요.',
   focus: '포커스·재연결마다 stale 이라 다시 받습니다. `staleTime` 을 주거나 `refetchOnWindowFocus: false` 를 쓰세요.',
   interval: '`refetchInterval` 마다 같은 응답을 받습니다. 간격을 늘리거나 바뀔 때만 받게 하세요.',
 };

@@ -16,7 +16,11 @@ const setup = async (seen: unknown[][]) => {
     </QueryClientProvider>,
   );
   findQueryClients();
-  for (const queryKey of seen) await client.fetchQuery({ queryKey, queryFn: () => fetch('/api/x').then((r) => r.json()) });
+  for (const queryKey of seen)
+    await client.fetchQuery({
+      queryKey,
+      queryFn: () => fetch('/api/x').then((r) => r.json()),
+    });
   return client;
 };
 const audit = () => {
@@ -38,7 +42,10 @@ describe('이슈 31: 같은 키 모양이면 invalidate-miss 가 아니다', () 
   it('bulk_one_line: 같은 위치의 107키는 한 줄(count 107)', async () => {
     const client = await setup([['scopedMember', 'list', 'ws', 'GROUP', 1]]);
     const save = async () => {
-      for (let i = 0; i < 107; i++) await client.invalidateQueries({ queryKey: ['scopedMember', 'list', 'ws', 'PROJECT', i] });
+      for (let i = 0; i < 107; i++)
+        await client.invalidateQueries({
+          queryKey: ['scopedMember', 'list', 'ws', 'PROJECT', i],
+        });
     };
     await save();
     const unloaded = audit().filter((f) => f.kind === 'invalidate-unloaded');
