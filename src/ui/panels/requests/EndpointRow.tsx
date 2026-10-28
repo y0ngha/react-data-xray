@@ -37,6 +37,12 @@ export const EndpointRow = ({ stat, ignored, onSelect, onToggleIgnore }: Endpoin
       {stat.idVariants && <span title="경로 안의 ID 를 :id 로 묶었습니다"> · ID {stat.idVariants}종</span>}
       {stat.duplicates > 0 && <span style={{ color: color.warn }}> · 중복 {stat.duplicates}</span>}
       {stat.sameResponses > 0 && <span style={{ color: color.warn }}> · 같은 응답 {stat.sameResponses}</span>}
+      {stat.failedDuplicates && (
+        <span style={{ color: color.warn, fontWeight: 600 }}>
+          {' '}
+          · 실패 응답 {stat.failedDuplicates} ({stat.failedCodes?.join('·')})
+        </span>
+      )}
       {stat.review > 0 && <span style={{ color: color.review }}> · 확인 필요 {stat.review}</span>}
       {stat.explained > 0 && <span> · 정상 반복 {stat.explained}</span>}
     </Muted>

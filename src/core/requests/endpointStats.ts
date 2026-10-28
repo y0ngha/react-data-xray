@@ -1,4 +1,4 @@
-import { needsReview, type RequestClass } from './classify.js';
+import { isFailed, isWaste, needsReview, type RequestClass } from './classify.js';
 import { endpointOf, pathOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
@@ -16,6 +16,10 @@ export interface EndpointStat {
   avgMs: number;
   /** ID 조각이 묶여 서로 다른 경로가 둘 이상 모인 경우 그 경로 수 */
   idVariants?: number;
+  /** 낭비로 판정된 요청 중 실패 응답(4xx·5xx, 네트워크 오류)인 것. 분류와 낭비 수는 그대로 둔다 */
+  failedDuplicates?: number;
+  /** 실패한 요청의 상태 코드(네트워크 오류는 'ERR'), 많이 나온 순 */
+  failedCodes?: string[];
 }
 
 const emptyStat = (endpoint: string): EndpointStat & { totalMs: number } => ({
@@ -29,14 +33,15 @@ const emptyStat = (endpoint: string): EndpointStat & { totalMs: number } => ({
   totalMs: 0,
 });
 
-const tally = (stat: EndpointStat & { totalMs: number }, durationMs: number, c: RequestClass | undefined) => ({
+const tally = (stat: EndpointStat & { totalMs: number }, r: RequestRecord, c: RequestClass | undefined) => ({
   ...stat,
   count: stat.count + 1,
-  totalMs: stat.totalMs + durationMs,
+  totalMs: stat.totalMs + r.durationMs,
   duplicates: stat.duplicates + (c === 'duplicate' ? 1 : 0),
   sameResponses: stat.sameResponses + (c === 'same-response' ? 1 : 0),
   review: stat.review + (needsReview(c) ? 1 : 0),
   explained: stat.explained + (c === 'strict-mode' || c === 'reconnect-refetch' || c === 'ignored' ? 1 : 0),
+  ...(isWaste(c) && isFailed(r) ? { failedDuplicates: (stat.failedDuplicates ?? 0) + 1 } : {}),
 });
 
 export const wasteCount = (stat: EndpointStat): number => stat.duplicates + stat.sameResponses;
@@ -54,15 +59,37 @@ export const getEndpointStats = (
 ): EndpointStat[] => {
   const byEndpoint = records.reduce((acc, r) => {
     const endpoint = keyOf(r);
-    return acc.set(endpoint, tally(acc.get(endpoint) ?? emptyStat(endpoint), r.durationMs, classes.get(r.id)));
+    return acc.set(endpoint, tally(acc.get(endpoint) ?? emptyStat(endpoint), r, classes.get(r.id)));
   }, new Map<string, EndpointStat & { totalMs: number }>());
   const pathsByEndpoint = records.reduce((acc, r) => {
     const endpoint = keyOf(r);
     return endpoint.includes(':id') ? acc.set(endpoint, (acc.get(endpoint) ?? new Set<string>()).add(pathOf(r.url))) : acc;
   }, new Map<string, Set<string>>());
+  const failedCodesByEndpoint = new Map(
+    Array.from(
+      records.filter(isFailed).reduce((acc, r) => {
+        const code = r.error ? 'ERR' : String(r.status);
+        const counts = acc.get(keyOf(r)) ?? new Map<string, number>();
+        return acc.set(keyOf(r), counts.set(code, (counts.get(code) ?? 0) + 1));
+      }, new Map<string, Map<string, number>>()),
+      ([endpoint, counts]) =>
+        [
+          endpoint,
+          Array.from(counts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([code]) => code),
+        ] as const,
+    ),
+  );
   return Array.from(byEndpoint.values(), ({ totalMs, ...stat }): EndpointStat => {
     const variants = pathsByEndpoint.get(stat.endpoint)?.size ?? 0;
-    return Object.assign(stat, { avgMs: Math.round(totalMs / stat.count) }, variants > 1 ? { idVariants: variants } : {});
+    const codes = failedCodesByEndpoint.get(stat.endpoint);
+    return Object.assign(
+      stat,
+      { avgMs: Math.round(totalMs / stat.count) },
+      variants > 1 ? { idVariants: variants } : {},
+      codes ? { failedCodes: codes } : {},
+    );
   }).sort((a, b) => wasteCount(b) - wasteCount(a) || b.count - a.count);
 };
 

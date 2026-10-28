@@ -23,6 +23,8 @@ export interface RequestSection {
     avgMs: number;
     duplicates: number;
     sameResponses: number;
+    /** 낭비(duplicates·sameResponses)로 센 것 중 실패 응답(4xx·5xx, 네트워크 오류)인 수 */
+    failedDuplicates: number;
     review: number;
     /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수 */
     callers: Array<{ frame: string; count: number }>;
@@ -86,6 +88,7 @@ export const buildRequestSection = (
         avgMs: s.avgMs,
         duplicates: s.duplicates,
         sameResponses: s.sameResponses,
+        failedDuplicates: s.failedDuplicates ?? 0,
         review: s.review,
         callers: callersOf(own),
         wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
@@ -98,4 +101,6 @@ export const buildRequestSection = (
 };
 
 // 새 howToRead 줄은 여기에 더한다.
-export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [];
+export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
+  'failedDuplicates 는 duplicates·sameResponses 중 실패 응답(4xx·5xx, 네트워크 오류)인 수다. 코드의 낭비가 아니라 재시도나 로컬 환경(백엔드 꺼짐) 문제일 수 있어 상태 코드부터 본다.',
+];
