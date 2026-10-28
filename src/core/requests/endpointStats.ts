@@ -1,5 +1,5 @@
 import { needsReview, type RequestClass } from './classify.js';
-import { endpointOf } from './requestKey.js';
+import { endpointOf, pathOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
 export interface EndpointStat {
@@ -14,6 +14,8 @@ export interface EndpointStat {
   /** StrictMode·재연결·무시처럼 이유가 확실한 반복 */
   explained: number;
   avgMs: number;
+  /** ID 조각이 묶여 서로 다른 경로가 둘 이상 모인 경우 그 경로 수 */
+  idVariants?: number;
 }
 
 const emptyStat = (endpoint: string): EndpointStat & { totalMs: number } => ({
@@ -54,9 +56,14 @@ export const getEndpointStats = (
     const endpoint = keyOf(r);
     return acc.set(endpoint, tally(acc.get(endpoint) ?? emptyStat(endpoint), r.durationMs, classes.get(r.id)));
   }, new Map<string, EndpointStat & { totalMs: number }>());
-  return Array.from(byEndpoint.values(), ({ totalMs, ...stat }): EndpointStat =>
-    Object.assign(stat, { avgMs: Math.round(totalMs / stat.count) }),
-  ).sort((a, b) => wasteCount(b) - wasteCount(a) || b.count - a.count);
+  const pathsByEndpoint = records.reduce((acc, r) => {
+    const endpoint = keyOf(r);
+    return endpoint.includes(':id') ? acc.set(endpoint, (acc.get(endpoint) ?? new Set<string>()).add(pathOf(r.url))) : acc;
+  }, new Map<string, Set<string>>());
+  return Array.from(byEndpoint.values(), ({ totalMs, ...stat }): EndpointStat => {
+    const variants = pathsByEndpoint.get(stat.endpoint)?.size ?? 0;
+    return Object.assign(stat, { avgMs: Math.round(totalMs / stat.count) }, variants > 1 ? { idVariants: variants } : {});
+  }).sort((a, b) => wasteCount(b) - wasteCount(a) || b.count - a.count);
 };
 
 /** 박스 라벨에 붙이는 짧은 지표: "×6 · 중복 2 · 같은 응답 3". 한 번만 불렸고 낭비도 없으면 빈 문자열 */

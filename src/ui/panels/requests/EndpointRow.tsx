@@ -34,6 +34,7 @@ export const EndpointRow = ({ stat, ignored, onSelect, onToggleIgnore }: Endpoin
     </div>
     <Muted>
       {stat.count}회 · 평균 {stat.avgMs}ms
+      {stat.idVariants && <span title="경로 안의 ID 를 :id 로 묶었습니다"> · ID {stat.idVariants}종</span>}
       {stat.duplicates > 0 && <span style={{ color: color.warn }}> · 중복 {stat.duplicates}</span>}
       {stat.sameResponses > 0 && <span style={{ color: color.warn }}> · 같은 응답 {stat.sameResponses}</span>}
       {stat.review > 0 && <span style={{ color: color.review }}> · 확인 필요 {stat.review}</span>}
