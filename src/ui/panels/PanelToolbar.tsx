@@ -4,6 +4,7 @@ import type { Dock } from '../hooks/useDockSettings.js';
 import { color } from '../theme.js';
 import { CompareReports } from './compare/CompareReports.js';
 import { DockPicker } from './DockPicker.js';
+import { ResetButton } from './ResetButton.js';
 import { TabReportButton } from './TabReportButton.js';
 import { TAB_GROUPS, type Tab } from './tabs.js';
 
@@ -61,6 +62,7 @@ export const PanelToolbar = (props: PanelToolbarProps) => (
       )}
     </TabGroup>
     <span style={{ width: 8 }} />
+    <ResetButton />
     <TabReportButton />
     <CompareReports />
     <DockPicker dock={props.dock} onChange={props.onDock} />
