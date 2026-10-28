@@ -6,14 +6,22 @@ import { color, plainButtonStyle, rowStyle } from '../../theme.js';
 interface EndpointRowProps {
   stat: EndpointStat;
   ignored: boolean;
+  /** 주면 이 경로에서 보낸 건수만 보인다 */
+  route?: string;
   onSelect: (endpoint: string) => void;
   onToggleIgnore: (endpoint: string) => void;
 }
 
+const MAX_SITES = 5;
+
+/** 경로·컴포넌트별 건수. 한 곳뿐이면 줄 하나가 엔드포인트와 같은 말이라 route 로 거를 때만 보인다 */
+const sitesShown = (stat: EndpointStat, route: string | undefined) =>
+  (stat.sites ?? []).filter((site) => route === undefined || site.route === route).slice(0, MAX_SITES);
+
 const titleColor = (stat: EndpointStat, ignored: boolean) => (isWastefulStat(stat) ? color.warn : ignored ? color.muted : color.text);
 
 /** 엔드포인트 한 줄: 호출 수와 낭비 지표. 이름을 누르면 그 엔드포인트의 요청 목록으로 간다. */
-export const EndpointRow = ({ stat, ignored, onSelect, onToggleIgnore }: EndpointRowProps) => (
+export const EndpointRow = ({ stat, ignored, route, onSelect, onToggleIgnore }: EndpointRowProps) => (
   <div style={rowStyle}>
     <div style={{ display: 'flex', gap: 8 }}>
       <button
@@ -34,10 +42,24 @@ export const EndpointRow = ({ stat, ignored, onSelect, onToggleIgnore }: Endpoin
     </div>
     <Muted>
       {stat.count}회 · 평균 {stat.avgMs}ms
+      {stat.idVariants && <span title="경로 안의 ID 를 :id 로 묶었습니다"> · ID {stat.idVariants}종</span>}
+      {!!stat.restoredCount && <span title="같은 탭에서 새로고침하기 전 페이지의 요청"> · 새로고침 전 {stat.restoredCount}</span>}
       {stat.duplicates > 0 && <span style={{ color: color.warn }}> · 중복 {stat.duplicates}</span>}
       {stat.sameResponses > 0 && <span style={{ color: color.warn }}> · 같은 응답 {stat.sameResponses}</span>}
+      {stat.failedDuplicates && (
+        <span style={{ color: color.warn, fontWeight: 600 }}>
+          {' '}
+          · 실패 응답 {stat.failedDuplicates} ({stat.failedCodes?.join('·')})
+        </span>
+      )}
       {stat.review > 0 && <span style={{ color: color.review }}> · 확인 필요 {stat.review}</span>}
       {stat.explained > 0 && <span> · 정상 반복 {stat.explained}</span>}
     </Muted>
+    {sitesShown(stat, route).map((site) => (
+      <Muted key={`${site.route}|${site.component}`}>
+        {'  '}
+        {site.route ?? '?'} {site.component ? `<${site.component}>` : ''} {site.count}
+      </Muted>
+    ))}
   </div>
 );

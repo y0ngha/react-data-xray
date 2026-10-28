@@ -30,6 +30,9 @@ export const CLASS_LABEL: Record<RequestClass, string> = {
   ok: '',
 };
 
+/** 4xx·5xx 응답이거나 네트워크 오류로 끝난 요청 */
+export const isFailed = (r: RequestRecord): boolean => !!r.error || r.status >= 400;
+
 export const isWaste = (c: RequestClass | undefined): boolean => c === 'duplicate' || c === 'same-response';
 export const needsReview = (c: RequestClass | undefined): boolean => c === 'periodic' || c === 'focus-refetch';
 

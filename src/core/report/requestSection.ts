@@ -4,10 +4,23 @@ import { endpointOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
+import { queryContextOf } from '../capture/requestContext.js';
 import { groupBy } from '../../shared/collections.js';
 
 const MAX_CALLERS = 3;
 const MAX_EXAMPLES = 3;
+
+interface Caller {
+  frame: string;
+  count: number;
+  route?: string;
+  component?: string;
+  /** React Query 를 거친 요청의 queryKey(JSON)와 useQuery 를 그린 컴포넌트 */
+  queryKey?: string;
+  observer?: string;
+  /** 호출 스택에 앱 프레임이 없어 보낸 위치를 모른다 */
+  noAppFrame?: true;
+}
 
 export interface RequestSection {
   total: number;
@@ -23,9 +36,11 @@ export interface RequestSection {
     avgMs: number;
     duplicates: number;
     sameResponses: number;
+    /** 낭비(duplicates·sameResponses)로 센 것 중 실패 응답(4xx·5xx, 네트워크 오류)인 수 */
+    failedDuplicates: number;
     review: number;
-    /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수 */
-    callers: Array<{ frame: string; count: number }>;
+    /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수. route·component 는 알 때만 있다 */
+    callers: Caller[];
     /** 낭비로 판정된 요청의 URL 예(쿼리 포함) */
     wasteExamples: string[];
   }>;
@@ -60,9 +75,21 @@ const callerOf = (stack: string | undefined): string | undefined =>
 const callersOf = (records: readonly RequestRecord[]) => {
   const counts = records.reduce((acc, r) => {
     const frame = callerOf(r.sourceStack ?? r.stack);
-    return frame ? acc.set(frame, (acc.get(frame) ?? 0) + 1) : acc;
-  }, new Map<string, number>());
-  return Array.from(counts, ([frame, count]) => ({ frame, count }))
+    const query = queryContextOf(r);
+    const component = r.component ?? query?.observer; // 스택으로 모르면 useQuery 를 그린 컴포넌트가 보낸 곳이다
+    if (!frame && !query) return acc;
+    const key = JSON.stringify([frame, r.route, component, query?.queryKey]);
+    const caller: Caller = acc.get(key) ?? {
+      frame: frame ?? '',
+      count: 0,
+      ...(r.route !== undefined && { route: r.route }),
+      ...(component && { component }),
+      ...(query && { queryKey: query.queryKey, ...(query.observer && { observer: query.observer }) }),
+      ...(r.noAppFrame && { noAppFrame: true as const }),
+    };
+    return acc.set(key, { ...caller, count: caller.count + 1 });
+  }, new Map<string, Caller>());
+  return Array.from(counts.values())
     .sort((a, b) => b.count - a.count)
     .slice(0, MAX_CALLERS);
 };
@@ -86,6 +113,7 @@ export const buildRequestSection = (
         avgMs: s.avgMs,
         duplicates: s.duplicates,
         sameResponses: s.sameResponses,
+        failedDuplicates: s.failedDuplicates ?? 0,
         review: s.review,
         callers: callersOf(own),
         wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
@@ -98,4 +126,8 @@ export const buildRequestSection = (
 };
 
 // 새 howToRead 줄은 여기에 더한다.
-export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [];
+export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
+  'failedDuplicates 는 duplicates·sameResponses 중 실패 응답(4xx·5xx, 네트워크 오류)인 수다. 코드의 낭비가 아니라 재시도나 로컬 환경(백엔드 꺼짐) 문제일 수 있어 상태 코드부터 본다.',
+  'callers 의 route 는 요청을 보낸 시점의 경로(쿼리 제외), component 는 호출 스택의 대문자 이름 함수로 짐작한 보낸 컴포넌트다. 없으면 알 수 없는 것이다.',
+  'callers 의 queryKey·observer 는 React Query 가 보낸 요청의 쿼리 키와 useQuery 를 그린 컴포넌트다. noAppFrame 은 ky 의 타이머처럼 비동기 경계에서 스택이 끊겨 보낸 코드 위치를 모른다는 뜻이다(frame 은 라이브러리 내부이니 queryKey 로 찾는다).',
+];

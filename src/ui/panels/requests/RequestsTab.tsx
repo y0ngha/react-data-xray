@@ -22,7 +22,10 @@ interface RequestsTabProps {
 export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: RequestsTabProps) => {
   const [view, setView] = useState<View>('endpoints');
   const [filter, setFilter] = useState<string | null>(null);
-  const logs = [...records].reverse().filter((r) => !filter || endpointOf(r) === filter);
+  const [currentOnly, setCurrentOnly] = useState(false);
+  const route = currentOnly ? window.location.pathname : undefined;
+  const logs = [...records].reverse().filter((r) => (!filter || endpointOf(r) === filter) && (route === undefined || r.route === route));
+  const shownStats = route === undefined ? stats : stats.filter((s) => s.sites?.some((site) => site.route === route));
   const showEndpoint = (endpoint: string) => {
     setFilter(endpoint);
     setView('log');
@@ -44,15 +47,19 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
             {filter} ✕
           </Button>
         )}
+        <Button active={currentOnly} onClick={() => setCurrentOnly(!currentOnly)} title="지금 경로(location.pathname)에서 보낸 요청만 보기">
+          지금 경로만
+        </Button>
         <span style={{ color: color.muted, marginLeft: 'auto' }}>최근 {records.length}건</span>
       </div>
       {view === 'cache' && <CacheAuditView records={records} />}
       {view === 'endpoints' &&
-        stats.map((stat) => (
+        shownStats.map((stat) => (
           <EndpointRow
             key={stat.endpoint}
             stat={stat}
             ignored={ignored.has(stat.endpoint)}
+            route={route}
             onSelect={showEndpoint}
             onToggleIgnore={onToggleIgnore}
           />

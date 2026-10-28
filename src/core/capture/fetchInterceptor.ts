@@ -7,6 +7,7 @@ import { rememberText } from './pendingTexts.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { attempt } from './attempt.js';
 import { annotateRequest } from './requestContext.js';
+import { requestOrigin } from './requestOrigins.js';
 import { serializeBody } from './serializeBody.js';
 
 const responseRecords = new WeakMap<Response, RequestRecord>();
@@ -35,7 +36,7 @@ const startRecord = (input: RequestInfo | URL, init?: RequestInit): RequestRecor
   const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
   const requestHeaders = headersToObject(init?.headers ?? (input instanceof Request ? input.headers : undefined));
   const action = requestHeaders?.['next-action'];
-  const record = annotateRequest(createRecord('fetch', method, toUrl(input), requestBodyOf(input, init), action));
+  const record = annotateRequest(createRecord('fetch', method, toUrl(input), requestBodyOf(input, init), action), requestOrigin(input));
   // 처음 보는 Server Action 이면 함수 이름을 찾아 둔다(받아 둔 스크립트를 한 번씩만 읽는다).
   if (action && !actionNameOf(action)) void learnActionNames();
   record.requestHeaders = requestHeaders;

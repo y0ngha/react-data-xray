@@ -2,6 +2,7 @@ import { interceptFetch } from './fetchInterceptor.js';
 import { keepNativeFetch } from './nativeFetch.js';
 import { interceptJsonParse } from './jsonParseInterceptor.js';
 import { trackRefetchTriggers } from './requestContext.js';
+import { interceptRequestOrigins } from './requestOrigins.js';
 import { interceptXhr } from './xhrInterceptor.js';
 import { onActionNames } from '../requests/serverActionNames.js';
 import { touchRecords } from '../requests/store.js';
@@ -17,6 +18,7 @@ export const installCapture = (): void => {
   if (typeof window.fetch === 'function' && typeof Response !== 'undefined') {
     keepNativeFetch(window.fetch.bind(window));
     interceptFetch();
+    interceptRequestOrigins();
   }
   if (typeof XMLHttpRequest !== 'undefined') interceptXhr();
   interceptJsonParse();
