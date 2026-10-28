@@ -48,6 +48,14 @@ export const getRecords = (): readonly RequestRecord[] => records;
 
 export const getStoreVersion = (): number => version;
 
+let snapshot: { version: number; records: readonly RequestRecord[] } = { version: -1, records: [] };
+
+/** 기록의 복사본. store 버전이 바뀔 때만 새 배열이라, 화면이 이 배열을 메모 의존성으로 쓸 수 있다. */
+export const getRecordsSnapshot = (): readonly RequestRecord[] => {
+  if (snapshot.version !== version) snapshot = { version, records: [...records] };
+  return snapshot.records;
+};
+
 /** 기록의 내용을 나중에 채웠을 때(원본 위치 등) 구독자에게 알린다. */
 export const touchRecords = (): void => notify();
 

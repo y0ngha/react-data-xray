@@ -1,0 +1,28 @@
+name: PR body
+
+# 본문을 고칠 때마다 다시 확인해야 해서 CI 와 나눈다. 같은 워크플로에 두면 본문만 고친 실행에서
+# check 가 건너뜀(성공으로 친다)으로 남아 앞선 실패를 덮는다.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-body:
+    name: pr-body
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR 템플릿을 쓰고 이슈를 닫는지 확인
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if ! grep -q '<!-- rdx-pr-template -->' <<<"$BODY"; then
+            echo "::error::PR 본문은 .github/pull_request_template.md 템플릿으로 써 주세요."
+            exit 1
+          fi
+          if ! grep -Eiq '(close[sd]?|fix(e[sd])?|resolve[sd]?) +#[0-9]+' <<<"$BODY"; then
+            echo "::error::PR 이 닫을 이슈를 'Closes #번호' 로 적어 주세요. 이슈가 없으면 먼저 만듭니다."
+            exit 1
+          fi

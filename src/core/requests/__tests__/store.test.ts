@@ -9,6 +9,7 @@ import {
   finishRecord,
   getDroppedCount,
   getRecords,
+  getRecordsSnapshot,
   getStoreVersion,
   keepResponseText,
   registerBody,
@@ -179,5 +180,14 @@ describe('store', () => {
     expect(r.stack).toBeUndefined();
     flushQueue();
     expect(r.stack).toContain('store.test');
+  });
+
+  it('기록 복사본은 기록이 바뀔 때만 새 배열이다(화면의 메모 의존성)', () => {
+    const before = getRecordsSnapshot();
+    expect(getRecordsSnapshot()).toBe(before);
+    finishRecord(createRecord('fetch', 'GET', '/api/snap'), 200);
+    const after = getRecordsSnapshot();
+    expect(after).not.toBe(before);
+    expect(after.at(-1)?.url).toBe('/api/snap');
   });
 });

@@ -43,8 +43,6 @@ export const getComponentName = (fiber: Pick<Fiber, 'type'>): string => {
 
 /** 이 컴포넌트를 그리는 JSX 위치(src/... 부터, 줄 번호 포함). dev 빌드가 기록하지 않으면(React 19 등) undefined */
 export const jsxLocationOf = (fiber: Fiber): string | undefined => {
-  // eslint 의 dangle 규칙: React 가 정한 dev 필드 이름이라 바꿀 수 없다.
-  // oxlint-disable-next-line no-underscore-dangle
   const source = fiber._debugSource;
   if (!source?.fileName) return undefined;
   const file = source.fileName.replace(/^.*?\/(src|app|pages|components)\//, '$1/');

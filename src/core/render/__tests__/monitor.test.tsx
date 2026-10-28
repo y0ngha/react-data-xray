@@ -241,17 +241,16 @@ describe('렌더의 네트워크 원인', () => {
       const runs = useRef(0);
       // 이 effect 가 채우는 state 를 의존성에 넣은 실수. 테스트가 끝나도록 6번에서 멈춘다.
       useEffect(() => {
-        if (runs.current++ >= 6) return;
+        if (runs.current++ >= 6 || items.length > 100) return;
         void fetch('/api/notices')
           .then((r) => r.json())
           .then((json: typeof DEFAULT_BODY) => setItems(json.data.list.map((x) => ({ id: x.id }))));
-        // oxlint-disable-next-line react/exhaustive-effect-dependencies -- items 변경이 재요청 고리를 만드는 시나리오
       }, [items]);
       return <p>{items.length}</p>;
     }
     render(<Notices />);
-    // oxlint-disable-next-line no-await-in-loop -- act 를 한 번씩 순차로 돌려야 한다
-    for (let i = 0; i < 8; i++) await act(flush);
+    // act 를 한 번씩 순서대로 돌린다(응답 → state → effect → 다시 요청을 8바퀴).
+    await Array.from({ length: 8 }).reduce<Promise<void>>((prev) => prev.then(() => act(flush)), Promise.resolve());
     const notices = groupRenders(getTopRenders(200), 0).find((g) => g.name === 'Notices')!;
     expect(notices.causes[0].record.url).toBe('/api/notices');
     expect(notices.causes[0].timing).toBeGreaterThanOrEqual(5);

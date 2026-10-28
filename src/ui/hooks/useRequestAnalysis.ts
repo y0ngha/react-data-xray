@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { classifyRecords, type RequestClass } from '../../core/requests/classify.js';
 import { getEndpointStats, isWastefulStat, type EndpointStat } from '../../core/requests/endpointStats.js';
 import { requestKeyOf } from '../../core/requests/requestKey.js';
-import { getRecords } from '../../core/requests/store.js';
+import { getRecordsSnapshot } from '../../core/requests/store.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { useRecordsVersion } from './useRecordsVersion.js';
 
@@ -19,9 +19,10 @@ export interface RequestAnalysis {
 
 /** 요청 기록을 분류하고 엔드포인트별로 모은다. 기록이 바뀌거나 무시 목록이 바뀔 때만 다시 계산한다. */
 export const useRequestAnalysis = (ignored: ReadonlySet<string>): RequestAnalysis => {
-  const version = useRecordsVersion();
+  // 기록이 바뀌면 다시 렌더되고, 그때 받은 복사본이 새 배열이라 다시 계산한다.
+  useRecordsVersion();
+  const records = getRecordsSnapshot();
   return useMemo(() => {
-    const records = [...getRecords()];
     const classes = classifyRecords(records, ignored);
     const stats = getEndpointStats(records, classes);
     return {
@@ -32,9 +33,7 @@ export const useRequestAnalysis = (ignored: ReadonlySet<string>): RequestAnalysi
       statsByEndpoint: new Map(stats.map((s) => [s.endpoint, s])),
       wasteCount: stats.filter(isWastefulStat).length,
     };
-    // version 은 getRecords() 의 내용이 바뀌었다는 신호다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, ignored]);
+  }, [records, ignored]);
 };
 
 /**
