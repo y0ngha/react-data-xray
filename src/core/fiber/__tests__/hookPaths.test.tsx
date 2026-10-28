@@ -47,6 +47,7 @@ describe('훅 호출 위치', () => {
 
   it('use·useMemoCache 는 기록하지 않고, useMemoCache 는 배열을 돌려 준다 (PR3-3)', () => {
     const Compiled = () => {
+      // oxlint-disable-next-line react/rules-of-hooks -- dispatcher 를 직접 불러 컴파일러 출력을 흉내 낸다
       const $ = dispatcherOf().useMemoCache(2) as unknown[];
       dispatcherOf().use(null);
       const [n] = useState($[0] === Symbol.for('react.memo_cache_sentinel') ? 1 : 0);

@@ -38,10 +38,7 @@ const setup = () => {
       staleTime,
       queryFn: () => fetch(url).then((r) => r.json()),
     });
-  const lastRecord = () =>
-    getRecords()
-      .filter((r) => r.url === url)
-      .at(-1)!;
+  const lastRecord = () => [...getRecords()].reverse().find((r) => r.url === url)!;
   return { client, key, url, fetchOnce, lastRecord };
 };
 

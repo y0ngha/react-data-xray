@@ -390,7 +390,7 @@ const foldInvalidations = (findings: readonly CacheFinding[]): CacheFinding[] =>
   return findings
     .filter((f) => {
       const id = foldId(f);
-      return !id || groups.get(id)![0] === f;
+      return !id || groups.get(id)?.[0] === f;
     })
     .map((f) => {
       const list = groups.get(foldId(f) ?? '');
