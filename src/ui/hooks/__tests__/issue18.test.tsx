@@ -38,3 +38,13 @@ describe('앱 모달을 피하는 패널', () => {
     expect(result.current.collapsed).toBe(true);
   });
 });
+
+describe('자동 dock 에서 크기 조절 (#18)', () => {
+  it('크기만 저장되고 dock 과 chosen 은 바뀌지 않는다', async () => {
+    const { useDockSettings } = await import('../useDockSettings.js');
+    const { result } = renderHook(() => useDockSettings());
+    act(() => result.current.update({ bottomHeight: 400 }));
+    expect(result.current.settings).toMatchObject({ dock: 'float', bottomHeight: 400 });
+    expect(result.current.settings.chosen).toBeUndefined();
+  });
+});
