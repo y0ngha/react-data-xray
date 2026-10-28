@@ -74,6 +74,14 @@ const memoAdvice = (g: RenderGroup): string | undefined =>
     ? `React.memo 가 효과 없습니다: ${propsList(g.memo.neverSkippedProps)} 가 렌더마다 새 참조라 ${g.memo.rendered}번 모두 다시 렌더됐고 한 번도 건너뛰지 못했습니다. 함수는 부모에서 useCallback, 객체는 useMemo 로 참조를 유지하세요.`
     : undefined;
 
+/** 같은 자리에서 컴포넌트 타입이 바뀌어 하위 트리가 통째로 다시 마운트되면 정의 위치를 고치라고 한다. */
+const typeChangedAdvice = (g: RenderGroup): string | undefined => {
+  const r = g.mounts?.remounts.find((x) => x.cause === 'type-changed');
+  return r
+    ? `<${g.name}> 이(가) ${r.count}회 재마운트됐는데 컴포넌트 타입이 렌더마다 새로 만들어집니다${g.location ? `(${g.location})` : ''}. 하위 트리 전체가 버려지고 다시 만들어지는 가장 비싼 낭비입니다. 렌더 중에 컴포넌트를 정의하지 말고 모듈 수준에 두거나, 그 정의를 만드는 useMemo 의 의존성을 줄이세요.`
+    : undefined;
+};
+
 /**
  * 줄일 수 있거나 점검할 렌더가 있으면 어떻게 줄일지 알려 준다.
  * 렌더는 네트워크와 무관하게도 비효율적일 수 있으므로 네트워크 원인과 상관없이 판단한다.
@@ -81,6 +89,7 @@ const memoAdvice = (g: RenderGroup): string | undefined =>
  */
 export const renderAdvice = (g: RenderGroup): string[] =>
   [
+    typeChangedAdvice(g),
     memoAdvice(g),
     loopAdvice(g),
     colocationAdvice(g),

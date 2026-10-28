@@ -71,7 +71,7 @@ const Mounts = ({ group }: { group: RenderGroup }) =>
     <Muted>
       마운트 {group.mounts.mounts}회 · 언마운트 {group.mounts.unmounts}회
       {group.mounts.remounts.length > 0 &&
-        ` · 재마운트: ${group.mounts.remounts.map((r) => `${r.parent ? `<${r.parent}> 아래 ` : ''}${r.count}회`).join(' · ')}`}
+        ` · 재마운트: ${group.mounts.remounts.map((r) => `${r.parent ? `<${r.parent}> 아래 ` : ''}${r.count}회${r.cause ? '(컴포넌트 타입이 렌더마다 새로 만들어짐)' : ''}`).join(' · ')}`}
     </Muted>
   ) : null;
 

@@ -5,7 +5,7 @@ export interface MountStats {
   mounts: number;
   unmounts: number;
   /** 같은 부모 아래 같은 이름이 모두 사라졌다가 곧 다시 생긴 횟수(많은 순). parent 는 서브트리를 갈아 끼운 가장 가까운 부모 */
-  remounts: Array<{ parent: string; count: number }>;
+  remounts: Array<{ parent: string; count: number; cause?: 'type-changed' }>;
 }
 
 /**
@@ -25,6 +25,7 @@ const MAX_NAMES = 1000;
 interface Place {
   live: number;
   lastUnmount?: number;
+  lastUnmountType?: unknown;
 }
 
 interface Stat {
@@ -32,6 +33,8 @@ interface Stat {
   unmounts: number;
   places: Map<string, Place>;
   remounts: Map<string, number>;
+  /** 같은 자리에서 이름은 같고 타입 정체만 바뀐 재마운트(렌더 중에 만든 컴포넌트) */
+  typeRemounts: Map<string, number>;
 }
 
 const stats = new Map<string, Stat>();
@@ -39,7 +42,7 @@ const stats = new Map<string, Stat>();
 const statOf = (name: string): Stat => {
   let s = stats.get(name);
   if (!s) {
-    s = { mounts: 0, unmounts: 0, places: new Map(), remounts: new Map() };
+    s = { mounts: 0, unmounts: 0, places: new Map(), remounts: new Map(), typeRemounts: new Map() };
     stats.set(name, s);
     if (stats.size > MAX_NAMES) stats.delete(stats.keys().next().value as string);
   }
@@ -62,14 +65,17 @@ export const recordMounts = (unmounted: readonly MountRef[], mounted: readonly M
     const place = placeOf(s, nameOf(r.parent));
     place.live = Math.max(0, place.live - 1);
     place.lastUnmount = now;
+    place.lastUnmountType = r.fiber.type;
   });
   mounted.forEach((r) => {
     const s = statOf(getComponentName(r.fiber));
     s.mounts++;
     const place = placeOf(s, nameOf(r.parent));
-    // 형제가 남아 있으면(목록 항목) 재마운트가 아니다.
-    if (place.live === 0 && place.lastUnmount !== undefined && now - place.lastUnmount <= REMOUNT_MS)
-      s.remounts.set(nameOf(r.branch), (s.remounts.get(nameOf(r.branch)) ?? 0) + 1);
+    const recent = place.lastUnmount !== undefined && now - place.lastUnmount <= REMOUNT_MS;
+    const bump = (m: Map<string, number>) => m.set(nameOf(r.branch), (m.get(nameOf(r.branch)) ?? 0) + 1);
+    // 타입이 바뀌었으면 형제가 많아도(표의 셀 수백 개) 모두 센다. 아니면 형제가 남아 있는 목록 항목은 재마운트가 아니다.
+    if (recent && place.lastUnmountType !== r.fiber.type) bump(s.typeRemounts);
+    else if (recent && place.live === 0) bump(s.remounts);
     place.live++;
   });
 };
@@ -80,7 +86,10 @@ export const getMountStats = (name: string): MountStats => {
   return {
     mounts: s.mounts,
     unmounts: s.unmounts,
-    remounts: Array.from(s.remounts, ([parent, count]) => ({ parent, count })).sort((a, b) => b.count - a.count),
+    remounts: [
+      ...Array.from(s.remounts, ([parent, count]) => ({ parent, count })),
+      ...Array.from(s.typeRemounts, ([parent, count]) => ({ parent, count, cause: 'type-changed' as const })),
+    ].sort((a, b) => b.count - a.count),
   };
 };
 
