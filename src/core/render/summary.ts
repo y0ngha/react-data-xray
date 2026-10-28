@@ -1,6 +1,7 @@
-import { hookSitesOf, resolvedLocation } from '../fiber/hookPaths.js';
+import { cachedHookSites, hookSitesOf, requestHookSites, resolvedLocation, type HookSite } from '../fiber/hookPaths.js';
 import type { Fiber } from '../fiber/types.js';
-import { endpointOf } from '../requests/requestKey.js';
+import type { RequestRecord } from '../requests/types.js';
+import { pathOf } from '../requests/requestKey.js';
 import {
   RENDER_REASONS,
   type NetworkCauseCount,
@@ -20,10 +21,14 @@ const countReasons = (reasons: readonly RenderReason[]): Record<RenderReason, nu
 const keysOf = (entry: RenderEntry['events'], reason: RenderReason): string[] =>
   Array.from(new Set(entry.filter((e) => e.reason === reason).flatMap((e) => e.keys ?? [])));
 
+/** 원인을 합치는 키: ID 를 묶지 않은 경로. 목록 행마다 다른 /items/{id} 를 한 원인으로 합치면 고리(loop)로 오탐한다. 표시만 묶인 endpoint 를 쓴다. */
+export const causeKeyOf = (record: Pick<RequestRecord, 'method' | 'url' | 'action'>): string =>
+  `${record.method} ${pathOf(record.url)}${record.action ?? ''}`;
+
 const countCauses = (events: RenderEntry['events']): NetworkCauseCount[] => {
   const byEndpoint = events.reduce((acc, { cause }) => {
     if (!cause) return acc;
-    const key = endpointOf(cause.record);
+    const key = causeKeyOf(cause.record);
     const prev = acc.get(key) ?? { record: cause.record, direct: 0, timing: 0, parent: 0, sameResponse: 0 };
     const sameResponse = prev.sameResponse + (cause.record.sameResponseAs ? 1 : 0);
     return acc.set(key, { ...prev, record: cause.record, sameResponse, [cause.via]: prev[cause.via] + 1 });
@@ -66,18 +71,20 @@ export const regularInterval = (times: readonly number[]): number | undefined =>
 
 const hookLabel = (h: { index: number; type?: string }): string => (h.type ? `${h.type} #${h.index}` : `훅 칸 #${h.index}`);
 
-/**
- * "useCart › useState #2 (src/x.ts:12)": 훅 순번(코드에서 훅을 부른 순서)에 커스텀 훅 경로를 붙인다.
- * 경로는 dev 빌드의 훅 목록이 있을 때만, 위치는 소스맵이 풀렸을 때만 붙는다. 없으면 "useState #2" 그대로.
- */
-export const stateHookLabel = (fiber: Fiber, hookIndex: number): string => {
+const labelFrom = (fiber: Fiber, hookIndex: number, sites: HookSite[] | null | undefined): string => {
   const type = fiber._debugHookTypes?.[hookIndex - 1];
   const base = hookLabel({ index: hookIndex, type });
-  const site = type ? hookSitesOf(fiber)?.[hookIndex - 1] : undefined;
+  const site = type ? sites?.[hookIndex - 1] : undefined;
   if (!site) return base;
   const where = resolvedLocation(site.frame);
   return `${[...site.path, base].join(' › ')}${where ? ` (${where})` : ''}`;
 };
+
+/**
+ * "useCart › useState #2 (src/x.ts:12)": 훅 순번(코드에서 훅을 부른 순서)에 커스텀 훅 경로를 붙인다.
+ * 경로는 dev 빌드의 훅 목록이 있을 때만, 위치는 소스맵이 풀렸을 때만 붙는다. 없으면 "useState #2" 그대로.
+ */
+export const stateHookLabel = (fiber: Fiber, hookIndex: number): string => labelFrom(fiber, hookIndex, hookSitesOf(fiber));
 
 /** state 때문에 렌더된 기록에서, 값이 바뀐 훅별 횟수·간격·최근 변경 */
 // 커스텀 훅 경로(stateHookLabel)는 앱 컴포넌트 함수를 다시 불러야 구해서 여기서 붙이지 않는다(주기 경로). withHookPaths 가 상세·보고서에서 붙인다.
@@ -100,12 +107,26 @@ const summarizeStateHooks = (events: RenderEntry['events']): StateHookSummary[] 
     .slice(0, MAX_STATE_HOOKS);
 };
 
-/** 렌더 항목을 열 때와 보고서를 만들 때만 부른다: label 에 커스텀 훅 경로와 호출 위치를 붙인다. */
-export const withHookPaths = (hooks: readonly StateHookSummary[], fiber: unknown): StateHookSummary[] =>
-  hooks.map((h) => (h.hookIndex ? { ...h, label: stateHookLabel(fiber as Fiber, h.hookIndex) } : h));
+const attach = (hooks: readonly StateHookSummary[], fiber: Fiber, sites: HookSite[] | null | undefined): StateHookSummary[] =>
+  hooks.map((h) => (h.hookIndex ? { ...h, label: labelFrom(fiber, h.hookIndex, sites) } : h));
+
+/**
+ * 패널용: 캐시된 훅 경로만 읽는다. 아직 모르면 순번 label 을 두고 유휴 큐에 계산을 맡긴다(렌더 중에 앱 컴포넌트를 다시 실행하지 않는다).
+ */
+export const withHookPaths = (hooks: readonly StateHookSummary[], fiber: unknown): StateHookSummary[] => {
+  const f = fiber as Fiber;
+  const sites = hooks.some((h) => h.hookIndex) ? cachedHookSites(f) : null;
+  if (sites === undefined) requestHookSites(f);
+  return attach(hooks, f, sites);
+};
+
+/** 보고서(사용자 조회)용: 그 자리에서 훅 경로를 구해 붙인다. */
+export const withHookPathsSync = (hooks: readonly StateHookSummary[], fiber: unknown): StateHookSummary[] =>
+  attach(hooks, fiber as Fiber, hooks.some((h) => h.hookIndex) ? hookSitesOf(fiber as Fiber) : null);
 
 const memoStatsOf = (skipped: number, reasons: Record<RenderReason, number>, keys: string[]): MemoStats => {
-  const rendered = Object.values(reasons).reduce((a, b) => a + b, 0) - reasons.mount;
+  // 건너뛸 수 있었는지의 분모는 부모 렌더가 원인인 것만이다. 마운트·자기 state·context 렌더는 memo 로 건너뛸 수 없다.
+  const rendered = Object.values(reasons).reduce((a, b) => a + b, 0) - reasons.mount - reasons.state - reasons.context;
   return { skipped, rendered, neverSkippedProps: skipped === 0 && rendered > 0 ? keys : [] };
 };
 

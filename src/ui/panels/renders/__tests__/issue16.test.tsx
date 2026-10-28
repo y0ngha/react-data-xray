@@ -2,13 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  getRenderGroups,
-  renderWindowStart,
-  reportWindowMs,
-  resetRenderStats,
-  setRenderMonitoring,
-} from '../../../../core/render/monitor.js';
+import { getRenderGroups, reportWindowMs, resetRenderStats, setRenderMonitoring } from '../../../../core/render/monitor.js';
 import { buildRenderSection } from '../../../../core/report/renderSection.js';
 import { flushQueue } from '../../../../core/scheduler/idleQueue.js';
 import { RendersTab } from '../RendersTab.js';
@@ -25,18 +19,18 @@ beforeEach(() => {
 afterEach(() => setRenderMonitoring(false));
 
 describe('reset 뒤 렌더 구간(#16)', () => {
-  it('reset 안 했으면 10초 전, 했으면 reset 시각', async () => {
+  it('reset 안 했으면 10초, 했으면 reset 뒤(최대 2분)', async () => {
     const now = Date.now();
     vi.resetModules();
     const fresh = await import('../../../../core/render/monitor.js');
-    expect(fresh.renderWindowStart(now)).toBe(now - 10_000);
+    expect(fresh.reportWindowMs(now)).toBe(10_000);
     const reset = now - 45_000;
     const realNow = Date.now;
     Date.now = () => reset;
     resetRenderStats();
     Date.now = realNow;
-    expect(renderWindowStart(now)).toBe(reset);
-    expect(renderWindowStart(now + 200_000)).toBe(now + 200_000 - 120_000);
+    expect(reportWindowMs(now)).toBe(45_000);
+    expect(reportWindowMs(now + 200_000)).toBe(120_000);
   });
 
   it('same_counts: reset 후 같은 구간에서 렌더 탭 횟수와 보고서 횟수가 같다', () => {

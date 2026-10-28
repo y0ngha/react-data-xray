@@ -1,6 +1,6 @@
-import { endpointOf } from '../requests/requestKey.js';
 import type { Fiber } from '../fiber/types.js';
 import type { MountStats } from './mounts.js';
+import { causeKeyOf } from './summary.js';
 import {
   RENDER_REASONS,
   type MemoStats,
@@ -14,6 +14,8 @@ import {
 } from './types.js';
 
 export interface RenderGroup extends RenderSummary {
+  /** 그룹 키(이름 + 위치, 라이브러리는 패키지 + 이름 + 그린 앱 컴포넌트). 목록의 key 로 쓴다. */
+  key?: string;
   name: string;
   instances: number;
   fiber: unknown;
@@ -37,11 +39,22 @@ export interface LibraryRender {
   avoidable: number;
 }
 
+// 유휴 큐 한 step 이 4ms 를 넘기지 않게 이만큼 처리할 때마다 쉰다.
+const GROUP_CHUNK = 100;
+
+/** 조각 생성기를 끝까지 돌려 결과를 얻는다(보고서·사용자 조회처럼 그 자리에서 끝낼 때). */
+export const drain = <T>(steps: Generator<void, T>): T => {
+  let r = steps.next();
+  while (!r.done) r = steps.next();
+  return r.value;
+};
+
 const union = (a: readonly string[], b: readonly string[]): string[] => Array.from(new Set([...a, ...b]));
 
 const mergeCauses = (a: readonly NetworkCauseCount[], b: readonly NetworkCauseCount[]): NetworkCauseCount[] => {
+  // 원인 키는 ID 를 묶지 않은 경로다. 목록 행마다 다른 /items/{id} 를 한 원인으로 합치면 고리(loop)로 오탐한다.
   const byEndpoint = [...a, ...b].reduce((acc, c) => {
-    const key = endpointOf(c.record);
+    const key = causeKeyOf(c.record);
     const prev = acc.get(key);
     return acc.set(
       key,
@@ -129,7 +142,7 @@ const keyOfOrigin = (o: NonNullable<RenderEvent['origin']>): string => (o.from ?
  * 렌더를 시작한 컴포넌트별로, 하위가 얼마나 따라 렌더됐고 그중 값이 실제로 바뀐 props 는 무엇인지 모은다.
  * since 이후의 기록만 본다.
  */
-export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number): Map<string, OriginImpact> => {
+export function* originImpactsSteps(renders: ReadonlyArray<RenderEntry>, since: number): Generator<void, Map<string, OriginImpact>> {
   const acc = new Map<
     string,
     {
@@ -142,7 +155,8 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
       unchangedMs: number;
     }
   >();
-  renders.forEach((entry) =>
+  for (let i = 0; i < renders.length; i++) {
+    const entry = renders[i];
     entry.events.forEach((e) => {
       if (e.time < since || !e.origin) return;
       const key = keyOfOrigin(e.origin);
@@ -169,8 +183,9 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
         e.keys?.filter((k) => k !== 'children').forEach((k) => cur.changed.set(`${entry.name}.${k}`, depthOf(entry.fiber)));
       }
       acc.set(key, cur);
-    }),
-  );
+    });
+    if ((i + 1) % GROUP_CHUNK === 0) yield;
+  }
   return new Map(
     [...acc.entries()].map(([name, a]) => [
       name,
@@ -183,7 +198,10 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
       },
     ]),
   );
-};
+}
+
+export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number): Map<string, OriginImpact> =>
+  drain(originImpactsSteps(renders, since));
 
 const locationKey = (name: string, location?: string): string => `${name}|${location ?? ''}`;
 
@@ -216,19 +234,24 @@ const foldLibraries = (groups: Map<string, RenderGroup>, renders: ReadonlyArray<
  * 같은 컴포넌트가 여러 개 렌더되면(목록의 행 등) 이름과 그리는 위치별로 합친다. 라이브러리 내부 컴포넌트는 그린 앱 컴포넌트 아래로 접는다.
  * since 를 주면 그 이후 기록으로 각 컴포넌트가 시작한 렌더의 영향(impact)도 붙인다.
  */
-export const groupRenders = (renders: ReadonlyArray<RenderEntry & RenderSummary>, since?: number): RenderGroup[] => {
-  const grouped = renders.reduce((acc, e) => {
+export function* groupRendersSteps(renders: ReadonlyArray<RenderEntry & RenderSummary>, since?: number): Generator<void, RenderGroup[]> {
+  const grouped = new Map<string, RenderGroup>();
+  for (let i = 0; i < renders.length; i++) {
+    const e = renders[i];
     const key = keyOf(e);
-    const g = acc.get(key);
-    return acc.set(key, g ? merge(g, e) : { ...e, instances: 1 });
-  }, new Map<string, RenderGroup>());
+    const g = grouped.get(key);
+    grouped.set(key, g ? merge(g, e) : { ...e, key, instances: 1 });
+    if ((i + 1) % GROUP_CHUNK === 0) yield;
+  }
   const folded = foldLibraries(grouped, renders);
   if (since === undefined) return folded;
-  const impacts = originImpacts(renders, since);
-  const keyOfGroup = new Map(Array.from(grouped.entries(), ([key, g]) => [g, key]));
+  const impacts = yield* originImpactsSteps(renders, since);
   // 그룹은 위에서 새로 만든 객체라 그대로 채워도 된다.
-  return folded.map((g) => Object.assign(g, { impact: impacts.get(keyOfGroup.get(g) ?? '') }));
-};
+  return folded.map((g) => Object.assign(g, { impact: impacts.get(g.key ?? '') }));
+}
+
+export const groupRenders = (renders: ReadonlyArray<RenderEntry & RenderSummary>, since?: number): RenderGroup[] =>
+  drain(groupRendersSteps(renders, since));
 
 export type RenderSort = 'avoidable' | 'count' | 'time';
 

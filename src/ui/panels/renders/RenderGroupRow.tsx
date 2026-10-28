@@ -1,6 +1,6 @@
 import { renderAdvice } from '../../../core/render/advice.js';
 import type { RenderGroup } from '../../../core/render/groups.js';
-import { withHookPaths } from '../../../core/render/summary.js';
+import { WINDOW_MS, withHookPaths } from '../../../core/render/summary.js';
 import { RENDER_REASONS, RENDER_STORM } from '../../../core/render/types.js';
 import type { Hit } from '../../../core/inspect/types.js';
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
@@ -17,9 +17,13 @@ const reasonSummary = (g: RenderGroup): string =>
     .map((r) => `${REASON_LABEL[r]} ${g.reasons[r]}`)
     .join(' · ');
 
-const Headline = ({ group, showTime }: { group: RenderGroup; showTime: boolean }) => (
+// RENDER_STORM 은 10초 기준이라, 더 긴 구간(reset 뒤 최대 120초)은 10초 몫으로 환산해 견준다.
+const isStorm = (group: RenderGroup, windowMs: number): boolean =>
+  group.recent / group.instances / Math.max(1, windowMs / WINDOW_MS) >= RENDER_STORM;
+
+const Headline = ({ group, showTime, windowMs }: { group: RenderGroup; showTime: boolean; windowMs: number }) => (
   <div>
-    <b style={{ color: group.recent / group.instances >= RENDER_STORM ? color.warn : color.text }}>{group.recent}회</b>
+    <b style={{ color: isStorm(group, windowMs) ? color.warn : color.text }}>{group.recent}회</b>
     {showTime && <span style={{ color: color.muted }}> · {group.ms.toFixed(1)}ms</span>} &lt;{group.name}&gt;
     {group.instances > 1 && <span style={{ color: color.muted }}> × {group.instances}개</span>}
     {group.avoidable > 0 && <Badge color={color.review}>줄일 수 있음 {group.avoidable}</Badge>}
@@ -122,12 +126,14 @@ interface RenderGroupRowProps {
   source?: Hit;
   stat?: EndpointStat;
   showTime: boolean;
+  /** 렌더를 센 구간(ms). 폭주 색을 10초 기준으로 환산하는 데 쓴다. */
+  windowMs?: number;
 }
 
 /** 렌더 분석 한 줄: 횟수·시간·이유, 줄이는 방법, 네트워크 원인, 데이터 출처 */
-export const RenderGroupRow = ({ group, source, stat, showTime }: RenderGroupRowProps) => (
+export const RenderGroupRow = ({ group, source, stat, showTime, windowMs = WINDOW_MS }: RenderGroupRowProps) => (
   <div style={rowStyle}>
-    <Headline group={group} showTime={showTime} />
+    <Headline group={group} showTime={showTime} windowMs={windowMs} />
     <Muted>{reasonSummary(group)}</Muted>
     <MemoStats group={group} />
     <Mounts group={group} />

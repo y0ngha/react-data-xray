@@ -51,6 +51,7 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 | `requests.endpoints[]` | 엔드포인트별 `count`·`duplicates`·`sameResponses`·`review`(주기·포커스 재요청)·`ignored`, 낭비 URL 예, `callers`(요청을 보낸 코드) |
 | `reactQuery.findings[]` | 캐시 키 점검 지적과 `fix` |
 | `renders.windowSeconds` | 렌더를 센 구간. `reset()` 했으면 그 뒤 전부(최대 2분), 아니면 최근 10초 |
+| `renders.truncated`·`droppedInstances` | 렌더된 인스턴스가 5000개를 넘어 렌더 적은 인스턴스를 센 대상에서 뺐는지와 그 수. 빠졌으면 `components[]` 의 횟수가 실제보다 적을 수 있습니다 |
 | `renders.components[]` | `renders`·`avoidable`, 이유별 횟수, `stateChanges`(바뀐 훅과 주기), `startedRenders`(이 컴포넌트가 일으킨 하위 렌더와 값이 바뀐 props), `causedBy`, `renderedAt`, `networkCauses`, `changedProps`, `advice` |
 | `howToRead` | 위 필드를 읽는 법 |
 
