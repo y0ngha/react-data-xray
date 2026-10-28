@@ -32,7 +32,9 @@
           "__REACT_DEVTOOLS_GLOBAL_HOOK__",
           "_debugHookTypes",
           "_debugSource",
-          "_debugStack"
+          "_debugStack",
+          "__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE",
+          "__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED"
         ]
       }
     ]

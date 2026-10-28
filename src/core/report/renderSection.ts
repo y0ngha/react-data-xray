@@ -110,4 +110,5 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
 // 새 howToRead 줄은 여기에 더한다.
 export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [
   'renders.truncated 가 true 면 렌더된 인스턴스가 5000개를 넘어 렌더 적은 인스턴스(droppedInstances 개)를 센 대상에서 뺀 것이다. 컴포넌트마다 최근 200회까지만 센다는 상한과는 별개다.',
+  "stateChanges 의 label 은 dev 빌드면 훅을 부른 커스텀 훅 경로가 앞에 붙고(예: useCart › useState #2), 소스맵이 있으면 호출 위치가 뒤에 붙는다(src/x.ts:12). 없으면 '종류 #순서' 만 나온다.",
 ];

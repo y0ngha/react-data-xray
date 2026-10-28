@@ -1,3 +1,5 @@
+import { hookSitesOf, resolvedLocation } from '../fiber/hookPaths.js';
+import type { Fiber } from '../fiber/types.js';
 import { endpointOf } from '../requests/requestKey.js';
 import {
   RENDER_REASONS,
@@ -63,12 +65,25 @@ export const regularInterval = (times: readonly number[]): number | undefined =>
 
 const hookLabel = (h: { index: number; type?: string }): string => (h.type ? `${h.type} #${h.index}` : `훅 칸 #${h.index}`);
 
+/**
+ * "useCart › useState #2 (src/x.ts:12)": 훅 순번(코드에서 훅을 부른 순서)에 커스텀 훅 경로를 붙인다.
+ * 경로는 dev 빌드의 훅 목록이 있을 때만, 위치는 소스맵이 풀렸을 때만 붙는다. 없으면 "useState #2" 그대로.
+ */
+export const stateHookLabel = (fiber: Fiber, hookIndex: number): string => {
+  const type = fiber._debugHookTypes?.[hookIndex - 1];
+  const base = hookLabel({ index: hookIndex, type });
+  const site = type ? hookSitesOf(fiber)?.[hookIndex - 1] : undefined;
+  if (!site) return base;
+  const where = resolvedLocation(site.frame);
+  return `${[...site.path, base].join(' › ')}${where ? ` (${where})` : ''}`;
+};
+
 /** state 때문에 렌더된 기록에서, 값이 바뀐 훅별 횟수·간격·최근 변경 */
-const summarizeStateHooks = (events: RenderEntry['events']): StateHookSummary[] => {
+const summarizeStateHooks = (events: RenderEntry['events'], fiber: unknown): StateHookSummary[] => {
   const byHook = new Map<string, { times: number[]; last: { from: string; to: string } }>();
   events.forEach((e) =>
     e.hooks?.forEach((h) => {
-      const label = hookLabel(h);
+      const label = h.type && h.type !== 'this.state' ? stateHookLabel(fiber as Fiber, h.index) : hookLabel(h);
       const prev = byHook.get(label);
       byHook.set(label, { times: [...(prev?.times ?? []), e.time], last: { from: h.from, to: h.to } });
     }),
@@ -98,7 +113,7 @@ export const summarize = (entry: RenderEntry, now: number, windowMs = WINDOW_MS)
     network: recent.filter((e) => e.cause).length,
     causes: countCauses(recent),
     origins: countOrigins(recent),
-    stateHooks: summarizeStateHooks(recent),
+    stateHooks: summarizeStateHooks(recent, entry.fiber),
     compiled: !!entry.compiled,
   };
 };

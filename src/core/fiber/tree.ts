@@ -58,7 +58,7 @@ const jsxFrameOf = (fiber: Fiber): string | undefined =>
     .map((line) => line.trim())
     .find((line) => FRAME_LOCATION.test(line) && !LIBRARY_FRAME.test(line));
 
-const locationOfFrame = (frame: string): string | undefined => {
+export const locationOfFrame = (frame: string): string | undefined => {
   const match = FRAME_LOCATION.exec(frame);
   return match ? `${shortPath(match[1])}:${match[2]}` : undefined;
 };
