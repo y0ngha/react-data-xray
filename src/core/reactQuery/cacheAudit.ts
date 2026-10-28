@@ -11,12 +11,13 @@ import type { Origin, RequestRecord } from '../requests/types.js';
  * - duplicate-cache: 같은 요청(메서드·URL·본문)의 데이터를 서로 다른 queryKey 로 캐시한다 → 키를 하나로 맞춘다
  * - key-missing-param: 같은 queryKey 로 서로 다른 요청을 가져왔다 → 쿼리 함수가 쓰는 값(파라미터)이 키에 빠졌다
  * - invalidate-miss: invalidateQueries 에 준 키와 맞는 쿼리가 이 화면에서 지금까지 없었다 → 무효화가 빗나간다
+ * - invalidate-unloaded: 무효화 키의 모양(앞 두 문자열)은 본 적 있지만 그 값의 쿼리는 아직 없다 → 정상(상속 범위 무효화 등), 한 줄로 묶어 회색으로 보인다
  * - stale-zero: staleTime 이 0 이라 화면을 옮길 때마다 같은 응답을 다시 받는다 → staleTime 을 늘린다
  *
  * 앞의 둘은 QueryCache 를 구독해 "쿼리 함수가 실제로 가져온" 성공만 기록한다(setQueryData·initialData 처럼 직접 넣은
  * 데이터는 요청이 아니다). 점검할 때 캐시를 훑기만 하면 그사이의 변경을 놓친다.
  */
-export type CacheFindingKind = 'duplicate-cache' | 'key-missing-param' | 'invalidate-miss' | 'stale-zero';
+export type CacheFindingKind = 'duplicate-cache' | 'key-missing-param' | 'invalidate-miss' | 'invalidate-unloaded' | 'stale-zero';
 
 export interface CacheFinding {
   kind: CacheFindingKind;
@@ -26,6 +27,8 @@ export interface CacheFinding {
   requests: string[];
   /** invalidate-miss: invalidateQueries 를 부른 코드 위치 */
   stack?: string;
+  /** invalidate-*: 같은 호출 위치에서 묶인 무효화 키 수(keys 는 앞의 몇 개만 남긴다) */
+  count?: number;
 }
 
 interface QueryLike {
@@ -210,12 +213,43 @@ const callerStack = (): string | undefined => {
   );
 };
 
+// 키 모양: 앞 두 요소가 모두 문자열이면 그 둘(예: ['scopedMember','list']). 한 요소뿐인 키는 모양으로 보지 않는다.
+const SHAPE_LEN = 2;
+const shapeOf = (key: unknown): string | undefined =>
+  Array.isArray(key) && key.length >= SHAPE_LEN && key.slice(0, SHAPE_LEN).every((k) => typeof k === 'string')
+    ? keyText(key.slice(0, SHAPE_LEN))
+    : undefined;
+
 const recordInvalidate = (history: ClientHistory, args: unknown[]): void => {
   const key = invalidatedKey(args);
-  if (key === undefined || [...history.keys.values()].some((k) => partialMatch(key, k))) return;
-  pushBounded(history.misses, {
-    at: Date.now(),
-    finding: { kind: 'invalidate-miss', keys: [keyText(key)], requests: [], stack: callerStack() },
+  const seen = [...history.keys.values()];
+  if (key === undefined || seen.some((k) => partialMatch(key, k))) return;
+  const shape = shapeOf(key);
+  const kind = shape !== undefined && seen.some((k) => shapeOf(k) === shape) ? 'invalidate-unloaded' : 'invalidate-miss';
+  pushBounded(history.misses, { at: Date.now(), finding: { kind, keys: [keyText(key)], requests: [], stack: callerStack() } });
+};
+
+const SAMPLE_KEYS = 3;
+/** 같은 종류·같은 호출 위치(스택 첫 줄)의 무효화는 한 줄로 묶는다(키는 앞 몇 개만, 수는 count) */
+const foldInvalidations = (findings: readonly CacheFinding[]): CacheFinding[] => {
+  const groups = new Map<string, CacheFinding[]>();
+  const out: CacheFinding[] = [];
+  findings.forEach((f) => {
+    const at = f.stack?.split('\n')[0];
+    if (!f.kind.startsWith('invalidate-') || !at) return void out.push(f);
+    const id = `${f.kind}|${at}`;
+    const list = groups.get(id);
+    if (list) list.push(f);
+    else {
+      groups.set(id, [f]);
+      out.push(f);
+    }
+  });
+  return out.map((f) => {
+    const list = groups.get(`${f.kind}|${f.stack?.split('\n')[0]}`);
+    return list && list.length > 1
+      ? Object.assign({}, f, { keys: list.slice(0, SAMPLE_KEYS).map((g) => g.keys[0]), count: list.length })
+      : f;
   });
 };
 
@@ -349,7 +383,7 @@ export const auditQueryCache = (
   });
   const findings = keyFindings(fetched).concat(others);
   // 같은 종류·키·요청은 하나로 합친다(같은 키를 여러 번 무효화한 경우 등).
-  return Array.from(new Map(findings.map((f) => [findingId(f), f])).values());
+  return foldInvalidations(Array.from(new Map(findings.map((f) => [findingId(f), f])).values()));
 };
 
 /** 점검 결과 하나를 가리키는 문자열(화면 key, 합치기) */
@@ -367,6 +401,10 @@ export const CACHE_FINDING_TEXT: Record<CacheFindingKind, { title: string; fix: 
   'invalidate-miss': {
     title: '무효화한 키와 맞는 쿼리가 없었습니다',
     fix: '이 화면에서 지금까지 만든 쿼리 중 이 키(접두사)와 맞는 것이 없습니다. queryKey 와 모양이 같은지 확인하세요. 다른 화면의 쿼리를 미리 무효화한 것이라면 무시해도 됩니다.',
+  },
+  'invalidate-unloaded': {
+    title: '아직 불러오지 않은 키를 무효화했습니다',
+    fix: '같은 모양(앞 두 요소)의 쿼리는 있었고 이 값의 쿼리만 아직 없습니다. 상속 범위 무효화 같은 정상 동작이라 고칠 것은 없습니다.',
   },
   'stale-zero': {
     title: 'staleTime 이 0 이라 같은 응답을 다시 받습니다',

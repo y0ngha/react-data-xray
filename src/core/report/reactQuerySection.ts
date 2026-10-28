@@ -25,4 +25,6 @@ export const buildReactQuerySection = (
 };
 
 // 새 howToRead 줄은 여기에 더한다.
-export const REACT_QUERY_HOW_TO_READ_EXTRA: readonly string[] = [];
+export const REACT_QUERY_HOW_TO_READ_EXTRA: readonly string[] = [
+  'reactQuery.findings 의 invalidate-unloaded 는 키 모양은 맞고 값의 쿼리만 아직 없는 정상 무효화라 고칠 것이 없다. count 는 같은 호출 위치에서 묶인 키 수(keys 는 앞 몇 개)다.',
+];
