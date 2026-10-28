@@ -89,3 +89,17 @@ describe('비동기 경계를 넘는 요청의 출처 (#13)', () => {
     expect(queryContextOf(getRecords().find((r) => r.url === '/api/plain')!)).toBeUndefined();
   });
 });
+
+describe('Request 가로채기 중복 설치 (#13)', () => {
+  it('두 번 설치해도 스택이 한 번만 담기고 instanceof 가 그대로다', async () => {
+    const { interceptRequestOrigins } = await import('../requestOrigins.js');
+    const { requestOrigin } = await import('../requestOrigins.js');
+    interceptRequestOrigins();
+    const once = globalThis.Request;
+    interceptRequestOrigins();
+    expect(globalThis.Request).toBe(once);
+    const r = new Request('http://l/x');
+    expect(r instanceof Request).toBe(true);
+    expect(requestOrigin(r)).toBeInstanceOf(Error);
+  });
+});
