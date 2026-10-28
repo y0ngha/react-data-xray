@@ -1,3 +1,4 @@
+import { knownQueryContextOf, queryContextOf } from '../capture/queryContext.js';
 import { queueIndex } from '../inspect/derivedMatch.js';
 import { flushQueue } from '../scheduler/idleQueue.js';
 import { classifyRecords } from '../requests/classify.js';
@@ -58,7 +59,7 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true)
     generatedAt: new Date(now).toISOString(),
     page: typeof location === 'undefined' ? '' : location.pathname,
     howToRead: HOW_TO_READ,
-    requests: buildRequestSection(records, classes, ignored),
+    requests: buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf),
     reactQuery: buildReactQuerySection(records, classes),
     renders: buildRenderSection(monitoring, now),
   };
