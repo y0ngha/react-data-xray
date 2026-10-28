@@ -12,6 +12,7 @@ import { Section } from '../components/Section.js';
 import type { Focus } from '../contexts.js';
 import { ClassBadge } from './ClassBadge.js';
 import { ConsumerList } from './ConsumerList.js';
+import { FetchCause } from './FetchCause.js';
 import { StackSection } from './StackSection.js';
 import { RequestStatusLine } from './RequestSummary.js';
 
@@ -116,6 +117,7 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
     {record.trigger && <Muted>{TRIGGER_TEXT[record.trigger]}</Muted>}
     <ConsumerList record={record} />
     <QueryCaller record={record} />
+    <FetchCause record={record} />
     <FollowUps record={record} />
     {record.stack && <StackSection stack={record.sourceStack ?? record.stack} />}
     <Section title="Query">

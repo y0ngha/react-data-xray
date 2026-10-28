@@ -40,17 +40,22 @@ export interface CacheFinding {
   count?: number;
 }
 
+interface ObserverLike {
+  options?: { staleTime?: unknown; refetchInterval?: unknown; enabled?: unknown };
+}
+
 interface QueryLike {
   queryKey: unknown;
   queryHash: string;
-  state: { data: unknown };
+  state: { data: unknown; dataUpdatedAt?: number; isInvalidated?: boolean };
   options?: { staleTime?: unknown };
-  observers?: Array<{ options?: { staleTime?: unknown; refetchInterval?: unknown } }>;
+  observers?: ObserverLike[];
 }
 
 interface CacheEvent {
   type: string;
   query?: QueryLike;
+  observer?: ObserverLike;
   action?: { type?: string; manual?: boolean };
 }
 
@@ -114,11 +119,32 @@ interface ClientHistory {
   successes: Array<{ at: number; queryHash: string; data: WeakRef<object> }>;
   /** 무효화 기록(재조회 원인 판정용). 맞는 쿼리가 있었는지와 무관하게 전부 남긴다. */
   invalidations: Array<{ at: number; key: unknown }>;
+  /** fetch 를 일으킬 수 있던 관찰자 이벤트(마운트, enabled 켜짐). 원인 판정은 조회할 때 한다. */
+  triggers: Array<{ at: number; seq: number; queryHash: string; kind: 'mount' | 'enabled' }>;
+  /** fetch 시작 순간의 쿼리 상태(원인 판정의 근거) */
+  fetchStarts: FetchStart[];
+}
+
+interface FetchStart {
+  at: number;
+  /** 이벤트 순서(같은 시각이어도 어느 fetch 가 그 관찰자 이벤트에 이어졌는지 가른다) */
+  seq: number;
+  queryHash: string;
+  /** 앞선 성공이 있었나(없으면 첫 조회) */
+  hadData: boolean;
+  dataUpdatedAt: number;
+  invalidated: boolean;
+  staleTime?: number;
+  interval: boolean;
 }
 
 const MAX_KEYS = 2000;
 // 네트워크 출처가 없는 데이터를 영원히 다시 찾지 않게, 이만큼 못 찾으면 버린다.
 const MAX_ATTEMPTS = 3;
+
+// 관찰자의 직전 enabled(false → true 로 켜지는 순간을 알아보려고)
+let eventSeq = 0;
+const enabledOf = new WeakMap<object, boolean>();
 
 const histories = new WeakMap<QueryClientLike, ClientHistory>();
 // 지금까지 감시한 client(트리를 다시 걷지 않고 재조회 원인을 찾으려고). 사라진 client 는 붙잡지 않는다.
@@ -293,10 +319,47 @@ const foldInvalidations = (findings: readonly CacheFinding[]): CacheFinding[] =>
   });
 };
 
+// 관찰자 이벤트와 fetch 시작은 이 시간 안에 이어진다(둘 다 같은 호출 안에서 일어난다).
+const TRIGGER_WINDOW_MS = 100;
+
+/** fetch 원인의 근거만 담는다(시각·상태 몇 개). 판정과 요청 연결은 조회할 때 한다. */
+const noteFetchEvent = (history: ClientHistory, event: CacheEvent, q: QueryLike): void => {
+  const at = Date.now();
+  const o = event.observer;
+  if (o && (event.type === 'observerAdded' || event.type === 'observerOptionsUpdated')) {
+    const enabled = o.options?.enabled !== false;
+    const before = enabledOf.get(o);
+    enabledOf.set(o, enabled);
+    const kind = event.type === 'observerAdded' ? 'mount' : before === false ? 'enabled' : undefined;
+    if (kind && enabled) pushBounded(history.triggers, { at, seq: ++eventSeq, queryHash: q.queryHash, kind });
+  } else if (event.type === 'updated' && event.action?.type === 'fetch') {
+    pushBounded(history.fetchStarts, {
+      at,
+      seq: ++eventSeq,
+      queryHash: q.queryHash,
+      hadData: (q.state.dataUpdatedAt ?? 0) > 0,
+      dataUpdatedAt: q.state.dataUpdatedAt ?? 0,
+      invalidated: !!q.state.isInvalidated,
+      staleTime: staleTimeOf(q),
+      interval: !!q.observers?.some((x) => x.options?.refetchInterval),
+    });
+  }
+};
+
 /** 처음 본 client 를 감시한다: 쿼리 성공을 기록하고, 무효화가 빗나가는지 본다. 원래 동작은 그대로 한다. */
 const watch = (client: QueryClientLike): void => {
   if (histories.has(client)) return;
-  const history: ClientHistory = { pending: [], fetched: [], keys: new Map(), misses: [], recent: [], successes: [], invalidations: [] };
+  const history: ClientHistory = {
+    pending: [],
+    fetched: [],
+    keys: new Map(),
+    misses: [],
+    recent: [],
+    successes: [],
+    invalidations: [],
+    triggers: [],
+    fetchStarts: [],
+  };
   histories.set(client, history);
   watched.push(new WeakRef(client));
   const cache = client.getQueryCache();
@@ -304,6 +367,7 @@ const watch = (client: QueryClientLike): void => {
   const now = Date.now();
   cache.getAll().forEach((q) => {
     rememberKey(history, q);
+    q.observers?.forEach((o) => enabledOf.set(o, o.options?.enabled !== false));
     const record = exactRequest(q.state.data);
     if (record) pushBounded(history.fetched, toFetched(now, q.queryHash, q.queryKey, record));
   });
@@ -312,6 +376,7 @@ const watch = (client: QueryClientLike): void => {
       const q = event.query;
       if (!q) return;
       if (event.type === 'added') rememberKey(history, q);
+      noteFetchEvent(history, event, q);
       // 직접 넣은 데이터(setQueryData 는 manual)는 요청이 아니다. 출처는 점검할 때 찾는다(dispatch 안에서 일을 줄인다).
       const data = q.state.data;
       if (
@@ -430,6 +495,8 @@ export const auditQueryCache = (
     history.fetched = history.fetched.filter((f) => f.at >= from);
     history.misses = history.misses.filter((m) => m.at >= from);
     history.successes = history.successes.filter((s) => s.at >= from);
+    history.triggers = history.triggers.filter((t) => t.at >= from);
+    history.fetchStarts = history.fetchStarts.filter((f) => f.at >= from);
     const queries = client.getQueryCache().getAll();
     fetched.push(...history.fetched, ...currentFetched(queries, now));
     others.push(
@@ -455,6 +522,24 @@ const staleTimeOf = (q: QueryLike): number | undefined => {
   return typeof st === 'number' ? st : undefined;
 };
 
+/** 이 요청이 끝난 직후의 쿼리 성공 중 데이터 출처가 이 요청과 같은 요청인 것(어느 쿼리의 요청인지) */
+const successOf = (record: RequestRecord): { client: QueryClientLike; history: ClientHistory; at: number } | undefined => {
+  for (const ref of watched) {
+    const client = ref.deref();
+    const history = client && histories.get(client);
+    if (!client || !history) continue;
+    resolvePending(history);
+    const end = record.startedAt + record.durationMs;
+    const at = history.successes.findIndex((s) => {
+      const data = s.data.deref();
+      const origin = data && originOfData(data)?.record;
+      return s.at >= record.startedAt && s.at <= end + SUCCESS_SLACK_MS && !!origin && requestKeyOf(origin) === requestKeyOf(record);
+    });
+    if (at >= 0) return { client, history, at };
+  }
+  return undefined;
+};
+
 /**
  * 이 요청이 React Query 쿼리의 재조회라면 그 원인. 앞선 성공(dataUpdatedAt)과 비교해 판정한다.
  * - after-invalidate: 앞선 성공 뒤에 이 쿼리를 덮는 무효화가 직전에 있었다
@@ -463,44 +548,104 @@ const staleTimeOf = (q: QueryLike): number | undefined => {
  * 쿼리 성공 기록(2분)에 앞선 성공이 없으면(첫 요청, 오래된 요청) 알 수 없다. 사용자 조회·보고서에서 부른다.
  */
 export const refetchReason = (record: RequestRecord): RefetchReason | undefined => {
+  const found = successOf(record);
+  if (!found) return undefined;
+  const { client, history, at } = found;
+  const { queryHash } = history.successes[at];
+  const prev = history.successes
+    .slice(0, at)
+    .reverse()
+    .find((f) => f.queryHash === queryHash);
+  if (!prev) return undefined;
+  const key = history.keys.get(queryHash);
+  if (
+    history.invalidations.some(
+      (i) =>
+        i.at >= prev.at && i.at <= record.startedAt + 5 && record.startedAt - i.at <= INVALIDATE_TO_REQUEST_MS && partialMatch(i.key, key),
+    )
+  )
+    return 'after-invalidate';
+  const q = client
+    .getQueryCache()
+    .getAll()
+    .find((x) => x.queryHash === queryHash);
+  if (!q) return undefined;
+  if (refetchesOnEveryVisit(q)) return 'stale-zero';
+  const staleTime = staleTimeOf(q);
+  return staleTime !== undefined && staleTime > 0 && record.startedAt - prev.at >= staleTime ? 'stale-elapsed' : undefined;
+};
+
+/** fetch 를 일으킨 원인: 마운트, enabled 켜짐, 무효화, 포커스·재연결, refetchInterval, 첫 조회. 수동 refetch() 는 직접 신호가 없어 맞추지 못하면 원인 없음(undefined)이다. */
+export type FetchCause = 'mount' | 'enabled' | 'invalidate' | 'focus' | 'interval' | 'initial';
+
+export interface FetchCauseDetail {
+  cause: FetchCause;
+  queryKey: string;
+  /** fetch 시작 순간의 staleTime(ms) */
+  staleTime?: number;
+  /** 마지막 갱신(dataUpdatedAt)으로부터 fetch 까지 지난 시간(ms). 첫 조회면 없다. */
+  ageMs?: number;
+  invalidated: boolean;
+  /** 지금 캐시 데이터의 요청(같은 응답이면 첫 요청). 관찰자 컴포넌트를 찾는 데 쓴다. */
+  dataRecord?: RequestRecord;
+}
+
+/**
+ * 이 요청을 보낸 쿼리 fetch 의 원인과 근거. 판정 순서: 첫 조회 > 관찰자 이벤트(마운트·enabled 켜짐) 직후 >
+ * 포커스·재연결 > 무효화 표시 > refetchInterval > 그 밖은 모른다(수동 호출의 직접 신호가 없다).
+ * 쿼리 성공 기록(2분)에 없는 요청(실패, 취소, 오래됨)은 알 수 없다. 사용자 조회·보고서에서 부른다.
+ */
+export const fetchCauseDetail = (record: RequestRecord): FetchCauseDetail | undefined => {
+  const found = successOf(record);
+  if (!found) return undefined;
+  const { client, history } = found;
+  const { queryHash } = history.successes[found.at];
+  const starts = history.fetchStarts.filter((f) => f.queryHash === queryHash);
+  const fetch = [...starts].reverse().find((f) => f.at <= record.startedAt + 5 && record.startedAt - f.at <= INVALIDATE_TO_REQUEST_MS);
+  if (!fetch) return undefined;
+  // 앞 fetch 에 쓰인 관찰자 이벤트는 이 fetch 의 원인이 아니다
+  const prevSeq = [...starts].reverse().find((f) => f.seq < fetch.seq)?.seq ?? 0;
+  const trigger = [...history.triggers]
+    .reverse()
+    .find((t) => t.queryHash === queryHash && t.seq > prevSeq && t.seq < fetch.seq && fetch.at - t.at <= TRIGGER_WINDOW_MS);
+  const cause: FetchCause | undefined = !fetch.hadData
+    ? 'initial'
+    : trigger
+      ? trigger.kind
+      : record.trigger
+        ? 'focus'
+        : fetch.invalidated
+          ? 'invalidate'
+          : fetch.interval
+            ? 'interval'
+            : undefined;
+  if (!cause) return undefined;
+  const data = client
+    .getQueryCache()
+    .getAll()
+    .find((x) => x.queryHash === queryHash)?.state.data;
+  const dataRecord = data !== null && typeof data === 'object' ? getOrigin(data)?.record : undefined;
+  return {
+    cause,
+    queryKey: keyText(history.keys.get(queryHash)),
+    ...(fetch.staleTime !== undefined && { staleTime: fetch.staleTime }),
+    ...(fetch.hadData && { ageMs: fetch.at - fetch.dataUpdatedAt }),
+    invalidated: fetch.invalidated,
+    ...(dataRecord && { dataRecord }),
+  };
+};
+
+export const fetchCause = (record: RequestRecord): FetchCause | undefined => fetchCauseDetail(record)?.cause;
+
+/** 겹친 무효화(double-invalidate)가 취소한 요청이면 두 무효화의 호출 위치(앞, 뒤). 요청 상세에 원인을 보이려고 쓴다. */
+export const overlapCancelOf = (record: RequestRecord): string[] | undefined => {
   for (const ref of watched) {
     const client = ref.deref();
     const history = client && histories.get(client);
-    if (!client || !history) continue;
-    resolvePending(history);
-    // 이 요청이 끝난 직후의 쿼리 성공 중 데이터 출처가 이 요청과 같은 요청인 것
-    const end = record.startedAt + record.durationMs;
-    const at = history.successes.findIndex((s) => {
-      const data = s.data.deref();
-      const origin = data && originOfData(data)?.record;
-      return s.at >= record.startedAt && s.at <= end + SUCCESS_SLACK_MS && !!origin && requestKeyOf(origin) === requestKeyOf(record);
-    });
-    if (at < 0) continue;
-    const { queryHash } = history.successes[at];
-    const prev = history.successes
-      .slice(0, at)
-      .reverse()
-      .find((f) => f.queryHash === queryHash);
-    if (!prev) return undefined;
-    const key = history.keys.get(queryHash);
-    if (
-      history.invalidations.some(
-        (i) =>
-          i.at >= prev.at &&
-          i.at <= record.startedAt + 5 &&
-          record.startedAt - i.at <= INVALIDATE_TO_REQUEST_MS &&
-          partialMatch(i.key, key),
-      )
-    )
-      return 'after-invalidate';
-    const q = client
-      .getQueryCache()
-      .getAll()
-      .find((x) => x.queryHash === queryHash);
-    if (!q) return undefined;
-    if (refetchesOnEveryVisit(q)) return 'stale-zero';
-    const staleTime = staleTimeOf(q);
-    return staleTime !== undefined && staleTime > 0 && record.startedAt - prev.at >= staleTime ? 'stale-elapsed' : undefined;
+    const m = history?.misses.find(
+      (x) => x.at >= auditFrom && x.finding.kind === 'double-invalidate' && cancelledBy(x.at, [record]).length > 0,
+    );
+    if (m?.finding.stacks) return m.finding.stacks;
   }
   return undefined;
 };
