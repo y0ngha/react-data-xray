@@ -16,6 +16,48 @@ describe('요청 문맥', () => {
     expect(stack).not.toContain('fetchInterceptor');
   });
 
+  describe('스택 상한', () => {
+    const original = Object.getOwnPropertyDescriptor(Error, 'stackTraceLimit');
+    const restore = () => {
+      if (original) Object.defineProperty(Error, 'stackTraceLimit', original);
+      else delete (Error as { stackTraceLimit?: number }).stackTraceLimit;
+    };
+
+    it('이미 넉넉한 상한(Safari 100, 앱이 올려 둔 값)은 낮추지 않는다', async () => {
+      Error.stackTraceLimit = 100;
+      const seen: number[] = [];
+      const spy = vi.spyOn(Error, 'stackTraceLimit', 'set').mockImplementation((v) => void seen.push(v));
+      try {
+        await fetch('/api/limit-high');
+        expect(seen).toEqual([]);
+      } finally {
+        spy.mockRestore();
+        restore();
+      }
+    });
+
+    it('상한이 없는 엔진(Firefox)에는 stackTraceLimit 를 새로 만들지 않는다', async () => {
+      delete (Error as { stackTraceLimit?: number }).stackTraceLimit;
+      try {
+        await fetch('/api/limit-none');
+        expect(Object.prototype.hasOwnProperty.call(Error, 'stackTraceLimit')).toBe(false);
+      } finally {
+        restore();
+      }
+    });
+
+    it('상한을 바꿀 수 없게 얼린 Error(SES)여도 요청은 기록한다', async () => {
+      Object.defineProperty(Error, 'stackTraceLimit', { value: 10, writable: false, configurable: true });
+      try {
+        await fetch('/api/limit-frozen');
+        flushQueue();
+        expect(getRecords().at(-1)?.url).toBe('/api/limit-frozen');
+      } finally {
+        restore();
+      }
+    });
+  });
+
   it('whenSourcesResolved 는 맵을 받은 뒤에야 큐에 오르는 해석 step 도 직접 돌려 끝낸다', async () => {
     vi.stubGlobal(
       'requestIdleCallback',

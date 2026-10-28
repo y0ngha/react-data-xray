@@ -27,8 +27,8 @@ jobs:
           grep -q '<!-- rdx-pr-template -->' <<<"$BODY" \
             || fail "PR 본문은 .github/pull_request_template.md 템플릿으로 써 주세요."
 
-          # GitHub 은 HTML 주석과 코드 블록 안의 키워드로는 이슈를 닫지 않으므로 빼고 본다.
-          VISIBLE=$(perl -0pe 's/<!--.*?-->//gs; s/```.*?```//gs' <<<"$BODY")
+          # GitHub 은 HTML 주석과 코드(블록·인라인·들여쓰기) 안의 키워드로는 이슈를 닫지 않으므로 빼고 본다.
+          VISIBLE=$(perl -0pe 's/<!--.*?-->//gs; s/^(```|~~~).*?^\1//gms; s/`[^`\n]*`//g; s/^(    |\t).*$//gm' <<<"$BODY")
           REPO_RE=${REPO//./\\.}
           # 이 저장소의 이슈를 닫는 형식: Closes #12, Closes: #12, Fixes owner/repo#12, Resolves https://github.com/owner/repo/issues/12
           NUMBERS=$(grep -Eio "\b(close[sd]?|fix(e[sd])?|resolve[sd]?):? +(${REPO_RE}#|#|https://github\.com/${REPO_RE}/issues/)[0-9]+" <<<"$VISIBLE" \
@@ -42,5 +42,5 @@ jobs:
             IFS=$'\t' read -r state is_pr has_template <<<"$info"
             [ "$is_pr" = "false" ] || fail "#$n 은 이슈가 아니라 PR 입니다."
             [ "$state" = "open" ] || fail "#$n 이슈가 이미 닫혀 있습니다."
-            [ "$has_template" = "true" ] || fail "#$n 이슈가 이슈 템플릿으로 만들어지지 않았습니다. 템플릿 본문으로 고쳐 주세요."
+            [ "$has_template" = "true" ] || fail "#$n 이슈가 이슈 템플릿으로 만들어지지 않았습니다. 템플릿 본문으로 고친 뒤 이 검사를 다시 돌려 주세요(이슈를 고쳐도 저절로 다시 돌지 않습니다)."
           done

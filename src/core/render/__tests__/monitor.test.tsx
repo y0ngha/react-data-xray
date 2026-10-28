@@ -276,7 +276,8 @@ describe('렌더의 네트워크 원인', () => {
     expect(getTopRenders(1, Date.now(), (e) => e.name === 'Quiet').map((e) => e.name)).toEqual(['Quiet']);
   });
 
-  it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유)과 자기를 그리는 JSX 위치를 남긴다', () => {
+  /** 부모(Counter) state 로 두 번 렌더된 Leaf 의 렌더 기록 */
+  const renderLeaf = () => {
     function Leaf() {
       return <em>leaf</em>;
     }
@@ -285,11 +286,21 @@ describe('렌더의 네트워크 원인', () => {
     }
     render(<Counter>{() => <Middle />}</Counter>);
     bump(2);
-    const leaf = getTopRenders(200).find((e) => e.name === 'Leaf')!;
-    expect(leaf.origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
-    // React 19 는 JSX 위치(_debugSource)를 없앴으므로 위치만 비고 나머지는 같다.
-    const location = process.env.RDX_REACT_MAJOR === '19' ? /^없음$/ : /monitor\.test\.tsx:\d+$/;
-    expect(leaf.location ?? '없음').toMatch(location);
+    return getTopRenders(200).find((e) => e.name === 'Leaf')!;
+  };
+  const isReact19 = process.env.RDX_REACT_MAJOR === '19';
+
+  it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유)을 남긴다', () => {
+    expect(renderLeaf().origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
+  });
+
+  it.runIf(!isReact19)('React 18 에서는 자기를 그리는 JSX 위치를 남긴다', () => {
+    expect(renderLeaf().location).toMatch(/monitor\.test\.tsx:\d+$/);
+  });
+
+  // React 19 는 JSX 위치(_debugSource)를 없앴다. 위치만 비고 나머지는 같다.
+  it.runIf(isReact19)('React 19 에서는 JSX 위치가 비어 있다', () => {
+    expect(renderLeaf().location).toBeUndefined();
   });
 });
 
