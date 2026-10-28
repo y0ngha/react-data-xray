@@ -1,13 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { compare } from '../../../core/report/compare.js';
 import { getSnapshot, snapshotNames } from '../../../core/report/reportApi.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 
-const fmt = (row: Record<string, unknown>, skip: string): string =>
+const fmt = (row: Record<string, unknown>, skip: readonly string[]): string =>
   Object.entries(row)
-    .filter(([k]) => k !== skip)
+    .filter(([k]) => !skip.includes(k))
     .map(([k, v]) => `${k} ${typeof v === 'number' && v > 0 ? '+' : ''}${String(v)}`)
     .join(' · ');
 
@@ -17,9 +17,12 @@ export const CompareReports = () => {
   const names = open ? snapshotNames() : [];
   const [before, setBefore] = useState('');
   const [after, setAfter] = useState('');
-  const a = getSnapshot(before);
-  const b = getSnapshot(after);
-  const result = a && b ? compare(a, b) : null;
+  // 닫혀 있는 동안 주기적으로 다시 그려져도 sessionStorage 의 보고서를 읽지 않는다.
+  const result = useMemo(() => {
+    const a = open ? getSnapshot(before) : undefined;
+    const b = open ? getSnapshot(after) : undefined;
+    return a && b ? compare(a, b) : null;
+  }, [open, before, after]);
   const pick = (value: string, set: (v: string) => void, label: string) => (
     <select aria-label={label} value={value} onChange={(e) => set(e.target.value)}>
       <option value="">{label}</option>
@@ -51,12 +54,12 @@ export const CompareReports = () => {
               ))}
               {result.requests.map((r) => (
                 <div key={r.endpoint}>
-                  {r.endpoint} {r.status ?? ''} {fmt(r, 'endpoint')}
+                  {r.endpoint} {r.status ?? ''} {fmt(r, ['endpoint', 'status'])}
                 </div>
               ))}
               {result.renders.map((r) => (
-                <div key={r.name}>
-                  &lt;{r.name}&gt; {r.status ?? ''} {fmt(r, 'name')}
+                <div key={`${r.name}|${r.renderedAt ?? ''}|${r.package ?? ''}`}>
+                  &lt;{r.name}&gt; {r.renderedAt ?? r.package ?? ''} {r.status ?? ''} {fmt(r, ['name', 'status', 'renderedAt', 'package'])}
                 </div>
               ))}
               {result.reactQuery.added.map((id) => (

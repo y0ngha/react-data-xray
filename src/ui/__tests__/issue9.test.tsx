@@ -8,7 +8,7 @@ import { useProblemSignal } from '../hooks/useProblemSignal.js';
 
 const handlers = { onPointerDown: () => undefined, onPointerMove: () => undefined, onPointerUp: () => undefined, onClick: () => undefined };
 const breakdown = { waste: ['GET /a', 'GET /b'], storming: ['Comp'] };
-const setup = (onSelect = vi.fn<(tab: string) => void>()) => {
+const setup = (onSelect = vi.fn<(tab: string, key: string) => void>()) => {
   render(
     <FloatingButton position={{ x: 0, y: 0 }} issues={3} alert={false} handlers={handlers} breakdown={breakdown} onSelect={onSelect} />,
   );
@@ -31,10 +31,10 @@ it('마우스를 올려도 열리고, 항목을 누르면 해당 탭으로 가�
   const { button, onSelect } = setup();
   fireEvent.mouseEnter(button);
   fireEvent.click(screen.getByRole('button', { name: 'GET /b' }));
-  expect(onSelect).toHaveBeenCalledWith('requests');
+  expect(onSelect).toHaveBeenCalledWith('requests', 'GET /b');
   fireEvent.mouseEnter(button);
   fireEvent.click(screen.getByRole('button', { name: '<Comp>' }));
-  expect(onSelect).toHaveBeenLastCalledWith('renders');
+  expect(onSelect).toHaveBeenLastCalledWith('renders', 'Comp');
 });
 
 it('storm_window_note: 렌더 폭주가 최근 10초 기준이라고 적는다', () => {
@@ -51,7 +51,7 @@ it('문제가 없으면 내역을 열지 않는다', () => {
       alert={false}
       handlers={handlers}
       breakdown={{ waste: [], storming: [] }}
-      onSelect={vi.fn<(tab: string) => void>()}
+      onSelect={vi.fn<(tab: string, key: string) => void>()}
     />,
   );
   fireEvent.mouseEnter(screen.getByRole('button'));

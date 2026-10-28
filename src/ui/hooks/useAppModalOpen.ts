@@ -22,21 +22,30 @@ const touchesApp = (records: MutationRecord[]): boolean =>
     return !isOwnUi(el);
   });
 
-/** 모달이 생기거나 열리고 닫히는 변경만 본다(속성은 open·aria-modal 만). 한 프레임에 한 번만 다시 확인한다. */
+/** 모달이 생기거나 열리고 닫히는 변경, 모달의 전환·애니메이션 끝, 창 크기 변경을 본다. 한 프레임에 한 번만 다시 확인한다. */
 const watchAppModal = (onChange: (rect: DOMRect | null) => void): (() => void) => {
   let frame = 0;
   const check = () => {
     frame = 0;
     onChange(appModalRect());
   };
-  const observer = new MutationObserver((records) => {
-    if (!frame && touchesApp(records)) frame = requestAnimationFrame(check);
-  });
+  const schedule = () => {
+    if (!frame) frame = requestAnimationFrame(check);
+  };
+  const observer = new MutationObserver((records) => touchesApp(records) && schedule());
+  // 열림 애니메이션이 끝난 뒤의 크기와 창 크기 변경도 다시 잰다(변이는 애니메이션 시작에만 온다).
+  const onAnimationEnd = (e: Event) => e.target instanceof Element && !isOwnUi(e.target) && e.target.closest(APP_MODAL) && schedule();
+  document.addEventListener('transitionend', onAnimationEnd, true);
+  document.addEventListener('animationend', onAnimationEnd, true);
+  window.addEventListener('resize', schedule);
   observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'aria-modal'] });
   // 감시를 시작할 때 이미 열려 있는 모달도 본다.
   frame = requestAnimationFrame(check);
   return () => {
     observer.disconnect();
+    document.removeEventListener('transitionend', onAnimationEnd, true);
+    document.removeEventListener('animationend', onAnimationEnd, true);
+    window.removeEventListener('resize', schedule);
     cancelAnimationFrame(frame);
   };
 };
@@ -64,7 +73,7 @@ export const useCollapseForAppModal = (
   const modal = useAppModalRect(panelOpen && settings.dock !== 'window');
   const [keepExpanded, setKeepExpanded] = useState(false);
   if (!modal && keepExpanded) setKeepExpanded(false);
-  const avoid = modal && !settings.chosen ? dockAvoiding(modal, new DOMRect(0, 0, window.innerWidth, window.innerHeight)) : null;
+  const avoid = modal && !settings.chosen ? dockAvoiding(modal, new DOMRect(0, 0, window.innerWidth, window.innerHeight), settings) : null;
   return {
     collapsed: !!modal && !keepExpanded && (!avoid || avoid === 'float'),
     expand: () => setKeepExpanded(true),

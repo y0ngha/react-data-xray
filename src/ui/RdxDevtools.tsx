@@ -10,7 +10,7 @@ import { useElementPicker } from './hooks/useElementPicker.js';
 import { useHotkey, type Hotkey } from './hooks/useHotkey.js';
 import { useIgnoredEndpoints } from './hooks/useIgnoredEndpoints.js';
 import { useStoredState } from './hooks/useStoredState.js';
-import { BOXES_KEY, parseBool, parseTab, TAB_KEY } from './viewState.js';
+import { BOXES_KEY, focusItem, parseBool, parseTab, TAB_KEY } from './viewState.js';
 import { usePanelVisibility } from './hooks/usePanelVisibility.js';
 import { useCollapseForAppModal } from './hooks/useAppModalOpen.js';
 import { useOwnLayerPortal } from './hooks/useOwnLayer.js';
@@ -158,10 +158,11 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
           issues={signal.issues}
           alert={signal.alert}
           breakdown={{ waste: signal.wasteEndpoints, storming: signal.stormingNames }}
-          onSelect={(next) => {
+          onSelect={(next, key) => {
             show();
             setSelected(null);
             setTab(next);
+            if (next === 'requests' || next === 'renders') focusItem(next, key);
           }}
           handlers={handlers}
         />

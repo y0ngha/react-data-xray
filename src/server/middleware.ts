@@ -83,10 +83,12 @@ const isTrusted = (req: IncomingMessage, allowedHosts: readonly string[] | true)
 const readBody = (req: IncomingMessage): Promise<string> =>
   new Promise((resolve, reject) => {
     let body = '';
+    let bytes = 0;
     req.setEncoding('utf8');
     req.on('data', (chunk: string) => {
       body += chunk;
-      if (Buffer.byteLength(body) <= MAX_BYTES) return;
+      bytes += Buffer.byteLength(chunk);
+      if (bytes <= MAX_BYTES) return;
       // 거절한 뒤에도 계속 받아 쌓지 않게 연결을 끊는다.
       req.destroy();
       reject(new Error('too large'));
@@ -117,10 +119,12 @@ const readIndex = async (file: string): Promise<TabEntry[]> => {
   }
 };
 
-/** 탭 목록을 갱신하고, 오래 갱신이 없는 탭(닫힌 탭)의 파일은 지운다. */
-const updateTabIndex = (folder: string, entry: TabEntry): Promise<unknown> => {
+/** 탭 파일을 쓰고 탭 목록을 갱신하며, 오래 갱신이 없는 탭(닫힌 탭)의 파일은 지운다. 쓰기와 정리가 같은 큐 안이라 방금 쓴 파일을 옛 목록 기준으로 지우지 않는다. */
+const updateTabIndex = (folder: string, entry: TabEntry, report: object): Promise<unknown> => {
   const run = async () => {
     const dir = join(folder, 'tabs');
+    await mkdir(dir, { recursive: true });
+    await writeJson(join(folder, entry.file), { tab: entry, ...report });
     const indexFile = join(dir, `${TABS_INDEX}.json`);
     const now = entry.updatedAt;
     const all = [...(await readIndex(indexFile)).filter((t) => t.id !== entry.id), entry];
@@ -178,9 +182,7 @@ export const rdxReportMiddleware = (root = process.cwd(), { dir = '.rdx', allowe
             updatedAt: Date.now(),
             file: reportFileFor(tab),
           };
-          await mkdir(join(folder, 'tabs'), { recursive: true });
-          await writeJson(join(folder, entry.file), { tab: entry, ...report });
-          await updateTabIndex(folder, entry);
+          await updateTabIndex(folder, entry, report);
           // 열려 있다는 알림만이면 "가장 최근에 바뀐 탭"을 바꾸지 않는다.
           if (query.get('idle') === '1') return reply(res, 204);
         }

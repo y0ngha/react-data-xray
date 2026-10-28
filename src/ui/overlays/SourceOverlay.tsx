@@ -50,19 +50,21 @@ const paintMetrics = ({ box, metrics }: BoxElements, statOf: StatOf): void => {
 
 /**
  * 겹친 박스의 라벨이 서로 붙으면 어느 박스 것인지 읽을 수 없다. 큰 박스부터 라벨 자리를 잡고,
- * 먼저 잡힌 라벨과 겹치거나 닿는 라벨은 그 아래로 내린다. 위치를 다 쓴 뒤 한 번에 읽는다.
+ * 먼저 잡힌 라벨과 겹치거나 닿는 라벨은 그 아래로 내린다. 크기를 먼저 다 읽고 위치를 한꺼번에 쓴다(번갈아 하면 라벨마다 레이아웃을 다시 계산한다).
  */
 const LABEL_GAP = 3;
-const separateLabels = (all: BoxElements[], rects: (DOMRect | null)[]): void => {
+/** 테스트에서 직접 부른다. */
+export const separateLabels = (all: BoxElements[], rects: (DOMRect | null)[]): void => {
   const placed: { left: number; right: number; top: number; bottom: number }[] = [];
   const order = all.map((_, i) => i).filter((i) => rects[i]);
   order.sort((a, b) => rects[b]!.width * rects[b]!.height - rects[a]!.width * rects[a]!.height);
+  const sizes = all.map(({ label }, i) => (rects[i] ? { width: label.offsetWidth, height: label.offsetHeight } : null));
+  const tops: number[] = [];
   for (const i of order) {
     const rect = rects[i]!;
-    const { label } = all[i];
     const left = rect.left;
-    const right = left + label.offsetWidth;
-    const height = label.offsetHeight;
+    const right = left + sizes[i]!.width;
+    const height = sizes[i]!.height;
     let top = rect.top;
     // 아래로 내리면 새로 겹치는 라벨이 생길 수 있어 겹침이 없을 때까지 되풀이한다(라벨 수가 상한).
     for (let n = 0; n <= placed.length; n++) {
@@ -72,9 +74,10 @@ const separateLabels = (all: BoxElements[], rects: (DOMRect | null)[]): void => 
       if (!hit) break;
       top = hit.bottom + LABEL_GAP;
     }
-    label.style.top = `${top - rect.top}px`;
+    tops[i] = top - rect.top;
     placed.push({ left, right, top, bottom: top + height });
   }
+  order.forEach((i) => (all[i].label.style.top = `${tops[i]}px`));
 };
 
 const paintRenders = ({ box, root, label, count }: BoxElements, now: number): void => {
@@ -124,22 +127,13 @@ const useBoxPainter = (statOf: StatOf) => {
       frame = 0;
       const now = Date.now();
       const all = Array.from(elements.current.values());
-      if (pending.position) {
-        // 위치를 모두 읽은 뒤에 쓴다. 읽고 쓰기를 번갈아 하면 박스마다 레이아웃을 다시 계산한다.
-        const rects = all.map((els) => unionRect(els.box.nodes));
-        all.forEach((els, i) => placeBox(els.root, rects[i]));
-        separateLabels(all, rects);
-      }
+      // 읽기(위치) → 쓰기(위치·렌더·지표 글자) → 읽기(라벨 크기) → 쓰기(라벨 위치) 순으로 해서 강제 레이아웃을 한 번만 겪는다.
+      const rects = all.map((els) => unionRect(els.box.nodes));
+      if (pending.position) all.forEach((els, i) => placeBox(els.root, rects[i]));
       if (pending.renders) all.forEach((els) => paintRenders(els, now));
-      if (pending.metrics) {
-        all.forEach((els) => paintMetrics(els, latestStatOf.current));
-        // 지표 글자가 바뀌면 라벨 너비가 바뀐다.
-        if (!pending.position)
-          separateLabels(
-            all,
-            all.map((els) => unionRect(els.box.nodes)),
-          );
-      }
+      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestStatOf.current));
+      // 렌더 수·지표 글자가 바뀌면 라벨 너비도 바뀐다.
+      separateLabels(all, rects);
       Object.assign(pending, { position: false, renders: false, metrics: false });
     };
     const schedule = (kind: keyof typeof pending) => () => {
