@@ -86,7 +86,7 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.setEncoding('utf8');
     req.on('data', (chunk: string) => {
       body += chunk;
-      if (body.length <= MAX_BYTES) return;
+      if (Buffer.byteLength(body) <= MAX_BYTES) return;
       // 거절한 뒤에도 계속 받아 쌓지 않게 연결을 끊는다.
       req.destroy();
       reject(new Error('too large'));
@@ -108,7 +108,10 @@ const writeJson = async (file: string, value: unknown): Promise<void> => {
 const readIndex = async (file: string): Promise<TabEntry[]> => {
   try {
     const list: unknown = JSON.parse(await readFile(file, 'utf8'));
-    return Array.isArray(list) ? (list as TabEntry[]) : [];
+    // 손상·조작된 항목(null, 숫자 아닌 시각, 잘못된 id)이 있어도 탭 저장이 계속 실패하지 않게 걸러 낸다.
+    return Array.isArray(list)
+      ? (list as TabEntry[]).filter((t) => typeof t === "object" && t !== null && typeof t.id === "string" && Number.isFinite(t.updatedAt))
+      : [];
   } catch {
     return [];
   }
