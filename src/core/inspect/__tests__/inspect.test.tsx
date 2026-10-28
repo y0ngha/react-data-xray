@@ -4,9 +4,10 @@ import { createContext, StrictMode, useContext, useEffect, useState } from 'reac
 import { describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_BODY, flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
-import { getRecords } from '../../requests/store.js';
+import { createRecord, finishRecord, getRecords, registerBody } from '../../requests/store.js';
 import { getComponentName, getFiber } from '../../fiber/tree.js';
 import type { Fiber } from '../../fiber/types.js';
+import { enqueue, flushQueue, isQueuePending } from '../../scheduler/idleQueue.js';
 import { collectBoxes } from '../boxes.js';
 import { flushIndex, isIndexPending } from '../derivedMatch.js';
 import { findConsumers } from '../consumers.js';
@@ -39,6 +40,7 @@ const EffectList = ({ url = '/api/events' }: { url?: string }) => {
 };
 
 const withLayout = <T,>(run: () => T): T => {
+  flushQueue(); // 출처 등록은 한가한 틱으로 미뤄진다
   const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 10, 10));
   try {
     return run();
@@ -48,6 +50,52 @@ const withLayout = <T,>(run: () => T): T => {
 };
 
 describe('inspect: 요소 → 컴포넌트 → 요청 → 응답 위치', () => {
+  it('inspect_flushes: 요소 조회는 큐에 남은 일을 먼저 마치고 답한다', () => {
+    const ran = vi.fn<() => boolean>(() => true);
+    enqueue(ran);
+    render(<p>x</p>);
+    inspect(screen.getByText('x'));
+    expect(ran).toHaveBeenCalled();
+  });
+
+  it('inspect_drains_moderate_backlog: 앞에 일이 어느 정도 쌓여 있어도 큰 응답의 출처 등록까지 마치고 답한다', async () => {
+    let skew = 0;
+    const real = performance.now.bind(performance);
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => real() + skew);
+    try {
+      for (let i = 0; i < 3; i++) enqueue(() => ((skew += 250), true)); // 한 step 이 200ms 한도를 넘긴다
+      const body = (await fetch('/api/events').then((r) => r.json())) as typeof DEFAULT_BODY;
+      render(<Row item={body.data.list[1]} />);
+      const result = inspect(screen.getByText('메모리 경고'));
+      expect(result.components[0].hits[0]).toMatchObject({ path: '$.data.list[1].title', match: 'exact' });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('inspect_caps_drain: 일이 아주 많이 쌓여 있으면 1초까지만 돌고 나머지는 남긴다', () => {
+    let skew = 0;
+    const real = performance.now.bind(performance);
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => real() + skew);
+    try {
+      for (let i = 0; i < 100; i++) enqueue(() => ((skew += 250), true));
+      render(<p>x</p>);
+      inspect(screen.getByText('x'));
+      expect(isQueuePending()).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('consumers_drain: 방금 도착한 응답도 큐를 비우고 소비자를 찾는다', () => {
+    const record = createRecord('fetch', 'GET', '/api/fresh');
+    finishRecord(record, 200);
+    const body = { items: [{ id: 1, title: 'fresh' }] };
+    registerBody(record, body); // 출처 등록은 큐에 있다
+    render(<Row item={body.items[0]} />);
+    expect(findConsumers(record, () => false).map((c) => c.name)).toContain('Row');
+  });
+
   it('useEffect + fetch 로 받은 값의 요청과 경로를 정확히 찾는다', async () => {
     render(<EffectList />);
     const result = inspect(await screen.findByText('메모리 경고'));
@@ -213,6 +261,7 @@ describe('전체 표시 박스', () => {
     await screen.findByText('CPU 경고');
     const first = withLayout(() => collectBoxes(() => false, -1));
     expect(first).toEqual({ boxes: [], deferred: true });
+    flushIndex();
     const next = withLayout(() => collectBoxes(() => false, Infinity));
     expect(next.deferred).toBe(false);
     expect(next.boxes.map((b) => [b.name, b.hit.match])).toEqual([['Row', 'derived']]);
@@ -242,6 +291,7 @@ describe('전체 표시 박스', () => {
       </section>
     );
     render(<Card status={project.status} item={project} />);
+    flushIndex();
     expect(withLayout(() => collectBoxes(() => false).boxes).map((b) => [b.name, b.hit.record.url, b.hit.match])).toEqual([
       ['Card', '/api/projects', 'exact'],
       ['Body', '/api/summary', 'derived'],
@@ -311,6 +361,7 @@ describe('전체 표시 박스', () => {
       </section>
     );
     render(<Card item={project} />);
+    flushIndex();
     const body = withLayout(() => collectBoxes(() => false).boxes).find((b) => b.name === 'Body');
     expect(body).toBeTruthy();
     const scoped = withLayout(() => collectBoxes(() => false, Infinity, body!.fiber as Fiber).boxes);

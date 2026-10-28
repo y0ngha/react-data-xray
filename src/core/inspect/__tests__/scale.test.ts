@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createRecord, finishRecord, registerBody } from '../../requests/store.js';
-import { findDerivedOrigin, flushIndex, isIndexPending } from '../derivedMatch.js';
+import { flushQueue } from '../../scheduler/idleQueue.js';
+import { findDerivedOrigin, isIndexPending } from '../derivedMatch.js';
 
 describe('파생 매칭 색인의 규모', () => {
   it('큰 응답은 나눠서 색인해 조회가 메인 스레드를 오래 막지 않고, 끝나면 찾는다', async () => {
@@ -26,7 +27,7 @@ describe('파생 매칭 색인의 규모', () => {
     registerBody(record, { rows });
     findDerivedOrigin({ id: 50_001, status: 'ACTIVE' });
     expect(isIndexPending()).toBe(true);
-    flushIndex();
+    flushQueue(); // flushIndex 는 200ms 까지만 해서 부하가 크면 남을 수 있다
     expect(isIndexPending()).toBe(false);
     expect(findDerivedOrigin({ id: 59_999, status: 'ACTIVE', label: 'y' })?.path).toBe('$.rows[9999]');
   });

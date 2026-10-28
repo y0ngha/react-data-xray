@@ -1,5 +1,6 @@
-import { createRecord, finishRecord, keepResponseText, registerBody } from '../requests/store.js';
+import { createRecord, finishRecord, keepResponseText, registerBody, touchRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
+import { enqueue } from '../scheduler/idleQueue.js';
 import { attempt } from './attempt.js';
 import { isJson, isReadableText } from './contentType.js';
 import { parseRawHeaders } from './headers.js';
@@ -21,17 +22,26 @@ const listening = new WeakSet<XMLHttpRequest>();
 const onLoad = (xhr: XMLHttpRequest): void => {
   const record = current.get(xhr);
   if (!record) return;
-  record.responseHeaders = parseRawHeaders(xhr.getAllResponseHeaders());
   finishRecord(record, xhr.status);
   const contentType = xhr.getResponseHeader('content-type');
-  if (xhr.responseType === 'json' && xhr.response && typeof xhr.response === 'object') {
-    keepResponseText(record, JSON.stringify(xhr.response), { compare: true });
-    registerBody(record, xhr.response);
-    return;
-  }
-  if (xhr.responseType !== '' && xhr.responseType !== 'text') return;
-  if (isReadableText(contentType)) keepResponseText(record, xhr.responseText, { compare: isJson(contentType) });
-  rememberText(xhr.responseText, record);
+  const rawHeaders = xhr.getAllResponseHeaders();
+  const isObject = xhr.responseType === 'json' && xhr.response && typeof xhr.response === 'object';
+  const readable = xhr.responseType === '' || xhr.responseType === 'text';
+  const response: unknown = isObject ? xhr.response : undefined;
+  const text = readable ? xhr.responseText : undefined;
+  if (isObject) registerBody(record, response);
+  else if (text !== undefined) rememberText(text, record);
+  // 헤더 파싱·직렬화·원문 보관은 O(n) 이라 앱의 load 핸들러 안에서 하지 않는다.
+  enqueue(() => {
+    attempt(() => {
+      record.responseHeaders = parseRawHeaders(rawHeaders);
+      // shortcut: 앱이 load 핸들러에서 응답 객체를 고치면 고친 값으로 비교한다, 오판이 보이면 원문(responseText) 기반으로 바꾼다.
+      if (isObject) keepResponseText(record, JSON.stringify(response), { compare: true });
+      else if (text !== undefined && isReadableText(contentType)) keepResponseText(record, text, { compare: isJson(contentType) });
+    });
+    touchRecords(); // finishRecord 의 알림은 이 step 보다 먼저라, 열려 있는 상세가 헤더를 보려면 한 번 더 알린다.
+    return true;
+  });
 };
 
 const listenOnce = (xhr: XMLHttpRequest): void => {

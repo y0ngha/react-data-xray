@@ -1,3 +1,5 @@
+import { flushIndex } from '../inspect/derivedMatch.js';
+import { flushQueue } from '../scheduler/idleQueue.js';
 import { auditQueryCache, CACHE_FINDING_TEXT, findQueryClients, type CacheFinding } from '../reactQuery/cacheAudit.js';
 import { renderAdvice } from '../render/advice.js';
 import { groupRenders, sortRenderGroups } from '../render/groups.js';
@@ -116,8 +118,13 @@ const callersOf = (records: readonly RequestRecord[]) => {
 const nonZero = (reasons: Record<string, number>): Record<string, number> =>
   Object.fromEntries(Object.entries(reasons).filter(([, n]) => n > 0));
 
-/** 지금까지 모은 요청과 렌더를 요약한다. */
-export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport => {
+/** 지금까지 모은 요청과 렌더를 요약한다. drain 이 false 면(주기적인 업로드) 미뤄 둔 분석을 기다리지 않고 지금까지 끝난 것만 담는다. */
+export const buildReport = (monitoring: boolean, now = Date.now(), drain = true): RdxReport => {
+  // 사용자가 직접 묻는 조회는 미뤄 둔 분석을 먼저 마친다.
+  if (drain) {
+    flushIndex(); // 모든 기록의 색인 일을 큐에 올린 뒤
+    flushQueue();
+  }
   const records = getRecords();
   // 패널에서 "의도된 반복"으로 지정한 엔드포인트는 보고서에서도 낭비로 세지 않는다.
   const ignored = readIgnoredEndpoints();
@@ -148,7 +155,10 @@ export const buildReport = (monitoring: boolean, now = Date.now()): RdxReport =>
           sameResponses: s.sameResponses,
           review: s.review,
           callers: callersOf(own),
-          wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(0, MAX_EXAMPLES),
+          wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
+            0,
+            MAX_EXAMPLES,
+          ),
         };
       }),
     },

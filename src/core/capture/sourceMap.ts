@@ -1,3 +1,4 @@
+import { enqueue } from '../scheduler/idleQueue.js';
 import { getNativeFetch } from './nativeFetch.js';
 
 /**
@@ -42,12 +43,15 @@ const decodeVlq = (segment: string): number[] => {
   return values;
 };
 
-/** mappings 문자열을 줄별 구간으로 푼다. 앞 구간 기준의 차이값을 누적한다. */
-export const parseMappings = (mappings: string): Segment[][] => {
-  let source = 0;
-  let line = 0;
-  let sourceColumn = 0;
-  return mappings.split(';').map((group) => {
+interface DecodeState {
+  source: number;
+  line: number;
+  sourceColumn: number;
+}
+
+/** 줄 묶음(세미콜론으로 나눈 것)을 푼다. 앞 구간 기준의 차이값을 state 에 누적해 다음 묶음으로 이어간다. */
+const decodeGroups = (groups: string[], state: DecodeState): Segment[][] =>
+  groups.map((group) => {
     let column = 0;
     const segments: Segment[] = [];
     group.split(',').forEach((text) => {
@@ -55,14 +59,38 @@ export const parseMappings = (mappings: string): Segment[][] => {
       const [dc = 0, ds, dl, dsc] = decodeVlq(text);
       column += dc;
       if (ds === undefined || dl === undefined || dsc === undefined) return;
-      source += ds;
-      line += dl;
-      sourceColumn += dsc;
-      segments.push({ column, source, line, sourceColumn });
+      state.source += ds;
+      state.line += dl;
+      state.sourceColumn += dsc;
+      segments.push({ column, source: state.source, line: state.line, sourceColumn: state.sourceColumn });
     });
     return segments;
   });
-};
+
+/** mappings 문자열을 줄별 구간으로 푼다. */
+export const parseMappings = (mappings: string): Segment[][] => decodeGroups(mappings.split(';'), { source: 0, line: 0, sourceColumn: 0 });
+
+const LINES_PER_STEP = 500;
+
+/** parseMappings 와 같은 결과를, 줄 500개씩 큐 step 으로 나눠 푼다(큰 소스맵이 메인 스레드를 오래 잡지 않게). */
+export const parseMappingsStepped = (mappings: string): Promise<Segment[][]> =>
+  new Promise((resolve, reject) => {
+    const groups = mappings.split(';');
+    const state: DecodeState = { source: 0, line: 0, sourceColumn: 0 };
+    const lines: Segment[][] = [];
+    // 다음 조각은 큐 맨 뒤에 새 step 으로 넣어, 긴 소스맵이 앞자리를 잡고 다른 일을 막지 않게 한다.
+    const chunk = (): boolean => {
+      try {
+        lines.push(...decodeGroups(groups.slice(lines.length, lines.length + LINES_PER_STEP), state));
+        if (lines.length < groups.length) enqueue(chunk);
+        else resolve(lines);
+      } catch (e) {
+        reject(e); // 던지는 step 은 큐가 조용히 버리므로, 약속이 영영 대기하지 않게 여기서 끝낸다.
+      }
+      return true;
+    };
+    enqueue(chunk);
+  });
 
 // 이보다 큰 모듈(인라인 소스맵 제외)은 앱과 라이브러리를 한 파일에 묶은 번들(webpack 등)이라 소스맵이 수십 MB 다. 메인 스레드를 멈추지 않게 건너뛴다.
 const MAX_MODULE_BYTES = 1_000_000;
@@ -109,7 +137,7 @@ const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   const root = map.sourceRoot ? map.sourceRoot.replace(/\/?$/, '/') : '';
   const base = entryBase();
   // sources 는 소스맵(또는 모듈) 위치 기준 상대 경로일 수 있다(Vite: "client.ts"). 모듈 주소 기준으로 풀어 경로를 살린다.
-  return { sources: map.sources.map((s) => sourcePath(`${root}${s}`, scriptUrl, base)), lines: parseMappings(map.mappings) };
+  return { sources: map.sources.map((s) => sourcePath(`${root}${s}`, scriptUrl, base)), lines: await parseMappingsStepped(map.mappings) };
 };
 
 // HMR 이 모듈 주소에 ?t= 를 붙여 새 키가 계속 생기므로, 오래된 것부터 버린다.

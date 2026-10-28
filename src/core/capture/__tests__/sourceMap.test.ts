@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { mockFetch } from '../../../testing/fetchMock.js';
-import { parseMappings, resolveStack } from '../sourceMap.js';
+import { enqueue, flushQueue, isQueuePending } from '../../scheduler/idleQueue.js';
+import { parseMappings, parseMappingsStepped, resolveStack } from '../sourceMap.js';
 
 // 변환된 3번째 줄 0열 → 원본 0번 소스의 10번째 줄(0 부터 9) 3번째 열(0 부터 2). VLQ: 0=A, 9→18=S, 2→4=E
 const MAPPINGS = ';;AASE';
@@ -51,5 +52,54 @@ describe('소스맵', () => {
     const frame = 'at f (http://localhost:3000/static/js/bundle.js:3:1)';
     expect(await resolveStack(frame)).toBe(frame);
     expect(mockFetch.mock.calls.some(([u]) => String(u).endsWith('.map'))).toBe(false);
+  });
+
+  it('mappings_parsed_in_steps: 2000줄 mappings 는 flush 전에는 끝나지 않고, flush 뒤 원본 위치로 끝난다', async () => {
+    const code = `a\n//# sourceMappingURL=${inlineMap({ version: 3, sources: ['big.ts'], mappings: `${';'.repeat(1999)}AASE` })}`;
+    mockFetch.mockImplementation(async () => new Response(code));
+    vi.useFakeTimers(); // 배경 구동이 먼저 비우지 못하게
+    let done = false;
+    const result = resolveStack('at f (http://localhost:3000/src/big.ts:2000:1)').then((r) => ((done = true), r));
+    try {
+      for (let i = 0; i < 50 && !isQueuePending(); i++) await Promise.resolve();
+      expect(isQueuePending()).toBe(true);
+      expect(done).toBe(false);
+      flushQueue();
+      expect(await result).toBe('at f (src/big.ts:10:3)');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('parse_yields_to_other_steps: 긴 소스맵 해석은 다음 조각을 큐 뒤에 넣어, 뒤에 넣은 step 이 해석이 끝나기 전에 돈다', async () => {
+    vi.useFakeTimers(); // 배경 구동이 먼저 비우지 못하게
+    try {
+      let parsed = false;
+      const parse = parseMappingsStepped(';'.repeat(1999)).then(() => (parsed = true));
+      let markerRan = false;
+      enqueue(() => (markerRan = true));
+      for (let i = 0; i < 3 && !markerRan; i++) flushQueue(0); // 한 번에 step 하나씩
+      expect(markerRan).toBe(true);
+      await Promise.resolve();
+      expect(parsed).toBe(false);
+      flushQueue();
+      await parse;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('parse_result_same: 나눠 푼 결과가 parseMappings 와 같다', async () => {
+    const mappings = Array.from({ length: 1200 }, (_, i) => (i % 3 ? 'AASE,EACC' : '')).join(';');
+    const stepped = parseMappingsStepped(mappings);
+    flushQueue();
+    expect(await stepped).toEqual(parseMappings(mappings));
+  });
+
+  it('parse_chunk_throw: 조각이 던지면 약속이 거부된다(영영 대기하지 않는다)', async () => {
+    const bad = { split: () => [null] } as unknown as string; // group.split 이 던진다
+    const stepped = parseMappingsStepped(bad);
+    flushQueue();
+    await expect(stepped).rejects.toThrow(TypeError);
   });
 });

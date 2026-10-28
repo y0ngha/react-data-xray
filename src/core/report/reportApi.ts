@@ -114,7 +114,7 @@ const startUpload = async (): Promise<void> => {
   let failures = 0;
   let timer = 0;
   const upload = async () => {
-    const { generatedAt, ...content } = buildReport(isRenderMonitoring());
+    const { generatedAt, ...content } = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
     const key = JSON.stringify(content);
     if (key === last) return;
     const body = JSON.stringify({ generatedAt, ...content });

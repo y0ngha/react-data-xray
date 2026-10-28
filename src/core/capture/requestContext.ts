@@ -1,4 +1,5 @@
 import { touchRecords } from '../requests/store.js';
+import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestRecord } from '../requests/types.js';
 import { resolveStack } from './sourceMap.js';
 
@@ -77,12 +78,16 @@ const appStack = (raw: string): string | undefined =>
 
 /** 새 요청에 보낸 위치, StrictMode 재실행 여부, 자동 재요청 여부를 붙인다. */
 export const annotateRequest = (record: RequestRecord): RequestRecord => {
-  const raw = new Error().stack ?? '';
-  // 판정은 자르기 전 전체 스택으로 한다. React 내부 프레임은 앱 코드보다 한참 아래에 있다.
-  record.strictModeReplay = STRICT_MODE_REPLAY.test(raw) || undefined;
-  record.stack = appStack(raw);
-  record.trigger = triggerAt(record.startedAt);
-  resolveSourceStack(record);
+  record.trigger = triggerAt(record.startedAt); // 요청 시점의 포커스·재연결 상태여야 한다
+  const err = new Error(); // .stack 은 V8 이 늦게 만들므로 여기서 읽지 않는다
+  enqueue(() => {
+    const raw = err.stack ?? '';
+    // 판정은 자르기 전 전체 스택으로 한다. React 내부 프레임은 앱 코드보다 한참 아래에 있다.
+    record.strictModeReplay = STRICT_MODE_REPLAY.test(raw) || undefined;
+    record.stack = appStack(raw);
+    resolveSourceStack(record);
+    return true;
+  });
   return record;
 };
 
@@ -106,8 +111,11 @@ const RESOLVE_WAIT_MS = 2000;
 
 /** 진행 중인 소스맵 변환이 끝날 때까지(길어도 2초) 기다린다. 보고서를 저장하기 직전에 부른다. */
 export const whenSourcesResolved = async (): Promise<void> => {
-  if (resolving.size === 0) return;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([Promise.allSettled(resolving), new Promise((resolve) => (timer = setTimeout(resolve, RESOLVE_WAIT_MS)))]);
-  clearTimeout(timer);
+  // 소스맵 step 은 맵을 받은 뒤에야 큐에 들어오므로, 큐를 비우고 한 틱 기다리기를 변환이 끝날 때까지 되풀이한다.
+  const deadline = Date.now() + RESOLVE_WAIT_MS;
+  for (;;) {
+    flushQueue();
+    if ((resolving.size === 0 && !isQueuePending()) || Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 };

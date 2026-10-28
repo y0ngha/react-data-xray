@@ -1,13 +1,11 @@
 import { MAX_NODES_PER_BODY } from '../../shared/limits.js';
+import { enqueue } from '../scheduler/idleQueue.js';
 import type { Origin, RequestRecord } from './types.js';
 
 const origins = new WeakMap<object, Origin>();
 
-// 앱의 res.json()·JSON.parse 안에서 쓰는 시간. 큰 응답(5만 객체)을 다 등록하면 파싱의 3~6배가 걸려 앱이 데이터를 늦게 받는다.
-const SYNC_MS = 2;
-const SLICE_MS = 8;
-// 시각을 이 노드 수마다 한 번 본다(매번 보면 그 자체가 비싸다).
-const CHECK_EVERY = 256;
+// 한 step 에서 등록하는 노드 수. 시간은 공용 큐가 본다.
+const NODES_PER_STEP = 256;
 
 interface Work {
   record: RequestRecord;
@@ -15,10 +13,6 @@ interface Work {
   stack: Array<[object, string]>;
   count: number;
 }
-
-// 응답이 들어온 순서대로 한다. 먼저 받은 응답의 객체가 처음 출처로 남는다.
-const queue: Work[] = [];
-let timer: ReturnType<typeof setTimeout> | undefined;
 
 /** 노드 하나를 등록한다. 이 응답의 일이 끝났으면 true */
 const step = (work: Work): boolean => {
@@ -37,26 +31,15 @@ const step = (work: Work): boolean => {
   return work.stack.length === 0;
 };
 
-const run = (limitMs: number): void => {
-  const started = performance.now();
-  let n = 0;
-  while (queue.length > 0) {
-    if (++n % CHECK_EVERY === 0 && performance.now() - started >= limitMs) break;
-    if (step(queue[0])) queue.shift();
-  }
-  clearTimeout(timer);
-  timer = queue.length > 0 ? setTimeout(() => run(SLICE_MS), 0) : undefined;
-};
-
-/** 응답 본문의 모든 객체·배열을 출처와 함께 등록한다. 이미 등록된 객체는 처음 출처를 유지한다. 큰 응답의 나머지는 백그라운드에서 한다. */
+/** 응답 본문의 모든 객체·배열을 출처와 함께 공용 큐에 등록을 맡긴다(동기로는 아무것도 등록하지 않는다). 이미 등록된 객체는 처음 출처를 유지한다. */
 export const registerOrigins = (record: RequestRecord, body: unknown): void => {
   if (body === null || typeof body !== 'object') return;
-  queue.push({ record, stack: [[body, '$']], count: 0 });
-  run(SYNC_MS);
+  const work: Work = { record, stack: [[body, '$']], count: 0 };
+  enqueue(() => {
+    for (let i = 0; i < NODES_PER_STEP; i++) if (step(work)) return true;
+    return false;
+  });
 };
 
-/** 남은 등록을 먼저 마쳐, 조회 결과가 등록을 미루기 전과 같게 한다. */
-export const getOrigin = (value: object): Origin | undefined => {
-  if (queue.length > 0) run(Infinity);
-  return origins.get(value);
-};
+/** 등록이 끝난 것만 돌려준다. 남은 등록은 부르는 쪽이 flushQueue 로 먼저 마친다. */
+export const getOrigin = (value: object): Origin | undefined => origins.get(value);

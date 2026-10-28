@@ -1,5 +1,6 @@
 import { findRootFibers, walkFibers } from '../fiber/tree.js';
-import { findDerivedOrigin, flushIndex } from '../inspect/derivedMatch.js';
+import { findDerivedOrigin } from '../inspect/derivedMatch.js';
+import { isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
@@ -85,6 +86,8 @@ interface PendingFetch {
   queryKey: unknown;
   /** 데이터를 붙잡지 않는다(큰 응답이 2분 동안 남지 않게) */
   data: WeakRef<object>;
+  /** 출처를 못 찾은 점검 횟수 */
+  attempts?: number;
 }
 
 interface ClientHistory {
@@ -96,6 +99,8 @@ interface ClientHistory {
 }
 
 const MAX_KEYS = 2000;
+// 네트워크 출처가 없는 데이터를 영원히 다시 찾지 않게, 이만큼 못 찾으면 버린다.
+const MAX_ATTEMPTS = 3;
 
 const histories = new WeakMap<QueryClientLike, ClientHistory>();
 // 측정을 새로 시작한 시각. 그 전 기록은 점검에 쓰지 않는다(고치기 전 지적이 고친 뒤 보고서에 남지 않게).
@@ -176,16 +181,20 @@ const rememberKey = (history: ClientHistory, q: QueryLike): void => {
   if (history.keys.size > MAX_KEYS) history.keys.delete(history.keys.keys().next().value as string);
 };
 
-/** 미뤄 둔 성공 이벤트의 출처를 찾는다. 색인을 먼저 마쳐 방금 받은 응답이 빠지지 않게 한다. */
+/**
+ * 미뤄 둔 성공 이벤트의 출처를 찾는다. 큐를 비우지 않는다(주기적으로 불리므로): 등록이 끝난 것만 쓰고,
+ * 큐에 일이 남은 동안은 못 찾은 이벤트를 다음 점검으로 넘긴다.
+ */
 const resolvePending = (history: ClientHistory): void => {
   if (history.pending.length === 0) return;
-  flushIndex();
-  history.pending.forEach(({ at, queryHash, queryKey, data }) => {
-    const value = data.deref();
-    const record = value && fetchedRequest(value, at);
-    if (record) pushBounded(history.fetched, toFetched(at, queryHash, queryKey, record));
+  const unresolved: PendingFetch[] = [];
+  history.pending.forEach((p) => {
+    const value = p.data.deref();
+    const record = value && fetchedRequest(value, p.at);
+    if (record) pushBounded(history.fetched, toFetched(p.at, p.queryHash, p.queryKey, record));
+    else if (value && (p.attempts = (p.attempts ?? 0) + 1) < MAX_ATTEMPTS) unresolved.push(p);
   });
-  history.pending = [];
+  history.pending = isQueuePending() ? unresolved : [];
 };
 
 /** 앱에서 invalidateQueries 를 부른 위치. rdx 가 감싼 invalidateQueries 와 그 안쪽 프레임은 뺀다(앱 코드가 첫 줄에 오게). */

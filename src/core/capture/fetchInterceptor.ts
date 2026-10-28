@@ -4,6 +4,7 @@ import type { RequestRecord } from '../requests/types.js';
 import { isJson, isReadableText } from './contentType.js';
 import { headersToObject } from './headers.js';
 import { rememberText } from './pendingTexts.js';
+import { enqueue } from '../scheduler/idleQueue.js';
 import { attempt } from './attempt.js';
 import { annotateRequest } from './requestContext.js';
 import { serializeBody } from './serializeBody.js';
@@ -69,7 +70,10 @@ export const interceptFetch = (): void => {
     });
     attempt(() => {
       responseRecords.set(res, record);
-      record.responseHeaders = headersToObject(res.headers);
+      enqueue(() => {
+        attempt(() => (record.responseHeaders = headersToObject(res.headers)));
+        return true;
+      });
       finishRecord(record, res.status);
       keepText(res, record);
     });

@@ -1,3 +1,4 @@
+import { flushQueue } from '../scheduler/idleQueue.js';
 import { readStored, writeStored } from '../../shared/storage.js';
 import { getRecords, mergeRecords, setCurrentLoad } from './store.js';
 import type { RequestRecord } from './types.js';
@@ -61,6 +62,7 @@ const parse = (raw: unknown): RequestRecord[] | undefined => (Array.isArray(raw)
 
 /** 지금 기록을 저장한다. 최신 기록부터 크기를 더해 상한 안에 드는 만큼만, 직렬화는 한 번만 한다. */
 export const saveRecords = (): void => {
+  flushQueue(200); // 미뤄 둔 원문·중복 판정이 빠진 채 저장되지 않게
   const saved = getRecords().map(toSaved);
   let size = 2;
   let from = saved.length;

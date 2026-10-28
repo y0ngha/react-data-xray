@@ -1,5 +1,6 @@
 import { getComponentName, isFrameworkDevtoolsRoot, isMemoized, jsxLocationOf, rememberRootContainer } from '../fiber/tree.js';
 import { isComposite, PERFORMED_WORK, type Fiber } from '../fiber/types.js';
+import { enqueue } from '../scheduler/idleQueue.js';
 import { listenToCommits } from './devtoolsHook.js';
 import { causeOf } from './networkCause.js';
 import { reasonOf } from './renderReason.js';
@@ -30,33 +31,37 @@ const commitListeners = new Set<() => void>();
 let commitSeq = 0;
 // 렌더 탭, 타임라인, 전체 표시가 동시에 켤 수 있어 사용 수를 센다.
 let users = 0;
+// reset·감시 중단 때 올린다. 그 전에 걸린 분석 step 은 버린다.
+let epoch = 0;
 
-const entryOf = (fiber: Fiber): RenderEntry => {
-  const existing = entries.get(fiber) ?? (fiber.alternate ? entries.get(fiber.alternate) : undefined);
+// alt·memoized·compiled 는 commit 시점 값이다. 언마운트되면 React 가 alternate·return·updateQueue 를 비운다.
+const entryOf = (fiber: Fiber, alt: Fiber | null, memoized: boolean, compiled: boolean): RenderEntry => {
+  const existing = entries.get(fiber) ?? (alt ? entries.get(alt) : undefined);
   const entry = existing ?? {
     name: getComponentName(fiber),
     events: [],
     fiber,
-    memoized: isMemoized(fiber),
+    memoized,
     location: jsxLocationOf(fiber),
-    compiled: isCompiled(fiber),
+    compiled,
   };
   entries.set(fiber, entry);
-  if (fiber.alternate) entries.set(fiber.alternate, entry);
+  if (alt) entries.set(alt, entry);
   return entry;
 };
 
 // 스스로 렌더를 시작하는 이유. 나머지(props·같은 내용·새 콜백·부모)는 조상이 시작한 렌더를 따라온 것이다.
 const STARTS_RENDER = new Set<RenderReason>(['mount', 'state', 'context']);
 
-/** 이번 commit 에서 렌더된 컴포넌트를 기록한다. */
-const recordRender = (fiber: Fiber, now: number, inherited: Inherited): RenderEvent => {
-  const entry = entryOf(fiber);
-  const result = reasonOf(fiber);
+/** 이번 commit 에서 렌더된 컴포넌트를 기록한다. snap 은 commit 시점 값의 사본(React 가 fiber 를 재사용해 덮어쓴다). */
+const recordRender = (p: Pending, now: number, inherited: Inherited): RenderEvent => {
+  const { fiber, snap } = p;
+  const entry = entryOf(fiber, p.alt, p.memoized, p.compiled);
+  const result = reasonOf(snap);
   const startsRender = STARTS_RENDER.has(result.reason);
   const event: RenderEvent = {
     time: now,
-    ms: typeof fiber.selfBaseDuration === 'number' ? fiber.selfBaseDuration : undefined,
+    ms: typeof snap.selfBaseDuration === 'number' ? snap.selfBaseDuration : undefined,
     reason: result.reason,
     keys: result.keys,
     hooks: result.hooks,
@@ -64,12 +69,33 @@ const recordRender = (fiber: Fiber, now: number, inherited: Inherited): RenderEv
     origin: startsRender ? undefined : inherited.origin,
   };
   entry.fiber = fiber;
-  // React commit 안에서 도는 코드라 배열을 복사하지 않는다.
   entry.events.push(event);
   if (entry.events.length > MAX_EVENTS_PER_COMPONENT) entry.events.shift();
   active.add(entry);
   return event;
 };
+
+const CHUNK = 32;
+
+interface Pending {
+  fiber: Fiber;
+  snap: Fiber;
+  alt: Fiber | null;
+  memoized: boolean;
+  compiled: boolean;
+  parent: number;
+}
+
+const shape = (f: Fiber): Record<string, unknown> => ({
+  tag: f.tag,
+  memoizedProps: f.memoizedProps,
+  memoizedState: f.memoizedState,
+  _debugHookTypes: f._debugHookTypes,
+  dependencies: { firstContext: f.dependencies?.firstContext ?? null },
+});
+
+const snapshotOf = (f: Fiber): Fiber =>
+  ({ ...shape(f), selfBaseDuration: f.selfBaseDuration, alternate: f.alternate ? shape(f.alternate) : null }) as unknown as Fiber;
 
 // React DevTools 처럼 이번 commit 에서 다시 만든 서브트리만 내려간다. 재사용된 서브트리의 fiber 는
 // 지난 렌더의 PerformedWork 플래그가 남아 있어, 들어가면 렌더하지 않은 것을 렌더로 센다.
@@ -80,25 +106,44 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   rememberRootContainer(root);
   if (users === 0) return;
   const now = Date.now();
-  let count = 0;
-  // 위에서 아래로 내려가며, 가장 가까운 렌더된 조상의 네트워크 원인과 렌더를 시작한 조상을 자식에게 넘긴다.
-  const visit = (fiber: Fiber | null, inherited: Inherited): void => {
+  const pending: Pending[] = [];
+  // commit 안에서는 렌더된 fiber 의 참조만 모으고, 분석은 큐에서 한다.
+  const visit = (fiber: Fiber | null, parent: number): void => {
     for (let f = fiber; f; f = f.sibling) {
       if (ignoredTypes.has(f.type)) continue;
       const rendered = isComposite(f) && (f.flags & PERFORMED_WORK) !== 0;
-      const event = rendered ? recordRender(f, now, inherited) : undefined;
-      count += rendered ? 1 : 0;
-      const next: Inherited = event
-        ? { cause: event.cause, origin: event.origin ?? { name: getComponentName(f), reason: event.reason } }
-        : inherited;
+      let next = parent;
+      if (rendered) {
+        next =
+          pending.push({ fiber: f, snap: snapshotOf(f), alt: f.alternate, memoized: isMemoized(f), compiled: isCompiled(f), parent }) - 1;
+      }
       if (f.child && wasRecreated(f)) visit(f.child, next);
     }
   };
-  if (wasRecreated(root.current)) visit(root.current.child, {});
-  if (count === 0) return;
-  commits.push({ id: ++commitSeq, time: now, count });
-  if (commits.length > MAX_COMMITS) commits.shift();
-  commitListeners.forEach((listener) => listener());
+  if (wasRecreated(root.current)) visit(root.current.child, -1);
+  if (pending.length === 0) return;
+  const inheritedBy: Inherited[] = [];
+  let at = 0;
+  const mine = epoch;
+  // 위에서 아래로 내려가며, 가장 가까운 렌더된 조상의 네트워크 원인과 렌더를 시작한 조상을 자식에게 넘긴다.
+  enqueue(() => {
+    if (mine !== epoch) return true;
+    for (const end = Math.min(at + CHUNK, pending.length); at < end; at++) {
+      const p = pending[at];
+      inheritedBy[at] = {}; // 한 fiber 가 던져도 나머지와 commit 기록·구독자 알림은 이어간다
+      try {
+        const event = recordRender(p, now, p.parent < 0 ? {} : inheritedBy[p.parent]);
+        inheritedBy[at] = { cause: event.cause, origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason } };
+      } catch {
+        /* 이 fiber 만 건너뛴다 */
+      }
+    }
+    if (at < pending.length) return false;
+    commits.push({ id: ++commitSeq, time: now, count: pending.length });
+    if (commits.length > MAX_COMMITS) commits.shift();
+    commitListeners.forEach((listener) => listener());
+    return true;
+  });
 };
 
 if (process.env.NODE_ENV !== 'production') listenToCommits(onCommit);
@@ -113,6 +158,7 @@ export const subscribeCommits = (listener: () => void): (() => void) => {
 export const setRenderMonitoring = (on: boolean): void => {
   users = Math.max(0, users + (on ? 1 : -1));
   if (users > 0) return;
+  epoch++;
   active.clear();
   commits.length = 0;
 };
@@ -125,6 +171,7 @@ export const resetRenderStats = (): void => {
   active.forEach((entry) => {
     entry.events.length = 0;
   });
+  epoch++;
   active.clear();
   commits.length = 0;
 };

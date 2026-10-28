@@ -32,8 +32,9 @@ describe('RdxDevtools', () => {
     render(<RdxDevtools />);
     await act(flush);
     const panel = openPanel();
+    // 중복 판정과 구독자 알림은 미뤄 두고 한 프레임에 한 번 묶어 반영한다.
+    expect(await within(panel).findByRole('button', { name: /네트워크 요청 ⚠1/ })).toBeTruthy();
     fireEvent.click(within(panel).getByRole('button', { name: /네트워크 요청/ }));
-    expect(within(panel).getByRole('button', { name: /네트워크 요청 ⚠1/ })).toBeTruthy();
     fireEvent.click(within(panel).getByText('전체 기록'));
     fireEvent.click(within(panel).getAllByRole('button', { name: /GET \/api\/a/ })[0]);
     expect(within(panel).getByText('← 뒤로')).toBeTruthy();

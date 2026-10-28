@@ -2,6 +2,7 @@ import { vi } from 'vitest';
 import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
+import { flushQueue } from '../../../core/scheduler/idleQueue.js';
 import { createRecord, finishRecord, keepResponseText, registerBody } from '../../../core/requests/store.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { renderWithActions } from '../../../testing/withActions.js';
@@ -83,6 +84,7 @@ describe('RequestDetail', () => {
   it('본문이 없거나 읽을 수 없거나 텍스트 원문만 있는 경우를 나눠 보여 준다', () => {
     const textOnly = makeRecord({ requestBody: undefined });
     keepResponseText(textOnly, '{"raw":true}', { compare: false });
+    flushQueue(); // 원문 보관은 미뤄 둔다
     const { unmount } = renderWithActions(<RequestDetail record={textOnly} onBack={() => undefined} />);
     expect(screen.getByText(/"raw": true/)).toBeTruthy();
     expect(screen.getAllByText('(없음)').length).toBeGreaterThan(0);

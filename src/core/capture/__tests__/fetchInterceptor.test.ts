@@ -57,6 +57,7 @@ describe('fetch 가로채기', () => {
     const text = await fetch('/api/text').then((r) => r.text());
     const parsed = JSON.parse(text);
     const unrelated = JSON.parse('{"x":1}', (_k, v) => v);
+    await flush();
 
     expect(getOrigin(parsed)?.record.url).toBe('/api/text');
     expect(getOrigin(unrelated)).toBeUndefined();
@@ -65,6 +66,7 @@ describe('fetch 가로채기', () => {
   it('clone() 한 응답도 같은 요청으로 이어진다', async () => {
     const res = await fetch('/api/clone');
     const body = await res.clone().json();
+    await flush();
     expect(getOrigin(body)?.record.url).toBe('/api/clone');
   });
 

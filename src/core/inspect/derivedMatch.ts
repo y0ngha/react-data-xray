@@ -1,4 +1,5 @@
 import { MAX_NODES_PER_BODY } from '../../shared/limits.js';
+import { enqueue, flushQueue } from '../scheduler/idleQueue.js';
 import { getRecords, getStoreVersion } from '../requests/store.js';
 import type { Origin, RequestRecord } from '../requests/types.js';
 
@@ -34,7 +35,6 @@ interface IndexEntry {
 const MAX_CANDIDATES_PER_FIELD = 1000;
 
 // 수백 KB 응답도 있어 색인 작업을 이만큼씩 끊어서 한다. 한 번에 다 하면 메인 스레드를 수백 ms 막는다.
-const SLICE_MS = 8;
 const NODES_PER_STEP = 200;
 
 const addEntry = (index: Segment, key: string, entry: IndexEntry): void => {
@@ -77,21 +77,28 @@ type Segment = Map<string, IndexEntry[]>;
 const cache = {
   segments: new Map<RequestRecord, Segment>(),
   version: -1,
-  // 남은 색인 작업. 응답마다 하나씩, 들어온 순서대로 한다.
-  queue: [] as Array<{ record: RequestRecord; work: Generator<void, void, void> }>,
-  timer: 0,
 };
 
-/** 남은 색인 작업을 limitMs 동안 한다. 남으면 백그라운드에서 SLICE_MS 씩 이어 한다. 작은 응답은 첫 조각 안에 끝난다. */
-const runQueue = (limitMs = SLICE_MS): void => {
-  const started = performance.now();
-  while (cache.queue.length > 0 && performance.now() - started < limitMs) {
-    const { record, work } = cache.queue[0];
-    // 색인하는 사이 목록에서 밀려난 응답은 마저 하지 않는다.
-    if (!cache.segments.has(record) || work.next().done) cache.queue.shift();
-  }
-  window.clearTimeout(cache.timer);
-  cache.timer = cache.queue.length > 0 ? window.setTimeout(() => runQueue(), 0) : 0;
+const STEP_CALLS = 64;
+const pending = new Set<RequestRecord>();
+
+/** 응답 하나의 색인을 공용 큐에 맡긴다. 한 step 은 next() 를 STEP_CALLS 번까지 부른다. */
+const enqueueIndex = (record: RequestRecord, work: Generator<void, void, void>): void => {
+  pending.add(record);
+  enqueue(() => {
+    try {
+      // 색인하는 사이 목록에서 밀려난 응답은 마저 하지 않는다.
+      if (cache.segments.has(record)) {
+        for (let i = 0; i < STEP_CALLS; i++)
+          if (work.next().done) break;
+          else if (i === STEP_CALLS - 1) return false; // 아직 남음
+      }
+    } catch {
+      // 던지면 이 응답은 포기한다(pending 에 남아 isIndexPending 이 영원히 참이 되지 않게)
+    }
+    pending.delete(record);
+    return true;
+  });
 };
 
 const getSegments = (): ReadonlyMap<RequestRecord, Segment> => {
@@ -104,15 +111,14 @@ const getSegments = (): ReadonlyMap<RequestRecord, Segment> => {
     if (record.body === undefined || cache.segments.has(record)) return;
     const segment: Segment = new Map();
     cache.segments.set(record, segment);
-    cache.queue.push({ record, work: indexRecord(segment, record) });
+    enqueueIndex(record, indexRecord(segment, record));
   });
   cache.version = getStoreVersion();
-  if (!cache.timer) runQueue();
   return cache.segments;
 };
 
 /** 아직 색인하지 못한 응답이 있는지. 있으면 지금 못 찾은 값도 곧 찾을 수 있다. */
-export const isIndexPending = (): boolean => cache.queue.length > 0;
+export const isIndexPending = (): boolean => pending.size > 0;
 
 // 요소 클릭처럼 한 번 묻고 끝나는 조회가 기다릴 수 있는 시간. 막 도착한 큰 응답 여러 개를 한 번에 다 하면 수백 ms 멈춘다.
 const FLUSH_LIMIT_MS = 200;
@@ -120,7 +126,7 @@ const FLUSH_LIMIT_MS = 200;
 /** 남은 색인을 FLUSH_LIMIT_MS 까지 지금 한다. 요소 클릭처럼 한 번 묻는 조회는 기다리지 않고 바로 답해야 한다. */
 export const flushIndex = (): void => {
   getSegments();
-  runQueue(FLUSH_LIMIT_MS);
+  flushQueue(FLUSH_LIMIT_MS);
 };
 
 /**
