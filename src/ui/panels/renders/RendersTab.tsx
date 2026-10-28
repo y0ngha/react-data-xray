@@ -8,6 +8,7 @@ import { isIndexPending } from '../../../core/inspect/derivedMatch.js';
 import { getRecords } from '../../../core/requests/store.js';
 import { inspectFiber } from '../../../core/inspect/inspect.js';
 import type { Fiber } from '../../../core/fiber/types.js';
+import { renderWindowStart } from '../../../core/render/monitor.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { useNow } from '../../hooks/useNow.js';
@@ -42,7 +43,16 @@ const sourceOf = (group: RenderGroup): Hit | undefined => {
   return source;
 };
 
-/** 렌더 › 분석: 최근 10초 렌더를 컴포넌트별로 묶어 이유, 줄이는 방법, 네트워크 원인을 보여 준다. */
+/** 지금 보는 구간. reset 했으면 reset 시각 이후(보고서와 같은 구간), 아니면 최근 10초 */
+const windowLabel = (now: number): string => {
+  const start = renderWindowStart(now);
+  if (now - start <= 10_000) return '최근 10초';
+  const t = new Date(start);
+  const hms = [t.getHours(), t.getMinutes(), t.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+  return `${hms} 이후 ${Math.round((now - start) / 1000)}초`;
+};
+
+/** 렌더 › 분석: reset 뒤에는 그 이후, 아니면 최근 10초 렌더를 컴포넌트별로 묶어 이유, 줄이는 방법, 네트워크 원인을 보여 준다. */
 export const RendersTab = ({
   statsByEndpoint,
   scope = null,
@@ -70,7 +80,7 @@ export const RendersTab = ({
   return (
     <div ref={host}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-        <Muted>렌더 분석 · 최근 10초 ·</Muted>
+        <Muted>렌더 분석 · {windowLabel(now)} ·</Muted>
         {SORTS.map((s) => (
           <Button key={s.sort} active={sort === s.sort} onClick={() => setSort(s.sort)} title={s.title}>
             {s.label}

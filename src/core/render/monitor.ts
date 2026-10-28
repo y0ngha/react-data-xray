@@ -212,6 +212,10 @@ export const getRenderInfo = (fiber: unknown, now = Date.now()): RenderSummary |
 export const reportWindowMs = (now = Date.now()): number =>
   measuredFrom ? Math.min(MAX_REPORT_WINDOW_MS, Math.max(WINDOW_MS, now - measuredFrom)) : WINDOW_MS;
 
+/** 렌더 탭이 표시할 구간의 시작: reset 했으면 reset 시각(최대 2분 전), 아니면 10초 전 */
+export const renderWindowStart = (now = Date.now()): number =>
+  measuredFrom ? Math.max(measuredFrom, now - MAX_REPORT_WINDOW_MS) : now - WINDOW_MS;
+
 // 렌더 기록이 그대로인 컴포넌트는 지난 요약을 다시 쓴다(탭이 1초마다 수천 개를 처음부터 요약하지 않게).
 // 기록 끝, 창 안 첫 기록, 창 안 개수가 같으면 창 안 기록이 같다(기록은 시간순으로 쌓인다).
 const summaries = new WeakMap<

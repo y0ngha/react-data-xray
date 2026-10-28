@@ -4,8 +4,7 @@ import type { Hit } from '../../../core/inspect/types.js';
 import type { Fiber } from '../../../core/fiber/types.js';
 import { isWithin } from '../../../core/fiber/tree.js';
 import type { RenderGroup } from '../../../core/render/groups.js';
-import { getRenderGroups } from '../../../core/render/monitor.js';
-import { WINDOW_MS } from '../../../core/render/summary.js';
+import { getRenderGroups, reportWindowMs } from '../../../core/render/monitor.js';
 import { enqueue } from '../../../core/scheduler/idleQueue.js';
 
 export interface ComputedGroups {
@@ -41,7 +40,11 @@ export const useRenderGroups = (
     let cancelled = false;
     enqueue(() => {
       if (cancelled) return true;
-      const { groups, truncated, droppedInstances } = getRenderGroups(now, WINDOW_MS, (e) => !scope || isWithin(e.fiber as Fiber, scope));
+      const { groups, truncated, droppedInstances } = getRenderGroups(
+        now,
+        reportWindowMs(now),
+        (e) => !scope || isWithin(e.fiber as Fiber, scope),
+      );
       setResult({ items: groups.map((group) => ({ group, source: sourceOf(group) })), truncated, droppedInstances });
       return true;
     });
