@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from 'react';
+import { startTransition, useEffect, useState } from 'react';
 
 import { getStoreVersion, subscribe } from '../../core/requests/store.js';
 
@@ -6,7 +6,7 @@ import { getStoreVersion, subscribe } from '../../core/requests/store.js';
 export const useRecordsVersion = (): number => {
   const [version, setVersion] = useState(0);
   // 렌더 때 본 store 버전. effect 에서 구독하기 전에 바뀐 것을 잡는 데 쓴다.
-  const seen = useRef(getStoreVersion());
+  const [seen] = useState(getStoreVersion);
   useEffect(() => {
     let frame = 0;
     const bump = () => {
@@ -17,11 +17,11 @@ export const useRecordsVersion = (): number => {
       });
     };
     const unsubscribe = subscribe(bump);
-    if (getStoreVersion() !== seen.current) bump();
+    if (getStoreVersion() !== seen) bump();
     return () => {
       cancelAnimationFrame(frame);
       unsubscribe();
     };
-  }, []);
+  }, [seen]);
   return version;
 };

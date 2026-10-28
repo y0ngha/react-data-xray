@@ -109,13 +109,13 @@ const resolveSourceStack = (record: RequestRecord): void => {
 const resolving = new Set<Promise<void>>();
 const RESOLVE_WAIT_MS = 2000;
 
-/** 진행 중인 소스맵 변환이 끝날 때까지(길어도 2초) 기다린다. 보고서를 저장하기 직전에 부른다. */
-export const whenSourcesResolved = async (): Promise<void> => {
-  // 소스맵 step 은 맵을 받은 뒤에야 큐에 들어오므로, 큐를 비우고 한 틱 기다리기를 변환이 끝날 때까지 되풀이한다.
-  const deadline = Date.now() + RESOLVE_WAIT_MS;
-  for (;;) {
-    flushQueue();
-    if ((resolving.size === 0 && !isQueuePending()) || Date.now() >= deadline) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
+// 소스맵 step 은 맵을 받은 뒤에야 큐에 들어오므로, 큐를 비우고 한 틱 기다리기를 변환이 끝날 때까지 되풀이한다.
+const settle = async (deadline: number): Promise<void> => {
+  flushQueue();
+  if ((resolving.size === 0 && !isQueuePending()) || Date.now() >= deadline) return;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return settle(deadline);
 };
+
+/** 진행 중인 소스맵 변환이 끝날 때까지(길어도 2초) 기다린다. 보고서를 저장하기 직전에 부른다. */
+export const whenSourcesResolved = (): Promise<void> => settle(Date.now() + RESOLVE_WAIT_MS);

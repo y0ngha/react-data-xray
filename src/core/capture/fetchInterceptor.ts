@@ -30,6 +30,18 @@ const isFrameworkInternal = (url: string): boolean => {
 
 const describeError = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
 
+/** 요청이 나갈 때 기록을 만든다. */
+const startRecord = (input: RequestInfo | URL, init?: RequestInit): RequestRecord => {
+  const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+  const requestHeaders = headersToObject(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  const action = requestHeaders?.['next-action'];
+  const record = annotateRequest(createRecord('fetch', method, toUrl(input), requestBodyOf(input, init), action));
+  // 처음 보는 Server Action 이면 함수 이름을 찾아 둔다(받아 둔 스크립트를 한 번씩만 읽는다).
+  if (action && !actionNameOf(action)) void learnActionNames();
+  record.requestHeaders = requestHeaders;
+  return record;
+};
+
 /** fetch 를 감싸 요청을 기록하고, 응답 객체(Response)와 기록을 잇는다. */
 export const interceptFetch = (): void => {
   const originalClone = Response.prototype.clone;
@@ -46,17 +58,6 @@ export const interceptFetch = (): void => {
       .text()
       .then((text) => keepResponseText(record, text, { compare: isJson(contentType) }))
       .catch(() => undefined);
-  };
-
-  const startRecord = (input: RequestInfo | URL, init?: RequestInit): RequestRecord => {
-    const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-    const requestHeaders = headersToObject(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-    const action = requestHeaders?.['next-action'];
-    const record = annotateRequest(createRecord('fetch', method, toUrl(input), requestBodyOf(input, init), action));
-    // 처음 보는 Server Action 이면 함수 이름을 찾아 둔다(받아 둔 스크립트를 한 번씩만 읽는다).
-    if (action && !actionNameOf(action)) void learnActionNames();
-    record.requestHeaders = requestHeaders;
-    return record;
   };
 
   window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {

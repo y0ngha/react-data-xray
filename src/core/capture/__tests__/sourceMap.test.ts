@@ -8,6 +8,13 @@ import { parseMappings, parseMappingsStepped, resolveStack } from '../sourceMap.
 const MAPPINGS = ';;AASE';
 const inlineMap = (map: object) => `data:application/json;base64,${btoa(JSON.stringify(map))}`;
 
+/** 맵을 받아 해석 step 이 큐에 오를 때까지 마이크로태스크를 넘긴다(최대 50번). */
+const untilQueued = async (left = 50): Promise<void> => {
+  if (left === 0 || isQueuePending()) return;
+  await Promise.resolve();
+  return untilQueued(left - 1);
+};
+
 describe('소스맵', () => {
   it('mappings 를 줄별 구간으로 풀고 앞 구간 기준 차이를 누적한다', () => {
     expect(parseMappings(MAPPINGS)).toEqual([[], [], [{ column: 0, source: 0, line: 9, sourceColumn: 2 }]]);
@@ -61,7 +68,7 @@ describe('소스맵', () => {
     let done = false;
     const result = resolveStack('at f (http://localhost:3000/src/big.ts:2000:1)').then((r) => ((done = true), r));
     try {
-      for (let i = 0; i < 50 && !isQueuePending(); i++) await Promise.resolve();
+      await untilQueued();
       expect(isQueuePending()).toBe(true);
       expect(done).toBe(false);
       flushQueue();
@@ -78,7 +85,11 @@ describe('소스맵', () => {
       const parse = parseMappingsStepped(';'.repeat(1999)).then(() => (parsed = true));
       let markerRan = false;
       enqueue(() => (markerRan = true));
-      for (let i = 0; i < 3 && !markerRan; i++) flushQueue(0); // 한 번에 step 하나씩
+      // 한 번에 step 하나씩
+      for (let i = 0; i < 3; i++) {
+        if (markerRan) break;
+        flushQueue(0);
+      }
       expect(markerRan).toBe(true);
       await Promise.resolve();
       expect(parsed).toBe(false);
