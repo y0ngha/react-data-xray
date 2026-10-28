@@ -108,6 +108,13 @@ export const resetCacheAudit = (): void => {
 
 const describeRequest = (r: RequestRecord): string => `${r.method} ${r.url}`;
 
+// 본문을 읽을 수 없는 요청(Request 객체, Blob 등)은 같은 요청인지 알 수 없어 키 점검에서 뺀다.
+const comparable = (r: RequestRecord | undefined): RequestRecord | undefined => (r?.bodyUnreadable ? undefined : r);
+
+/** 같은 참조로 확실한 데이터의 요청 */
+const exactRequest = (data: unknown): RequestRecord | undefined =>
+  data !== null && typeof data === 'object' ? comparable(getOrigin(data)?.record) : undefined;
+
 // 배열의 출처를 항목으로 찾을 때 볼 항목 수
 const MAX_ITEMS_TO_MATCH = 5;
 
@@ -128,7 +135,7 @@ const originOfData = (data: object): Origin | undefined => {
 
 /** 쿼리 함수가 가져온 데이터의 요청. 같은 참조가 아니면(structural sharing 이 복사) 필드 값으로 찾되, 성공 직전에 끝난 요청만 */
 const fetchedRequest = (data: object, at: number): RequestRecord | undefined => {
-  const record = originOfData(data)?.record;
+  const record = comparable(originOfData(data)?.record);
   const finished = record ? record.startedAt + record.durationMs : -Infinity;
   return record && finished <= at && at - finished <= FETCH_WINDOW_MS ? record : undefined;
 };
@@ -212,8 +219,7 @@ const watch = (client: QueryClientLike): void => {
   const now = Date.now();
   cache.getAll().forEach((q) => {
     rememberKey(history, q);
-    const data = q.state.data;
-    const record = data !== null && typeof data === 'object' ? getOrigin(data)?.record : undefined;
+    const record = exactRequest(q.state.data);
     if (record) pushBounded(history.fetched, toFetched(now, q.queryHash, q.queryKey, record));
   });
   cache.subscribe((event) => {
@@ -291,8 +297,7 @@ const refetchesOnEveryVisit = (q: QueryLike): boolean =>
 /** 지금 캐시의 데이터 출처. 데이터가 바뀌지 않아 기록(2분)이 지난 중복 캐시도 찾게 같은 참조인 것을 더한다. */
 const currentFetched = (queries: readonly QueryLike[], now: number): Fetched[] =>
   queries.flatMap((q) => {
-    const data = q.state.data;
-    const record = data !== null && typeof data === 'object' ? getOrigin(data)?.record : undefined;
+    const record = exactRequest(q.state.data);
     return record ? [toFetched(now, q.queryHash, q.queryKey, record)] : [];
   });
 

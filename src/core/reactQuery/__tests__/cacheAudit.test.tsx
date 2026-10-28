@@ -55,6 +55,25 @@ describe('React Query 캐시키 점검', () => {
     expect(found?.requests).toEqual(['GET /api/search?q=aapl', 'GET /api/search?q=msft']);
   });
 
+  it('본문이 다른 POST 는 다른 요청으로, 읽을 수 없는 본문은 점검에서 뺀다', async () => {
+    // 조회마다 다른 데이터(같으면 structural sharing 이 이전 객체를 그대로 둔다)
+    mockFetch.mockImplementation(async (_input, init) => jsonResponse({ query: String(init?.body ?? 'stream'), size: 20, total: 100 }));
+    const client = new QueryClient();
+    withClient(client, <p>app</p>);
+    findQueryClients();
+    const post = (body: string) => () => fetch('/api/graphql', { method: 'POST', body }).then((r) => r.json());
+    await client.fetchQuery({ queryKey: ['gql'], queryFn: post('{"q":1}') });
+    await client.fetchQuery({ queryKey: ['gql'], queryFn: post('{"q":2}') });
+    // Request 객체의 본문은 읽을 수 없다. 키를 제대로 나눴어도 같은 요청으로 보이면 안 된다.
+    const unreadable = (q: number) => () =>
+      fetch(new Request('http://localhost/api/search', { method: 'POST', body: `{"q":${q}}` })).then((r) => r.json());
+    await client.fetchQuery({ queryKey: ['search', 1], queryFn: unreadable(1) });
+    await client.fetchQuery({ queryKey: ['search', 2], queryFn: unreadable(2) });
+    const findings = auditQueryCache(sameOrOk, getRecords());
+    expect(findings.find((f) => f.kind === 'key-missing-param')?.requests).toEqual(['POST /api/graphql']);
+    expect(findings.filter((f) => f.kind === 'duplicate-cache')).toEqual([]);
+  });
+
   it('setQueryData 로 직접 넣은 데이터는 요청으로 세지 않는다(수정 응답으로 캐시를 갱신하는 정상 패턴)', async () => {
     const client = new QueryClient();
     withClient(client, <p>app</p>);
