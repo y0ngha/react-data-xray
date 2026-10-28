@@ -22,6 +22,10 @@ export interface RequestRecord {
   trigger?: 'focus' | 'reconnect';
   /** 요청을 보낸 코드의 호출 스택(rdx 자신의 프레임은 뺀다) */
   stack?: string;
+  /** 요청을 보낸 시점의 location.pathname(쿼리 제외). 새로고침 전 기록이나 SSR 에서는 없을 수 있다. */
+  route?: string;
+  /** 호출 스택으로 짐작한 보낸 컴포넌트 이름. 판정할 수 없으면 없다. */
+  component?: string;
   /** stack 을 소스맵으로 원본 위치로 바꾼 것(비동기로 채운다. 못 바꾸면 없다) */
   sourceStack?: string;
   /** React 가 StrictMode 에서 effect 를 다시 실행하는 도중에 보낸 요청(호출 스택으로 확인) */

@@ -1,6 +1,7 @@
 import { touchRecords } from '../requests/store.js';
 import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestRecord } from '../requests/types.js';
+import { componentOfStack } from './callerComponent.js';
 import { resolveStack } from './sourceMap.js';
 
 // 이 시간 안에 나간 요청은 포커스·재연결 때문에 라이브러리가 자동으로 다시 보낸 것으로 본다.
@@ -103,12 +104,14 @@ const appStack = (raw: string): string | undefined =>
 /** 새 요청에 보낸 위치, StrictMode 재실행 여부, 자동 재요청 여부를 붙인다. */
 export const annotateRequest = (record: RequestRecord): RequestRecord => {
   record.trigger = triggerAt(record.startedAt); // 요청 시점의 포커스·재연결 상태여야 한다
+  if (typeof location !== 'undefined') record.route = location.pathname; // 문자열 하나만 읽는다. 이후 SPA 이동과 섞이지 않게 지금
   const err = captureStack(); // .stack 은 V8 이 늦게 만들므로 여기서 읽지 않는다
   enqueue(() => {
     const raw = err.stack ?? '';
     // 판정은 자르기 전 전체 스택으로 한다. React 내부 프레임은 앱 코드보다 한참 아래에 있다.
     record.strictModeReplay = STRICT_MODE_REPLAY.test(raw) || undefined;
     record.stack = appStack(raw);
+    record.component = componentOfStack(record.stack);
     resolveSourceStack(record);
     return true;
   });

@@ -1,5 +1,6 @@
 import { isFailed, isWaste, needsReview, type RequestClass } from './classify.js';
 import { endpointOf, pathOf } from './requestKey.js';
+import { groupBy } from '../../shared/collections.js';
 import type { RequestRecord } from './types.js';
 
 export interface EndpointStat {
@@ -14,13 +15,36 @@ export interface EndpointStat {
   /** StrictMode·재연결·무시처럼 이유가 확실한 반복 */
   explained: number;
   avgMs: number;
+  /** 새로고침 전 페이지에서 되살린 요청 수. 없으면 비운다 */
+  restoredCount?: number;
   /** ID 조각이 묶여 서로 다른 경로가 둘 이상 모인 경우 그 경로 수 */
   idVariants?: number;
   /** 낭비로 판정된 요청 중 실패 응답(4xx·5xx, 네트워크 오류)인 것. 분류와 낭비 수는 그대로 둔다 */
   failedDuplicates?: number;
   /** 실패한 요청의 상태 코드(네트워크 오류는 'ERR'), 많이 나온 순 */
   failedCodes?: string[];
+  /** 요청을 보낸 경로·컴포넌트별 건수, 많은 순. 경로도 컴포넌트도 모르는 요청은 뺀다 */
+  sites?: EndpointSite[];
 }
+
+export interface EndpointSite {
+  route?: string;
+  component?: string;
+  count: number;
+}
+
+/** 경로·컴포넌트 조합별 건수, 많은 순 */
+export const sitesOf = (records: readonly RequestRecord[]): EndpointSite[] =>
+  Array.from(
+    records
+      .filter((r) => r.route !== undefined || r.component !== undefined)
+      .reduce((acc, r) => {
+        const key = JSON.stringify([r.route, r.component]);
+        const site = acc.get(key) ?? { route: r.route, component: r.component, count: 0 };
+        return acc.set(key, { ...site, count: site.count + 1 });
+      }, new Map<string, EndpointSite>())
+      .values(),
+  ).sort((a, b) => b.count - a.count);
 
 const emptyStat = (endpoint: string): EndpointStat & { totalMs: number } => ({
   endpoint,
@@ -37,6 +61,7 @@ const tally = (stat: EndpointStat & { totalMs: number }, r: RequestRecord, c: Re
   ...stat,
   count: stat.count + 1,
   totalMs: stat.totalMs + r.durationMs,
+  ...(r.restored ? { restoredCount: (stat.restoredCount ?? 0) + 1 } : {}),
   duplicates: stat.duplicates + (c === 'duplicate' ? 1 : 0),
   sameResponses: stat.sameResponses + (c === 'same-response' ? 1 : 0),
   review: stat.review + (needsReview(c) ? 1 : 0),
@@ -81,14 +106,17 @@ export const getEndpointStats = (
         ] as const,
     ),
   );
+  const recordsByEndpoint = groupBy(records, keyOf);
   return Array.from(byEndpoint.values(), ({ totalMs, ...stat }): EndpointStat => {
     const variants = pathsByEndpoint.get(stat.endpoint)?.size ?? 0;
     const codes = failedCodesByEndpoint.get(stat.endpoint);
+    const sites = sitesOf(recordsByEndpoint.get(stat.endpoint) ?? []);
     return Object.assign(
       stat,
       { avgMs: Math.round(totalMs / stat.count) },
       variants > 1 ? { idVariants: variants } : {},
       codes ? { failedCodes: codes } : {},
+      sites.length > 0 ? { sites } : {},
     );
   }).sort((a, b) => wasteCount(b) - wasteCount(a) || b.count - a.count);
 };

@@ -26,8 +26,8 @@ export interface RequestSection {
     /** 낭비(duplicates·sameResponses)로 센 것 중 실패 응답(4xx·5xx, 네트워크 오류)인 수 */
     failedDuplicates: number;
     review: number;
-    /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수 */
-    callers: Array<{ frame: string; count: number }>;
+    /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수. route·component 는 알 때만 있다 */
+    callers: Array<{ frame: string; count: number; route?: string; component?: string }>;
     /** 낭비로 판정된 요청의 URL 예(쿼리 포함) */
     wasteExamples: string[];
   }>;
@@ -62,9 +62,17 @@ const callerOf = (stack: string | undefined): string | undefined =>
 const callersOf = (records: readonly RequestRecord[]) => {
   const counts = records.reduce((acc, r) => {
     const frame = callerOf(r.sourceStack ?? r.stack);
-    return frame ? acc.set(frame, (acc.get(frame) ?? 0) + 1) : acc;
-  }, new Map<string, number>());
-  return Array.from(counts, ([frame, count]) => ({ frame, count }))
+    if (!frame) return acc;
+    const key = JSON.stringify([frame, r.route, r.component]);
+    const caller = acc.get(key) ?? {
+      frame,
+      count: 0,
+      ...(r.route !== undefined && { route: r.route }),
+      ...(r.component && { component: r.component }),
+    };
+    return acc.set(key, { ...caller, count: caller.count + 1 });
+  }, new Map<string, { frame: string; count: number; route?: string; component?: string }>());
+  return Array.from(counts.values())
     .sort((a, b) => b.count - a.count)
     .slice(0, MAX_CALLERS);
 };
@@ -103,4 +111,5 @@ export const buildRequestSection = (
 // 새 howToRead 줄은 여기에 더한다.
 export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   'failedDuplicates 는 duplicates·sameResponses 중 실패 응답(4xx·5xx, 네트워크 오류)인 수다. 코드의 낭비가 아니라 재시도나 로컬 환경(백엔드 꺼짐) 문제일 수 있어 상태 코드부터 본다.',
+  'callers 의 route 는 요청을 보낸 시점의 경로(쿼리 제외), component 는 호출 스택의 대문자 이름 함수로 짐작한 보낸 컴포넌트다. 없으면 알 수 없는 것이다.',
 ];
