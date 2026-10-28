@@ -353,10 +353,17 @@ export const getTopRenders = (
   windowMs = WINDOW_MS,
 ): Array<RenderEntry & RenderSummary> => recentRenders(now, keep, windowMs).slice(0, limit);
 
-// 언마운트가 한 번이라도 있었을 때만 싣는다(마운트 횟수만으로는 목록 행마다 잡음이다). 이름 기준이라 같은 이름의 다른 위치와 같이 센다.
-const withMounts = (g: RenderGroup): RenderGroup => {
-  const mounts = getMountStats(g.name);
-  return mounts.unmounts > 0 ? { ...g, mounts } : g;
+// 언마운트가 한 번이라도 있었을 때만 싣는다(마운트 횟수만으로는 목록 행마다 잡음이다).
+// 마운트 통계는 이름 기준이라 같은 이름의 위치별 그룹에 모두 싣으면 보고서가 합산할 때 두 번 센다. 위치(소스맵으로 나중에 풀린다)를 통계 키로 맞추기 어려워 이름마다 첫 그룹에만 싣는다.
+const withMounts = (groups: readonly RenderGroup[]): RenderGroup[] => {
+  const seen = new Set<string>();
+  return groups.map((g) => {
+    if (seen.has(g.name)) return g;
+    const mounts = getMountStats(g.name);
+    if (mounts.unmounts === 0) return g;
+    seen.add(g.name);
+    return { ...g, mounts };
+  });
 };
 
 /**
@@ -371,7 +378,7 @@ export const getRenderGroups = (
   const all = recentRenders(now, keep, sinceMs);
   const droppedInstances = Math.max(0, all.length - MAX_GROUPED_INSTANCES);
   return {
-    groups: groupRenders(all.slice(0, MAX_GROUPED_INSTANCES), now - sinceMs).map(withMounts),
+    groups: withMounts(groupRenders(all.slice(0, MAX_GROUPED_INSTANCES), now - sinceMs)),
     truncated: droppedInstances > 0,
     droppedInstances,
   };

@@ -15,6 +15,18 @@ const List = () => {
   }, []);
   return <Child key={n} />;
 };
+const TwoPlaces = () => {
+  const [n, set] = useState(0);
+  useEffect(() => {
+    setN = set;
+  }, []);
+  return (
+    <>
+      <Child key={n} />
+      <Child key={`b${n}`} />
+    </>
+  );
+};
 const Item = () => <li>x</li>;
 const Items = ({ n }: { n: number }) => (
   <ul>
@@ -90,5 +102,16 @@ describe('마운트 이력 (#6)', () => {
     expect(g.find((x) => x.name === 'List')?.mounts).toBeUndefined();
     const c = buildRenderSection(true, Date.now()).components.find((x) => x.name === 'Child')!;
     expect(c.mounts?.remounts).toEqual([{ parent: 'List', count: 1 }]);
+  });
+
+  it('같은 이름이 두 위치에서 렌더돼도 보고서 합산이 마운트를 두 번 세지 않는다', () => {
+    render(<TwoPlaces />);
+    act(() => setN(1));
+    flushQueue();
+    const comps = buildRenderSection(true, Date.now()).components.filter((x) => x.name === 'Child');
+    expect(comps.length).toBe(2);
+    const total = getMountStats('Child');
+    expect(total.mounts).toBe(4);
+    expect(comps.reduce((sum, c) => sum + (c.mounts?.mounts ?? 0), 0)).toBe(total.mounts);
   });
 });
