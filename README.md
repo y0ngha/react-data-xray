@@ -21,14 +21,14 @@ Network 탭과 React DevTools 를 오가며 짐작하던 질문에, 개발 중�
 | 이미 쓰는 도구 | 보여 주는 것 | RDX 가 더하는 것 |
 |---|---|---|
 | Network 탭 | 어떤 요청이 나갔는지 | 그 응답을 화면의 어느 컴포넌트가 쓰는지 |
-| React DevTools | props·state, 렌더 시간 | 그 값이 어느 요청에서 왔는지, 그 렌더를 일으킨 응답 |
+| React DevTools | props, state, 렌더 시간 | 그 값이 어느 요청에서 왔는지, 그 렌더를 일으킨 응답 |
 | TanStack Query Devtools | 캐시에 든 쿼리와 키 | 어느 컴포넌트가 쓰는지, 키 설계가 잘못된 곳 |
 
 ## 지원 환경
 
-- React 18, 19 · 개발 서버에서만 동작(production 빌드에서는 아무것도 하지 않음)
+- React 18, 19. 개발 서버에서만 동작(production 빌드에서는 아무것도 하지 않음)
 - Vite, Create React App, Next.js App Router(15.3 이상). Pages Router 는 아직 확인하지 않았습니다.
-- `fetch`·`XMLHttpRequest` 로 받은 JSON 응답. 데이터를 가져오는 라이브러리(React Query, SWR, axios, redux 등)는 가리지 않습니다.
+- `fetch`, `XMLHttpRequest` 로 받은 JSON 응답. 데이터를 가져오는 라이브러리(React Query, SWR, axios, redux 등)는 가리지 않습니다.
 
 ## 시작하기
 
@@ -41,7 +41,7 @@ git clone https://github.com/y0ngha/react-data-xray.git
 cd react-data-xray && pnpm install && pnpm build
 
 # 앱 폴더에서. 두 폴더를 나란히 뒀다면 경로는 ../react-data-xray
-pnpm add -D file:../react-data-xray   # npm i -D file:../react-data-xray · yarn add -D file:../react-data-xray
+pnpm add -D file:../react-data-xray   # npm i -D file:../react-data-xray, yarn add -D file:../react-data-xray
 ```
 
 ### 2. 앱에 넣기
@@ -69,14 +69,14 @@ createRoot(document.getElementById('root')!).render(
 Next.js 에는 시작 파일이 없어서 `instrumentation-client.ts`(브라우저에서 React 보다 먼저 실행되는 파일)에 import 를 둡니다. `src` 폴더를 쓰지 않으면 경로에서 `src/` 를 빼세요.
 
 ```ts
-// src/instrumentation-client.ts — 맨 위에
+// src/instrumentation-client.ts 맨 위에
 import 'react-data-xray';
 ```
 
 패널은 `'use client'` 인 Provider 안에 둡니다. 이미 Provider 파일이 있다면 한 줄만 더하면 됩니다.
 
 ```tsx
-// src/app/providers.tsx — 루트 레이아웃이 <Providers>{children}</Providers> 로 감싼다
+// src/app/providers.tsx: 루트 레이아웃이 <Providers>{children}</Providers> 로 감싼다
 'use client';
 import { RdxDevtools } from 'react-data-xray';
 
@@ -96,7 +96,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 1. 오른쪽 아래 **RDX** 버튼으로 패널을 엽니다.
 2. 패널의 **⌖ 요소 선택**(<kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd>)을 누르고, API 에서 받아 온 숫자나 글자를 클릭합니다.
-3. 패널에 `GET /api/...` 와 `$[0].name` 같은 위치가 나오면 성공입니다. **네트워크 요청 · 렌더** 로 같은 컴포넌트를 다른 각도에서 봅니다.
+3. 패널에 `GET /api/...` 와 `$[0].name` 같은 위치가 나오면 성공입니다. **네트워크 요청**, **렌더** 로 같은 컴포넌트를 다른 각도에서 봅니다.
 
 <details>
 <summary><b>잘 안 될 때</b></summary>
@@ -112,7 +112,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 ### 응답 → 렌더 → 다시 요청, 끝나지 않는 고리
 
-실제 서비스(Next.js 16 · React 19)의 공지 팝업에 흔한 실수를 일부러 넣었습니다. `useEffect` 의존성에 그 effect 가 채우는 state 를 넣은 것입니다. 응답이 올 때마다 state 가 바뀌어 effect 가 다시 돌고, 6초 동안 요청이 1,713번 나갔습니다.
+실제 서비스(Next.js 16, React 19)의 공지 팝업에서 `useEffect` 의존성에 그 effect 가 채우는 state 를 넣은 경우입니다. 응답이 올 때마다 state 가 바뀌어 effect 가 다시 돌고, 6초 동안 요청이 1,713번 나갔습니다.
 
 <table>
   <tr>
@@ -148,14 +148,13 @@ RDX 는 "이 state 가 1초마다 바뀌는데 값이 실제로 바뀐 건 버�
 
 - [화면 둘러보기](./docs/guide.md): 박스, 요소 선택, 네트워크, 렌더, React Query 캐시 점검, 패널 쓰기 팁
 - [AI 에이전트와 함께 쓰기](./docs/ai.md): `window.__RDX__`, `.rdx/report.json` 보고서, Claude Code 스킬
-- [설계와 판단 근거](./docs/CONTEXT.md) · [앞으로 할 일](./docs/ROADMAP.md)
 
 ## 알아 둘 것
 
 - 기록은 브라우저와 내 개발 서버에만 남고 다른 곳으로 보내지 않습니다.
-- JSON 응답만 화면 요소와 이어집니다. Next.js 의 서버 컴포넌트·Server Action 으로 받은 데이터는 요청 목록에만 나옵니다. 같은 앱에서도 브라우저가 `fetch` 로 받는 데이터(검색, React Query 등)는 이어집니다. WebSocket·SSE·Service Worker 안의 요청은 보지 않습니다.
+- JSON 응답만 화면 요소와 이어집니다. Next.js 의 서버 컴포넌트, Server Action 으로 받은 데이터는 요청 목록에만 나옵니다. 같은 앱에서도 브라우저가 `fetch` 로 받는 데이터(검색, React Query 등)는 이어집니다. WebSocket, SSE, Service Worker 안의 요청은 보지 않습니다.
 - 응답을 `map` 등으로 가공해 state 에 넣으면 같은 객체로 이을 수 없어서, 응답이 도착한 직후에 바뀐 state 를 그 응답 때문이라고 추정합니다. 우연히 겹친 렌더가 붙을 수 있습니다.
-- 요청을 보낸 코드의 원래 파일 위치는 Vite 처럼 파일을 하나씩 보내는 개발 서버에서만 보여 줍니다. webpack·Turbopack 에서는 함수 이름으로 찾으세요.
+- 요청을 보낸 코드의 원래 파일 위치는 Vite 처럼 파일을 하나씩 보내는 개발 서버에서만 보여 줍니다. webpack, Turbopack 에서는 함수 이름으로 찾으세요.
 - 컴포넌트를 렌더한 JSX 위치는 React 18 개발 빌드에서만 나옵니다. React 19 에서는 이 위치만 빠지고 나머지는 그대로 동작합니다.
 
 ## 기여
