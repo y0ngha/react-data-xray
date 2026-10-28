@@ -8,7 +8,7 @@ const TRIGGER_WINDOW_MS = 1000;
 // 요청 기록에 남기는 앱 쪽 프레임 수. StrictMode 판정은 CAPTURE_FRAMES 전체로 하고, 기록은 앞부분만 둔다.
 const MAX_STACK_FRAMES = 10;
 // React 가 StrictMode 에서 effect 를 다시 실행할 때만 호출 스택에 나오는 함수들(React 18, 19 dev 빌드).
-const STRICT_MODE_REPLAY = /DoubleInvoke|invoke(Passive|Layout)EffectMountInDEV|doubleInvokeEffects/;
+export const STRICT_MODE_REPLAY = /DoubleInvoke|invoke(Passive|Layout)EffectMountInDEV|doubleInvokeEffects/;
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
