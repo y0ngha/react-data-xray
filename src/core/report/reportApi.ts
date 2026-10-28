@@ -6,9 +6,30 @@ import { resetCacheAudit } from '../reactQuery/cacheAudit.js';
 import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { buildReport, type RdxReport } from './buildReport.js';
+import { compare, type ReportComparison } from './compare.js';
 
 const UPLOAD_MS = 5000;
 const TAB_ID_KEY = 'rdx:tabId';
+const SNAPSHOTS_KEY = 'rdx:snapshots';
+const MAX_SNAPSHOTS = 6;
+
+// 저장한 보고서를 이 탭 sessionStorage 에도 남긴다. 고친 뒤 새로고침해도 전후를 비교할 수 있게 한다(용량이 넘치면 조용히 건너뛴다).
+const readSnapshots = (): Record<string, RdxReport> =>
+  readStored<Record<string, RdxReport>>(
+    SNAPSHOTS_KEY,
+    (v) => (typeof v === 'object' && v !== null ? (v as Record<string, RdxReport>) : undefined),
+    {},
+    'session',
+  );
+
+/** 이 탭에서 snapshot 으로 저장한 보고서 이름(오래된 것부터) */
+export const snapshotNames = (): string[] => Object.keys(readSnapshots());
+export const getSnapshot = (name: string): RdxReport | undefined => readSnapshots()[name];
+const keepSnapshot = (name: string, value: RdxReport): void => {
+  const { [name]: _old, ...rest } = readSnapshots();
+  const entries = Object.entries({ ...rest, [name]: value }).slice(-MAX_SNAPSHOTS);
+  writeStored(SNAPSHOTS_KEY, Object.fromEntries(entries), 'session');
+};
 
 /** 이 탭의 id. 새로고침해도 같고(sessionStorage), 새 탭은 새로 만든다. */
 export const getTabId = (): string => {
@@ -30,6 +51,8 @@ export interface RdxApi {
   reset: () => void;
   /** 보고서를 이름 붙여 저장한다(.rdx/<name>.json). 고치기 전후를 비교할 때 쓴다. 저장하지 못하면(플러그인 없음 등) 거부된다 */
   snapshot: (name: string) => Promise<RdxReport>;
+  /** 이 탭에서 저장한 두 보고서(전, 후)의 증감을 돌려주고 .rdx/compare-<전>-<후>.json 에도 쓴다(쓰지 못해도 거부되지 않는다) */
+  compare: (before: string, after: string) => Promise<ReportComparison>;
 }
 
 declare global {
@@ -95,6 +118,28 @@ const snapshot = async (name: string): Promise<RdxReport> => {
     body: JSON.stringify(result),
   }).catch(() => null);
   if (!res?.ok) throw new Error(`[react-data-xray] .rdx/${name}.json 을 쓰지 못했습니다(${res ? res.status : '응답 없음'}).`);
+  keepSnapshot(name, result);
+  return result;
+};
+
+const compareSnapshots = async (before: string, after: string): Promise<ReportComparison> => {
+  const a = getSnapshot(before);
+  const b = getSnapshot(after);
+  if (!a || !b)
+    throw new Error(
+      `[react-data-xray] 이 탭에서 저장한 보고서가 아닙니다: ${a ? after : before} (저장한 이름: ${snapshotNames().join(', ') || '없음'})`,
+    );
+  const result = compare(a, b);
+  const name = `compare-${before}-${after}`;
+  const send = getNativeFetch();
+  if (send && isReportName(name) && (await endpoint) === 'ready') {
+    await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(result),
+    }).catch(() => null);
+  }
   return result;
 };
 
@@ -160,6 +205,6 @@ const startUpload = async (): Promise<void> => {
 /** `window.__RDX__` 를 걸고, dev 서버 플러그인이 있으면 보고서를 파일로 보낸다. */
 export const installReportApi = (): void => {
   if (typeof window === 'undefined' || window.__RDX__) return;
-  window.__RDX__ = { report, reset, snapshot };
+  window.__RDX__ = { report, reset, snapshot, compare: compareSnapshots };
   void startUpload();
 };
