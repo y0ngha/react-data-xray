@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
-import type { EndpointStat } from '../../../core/requests/endpointStats.js';
+import { getEndpointStats, type EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Button } from '../../components/Button.js';
+import { useRequestActions } from '../../contexts.js';
 import { color } from '../../theme.js';
 import { CacheAuditView } from './CacheAuditView.js';
 import { EndpointRow } from './EndpointRow.js';
@@ -25,7 +26,13 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
   const [currentOnly, setCurrentOnly] = useState(false);
   const route = currentOnly ? window.location.pathname : undefined;
   const logs = [...records].reverse().filter((r) => (!filter || endpointOf(r) === filter) && (route === undefined || r.route === route));
-  const shownStats = route === undefined ? stats : stats.filter((s) => s.sites?.some((site) => site.route === route));
+  const { classOf } = useRequestActions();
+  // 경로 필터 중에는 그 경로에서 보낸 요청만으로 건수·낭비를 다시 센다(전 경로 합계를 보이지 않는다). 분류는 전체 기록 기준 그대로다.
+  const shownStats = useMemo(() => {
+    if (route === undefined) return stats;
+    const own = records.filter((r) => r.route === route);
+    return getEndpointStats(own, new Map(own.map((r) => [r.id, classOf(r)])));
+  }, [route, stats, records, classOf]);
   const showEndpoint = (endpoint: string) => {
     setFilter(endpoint);
     setView('log');

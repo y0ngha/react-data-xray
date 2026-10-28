@@ -21,7 +21,7 @@ export interface EndpointStat {
   idVariants?: number;
   /** 낭비로 판정된 요청 중 실패 응답(4xx·5xx, 네트워크 오류)인 것. 분류와 낭비 수는 그대로 둔다 */
   failedDuplicates?: number;
-  /** 실패한 요청의 상태 코드(네트워크 오류는 'ERR'), 많이 나온 순 */
+  /** 실패한 요청(낭비 여부와 무관)의 상태 코드(네트워크 오류는 'ERR'), 많이 나온 순 */
   failedCodes?: string[];
   /** 요청을 보낸 경로·컴포넌트별 건수, 많은 순. 경로도 컴포넌트도 모르는 요청은 뺀다 */
   sites?: EndpointSite[];
@@ -82,20 +82,24 @@ export const getEndpointStats = (
   classes: ReadonlyMap<number, RequestClass>,
   keyOf: (record: RequestRecord) => string = endpointOf,
 ): EndpointStat[] => {
+  // 키 계산(URL 파싱)은 기록마다 한 번만 한다.
+  const keys = new Map(records.map((r) => [r, keyOf(r)]));
+  const keyed = (r: RequestRecord): string => keys.get(r) ?? keyOf(r);
   const byEndpoint = records.reduce((acc, r) => {
-    const endpoint = keyOf(r);
+    const endpoint = keyed(r);
     return acc.set(endpoint, tally(acc.get(endpoint) ?? emptyStat(endpoint), r, classes.get(r.id)));
   }, new Map<string, EndpointStat & { totalMs: number }>());
   const pathsByEndpoint = records.reduce((acc, r) => {
-    const endpoint = keyOf(r);
+    const endpoint = keyed(r);
     return endpoint.includes(':id') ? acc.set(endpoint, (acc.get(endpoint) ?? new Set<string>()).add(pathOf(r.url))) : acc;
   }, new Map<string, Set<string>>());
   const failedCodesByEndpoint = new Map(
     Array.from(
       records.filter(isFailed).reduce((acc, r) => {
         const code = r.error ? 'ERR' : String(r.status);
-        const counts = acc.get(keyOf(r)) ?? new Map<string, number>();
-        return acc.set(keyOf(r), counts.set(code, (counts.get(code) ?? 0) + 1));
+        const endpoint = keyed(r);
+        const counts = acc.get(endpoint) ?? new Map<string, number>();
+        return acc.set(endpoint, counts.set(code, (counts.get(code) ?? 0) + 1));
       }, new Map<string, Map<string, number>>()),
       ([endpoint, counts]) =>
         [
@@ -106,7 +110,7 @@ export const getEndpointStats = (
         ] as const,
     ),
   );
-  const recordsByEndpoint = groupBy(records, keyOf);
+  const recordsByEndpoint = groupBy(records, keyed);
   return Array.from(byEndpoint.values(), ({ totalMs, ...stat }): EndpointStat => {
     const variants = pathsByEndpoint.get(stat.endpoint)?.size ?? 0;
     const codes = failedCodesByEndpoint.get(stat.endpoint);

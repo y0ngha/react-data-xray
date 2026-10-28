@@ -6,7 +6,7 @@ import { flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { buildReport } from '../../report/buildReport.js';
 import { getRecords } from '../../requests/store.js';
 import { hasAppFrame } from '../callerComponent.js';
-import { queryContextOf } from '../requestContext.js';
+import { queryContextOf } from '../queryContext.js';
 
 // ky 는 타임아웃을 걸려고 new Promise 안의 타이머 콜백에서 fetch 를 부른다. 그때 스택에는 ky 내부만 남는다.
 const KY_TIMEOUT_STACK = [

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-import { queryContextOf } from '../../core/capture/requestContext.js';
+import { queryContextOf } from '../../core/capture/queryContext.js';
 import { followUps } from '../../core/requests/followUps.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { prettyText, queryParamsOf, truncate, valueAt } from '../../shared/format.js';
@@ -10,8 +10,10 @@ import { KeyValues } from '../components/KeyValues.js';
 import { Muted } from '../components/Muted.js';
 import { Section } from '../components/Section.js';
 import type { Focus } from '../contexts.js';
+import { useRecords } from '../hooks/useRecords.js';
 import { ClassBadge } from './ClassBadge.js';
 import { ConsumerList } from './ConsumerList.js';
+import { FetchCause } from './FetchCause.js';
 import { StackSection } from './StackSection.js';
 import { RequestStatusLine } from './RequestSummary.js';
 
@@ -65,6 +67,7 @@ const RepeatInfo = ({ record }: { record: RequestRecord }) => (
     <ClassBadge record={record} />
     {record.duplicateOf && <Muted>앞선 요청 #{record.duplicateOf}</Muted>}
     {record.sameResponseAs && <Muted>같은 응답 #{record.sameResponseAs}</Muted>}
+    {record.repeatCause && <Muted>다시 나간 이유: {record.repeatCause.detail}</Muted>}
   </div>
 );
 
@@ -83,7 +86,9 @@ const QueryCaller = ({ record }: { record: RequestRecord }) => {
 
 // 변경 요청 뒤 1초 안에 다시 나간 조회. 근거는 시간 근접이고, React Query 면 queryKey 를 덧붙인다.
 const FollowUps = ({ record }: { record: RequestRecord }) => {
-  const list = useMemo(() => followUps(record, undefined, (r) => queryContextOf(r)?.queryKey), [record]);
+  // 뒤따르는 조회는 상세를 연 뒤에도 끝나므로 기록이 바뀔 때마다 다시 센다.
+  const records = useRecords();
+  const list = useMemo(() => followUps(record, records, (r) => queryContextOf(r)?.queryKey), [record, records]);
   if (!list.length) return null;
   return (
     <Section title="이 요청 뒤에 다시 받은 요청 (1초 안, 시간 근접)">
@@ -116,6 +121,7 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
     {record.trigger && <Muted>{TRIGGER_TEXT[record.trigger]}</Muted>}
     <ConsumerList record={record} />
     <QueryCaller record={record} />
+    <FetchCause record={record} />
     <FollowUps record={record} />
     {record.stack && <StackSection stack={record.sourceStack ?? record.stack} />}
     <Section title="Query">
