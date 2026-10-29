@@ -47,7 +47,7 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
   };
   return (
     <div>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
         <Button active={view === 'endpoints'} onClick={() => setView('endpoints')}>
           By endpoint
         </Button>

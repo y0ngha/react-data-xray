@@ -1,3 +1,4 @@
+import { formatTime } from '../../shared/format.js';
 import type { RdxReport } from './buildReport.js';
 
 /** 비교에 쓰는 부분만 담은 보고서. sessionStorage 에 남기는 것도 이 크기다. */
@@ -86,8 +87,6 @@ const diffBy = <T, K extends string, N extends string>(
 
 const findingId = (f: ComparableReport['reactQuery']['findings'][number]): string => `${f.kind} ${f.keys.join(', ')}`;
 
-const fmtTime = (ms: number): string => new Date(ms).toTimeString().slice(0, 8);
-
 /** 저장한 두 보고서(a: 전, b: 후)의 차이. 양수는 b 에서 늘어난 것이다. */
 export const compare = (a: ComparableReport, b: ComparableReport): ReportComparison => {
   const warnings: string[] = [];
@@ -100,8 +99,8 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
   const ra = a.resetAt ?? null;
   const rb = b.resetAt ?? null;
   if ((ra === null) !== (rb === null)) {
-    const beforeStr = ra !== null ? fmtTime(ra) : 'none';
-    const afterStr = rb !== null ? fmtTime(rb) : 'none';
+    const beforeStr = ra !== null ? formatTime(ra) : 'none';
+    const afterStr = rb !== null ? formatTime(rb) : 'none';
     warnings.push(`only one report was measured after a reset (before: ${beforeStr}, after: ${afterStr})`);
   }
   const before = new Set(a.reactQuery.findings.map(findingId));

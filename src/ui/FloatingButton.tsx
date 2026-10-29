@@ -3,6 +3,7 @@ import { useId, useRef, useState, type FocusEvent, type MouseEvent, type Pointer
 import type { Position } from './hooks/useDraggable.js';
 import type { Tab } from './panels/tabs.js';
 import { color, Z_PANEL } from './theme.js';
+import { clientViewport } from './viewport.js';
 
 export const BUTTON_SIZE = 44;
 
@@ -85,7 +86,7 @@ const Rdx = ({
         style={{
           position: 'absolute',
           top: -6,
-          right: -6,
+          right: 0,
           minWidth: 18,
           height: 18,
           padding: '0 4px',
@@ -113,7 +114,8 @@ const BreakdownPopup = ({
   breakdown: Breakdown;
   onSelect: (tab: Tab, key: string) => void;
 }) => {
-  const below = position.y < window.innerHeight / 2;
+  const vp = clientViewport();
+  const below = position.y < vp.height / 2;
   const section = (label: string, names: readonly string[], tab: Tab, show: (n: string) => string) =>
     names.length > 0 && (
       <div>
@@ -122,7 +124,14 @@ const BreakdownPopup = ({
         </strong>
         {names.map((n) => (
           // mousedown 이 포커스를 가져가면(Safari) 클릭 전에 팝업이 닫힐 수 있어 막는다.
-          <button key={n} type="button" style={itemStyle} onMouseDown={(e) => e.preventDefault()} onClick={() => onSelect(tab, n)}>
+          <button
+            key={n}
+            type="button"
+            title={show(n)}
+            style={{ ...itemStyle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onSelect(tab, n)}
+          >
             {show(n)}
           </button>
         ))}
@@ -133,8 +142,8 @@ const BreakdownPopup = ({
       id={id}
       style={{
         position: 'fixed',
-        left: Math.max(0, Math.min(position.x, window.innerWidth - POPUP_WIDTH)),
-        ...(below ? { top: position.y + BUTTON_SIZE } : { bottom: window.innerHeight - position.y }),
+        left: Math.max(0, Math.min(position.x, vp.width - POPUP_WIDTH)),
+        ...(below ? { top: position.y + BUTTON_SIZE } : { bottom: vp.height - position.y }),
         width: POPUP_WIDTH,
         padding: 8,
         border: `1px solid ${color.border}`,

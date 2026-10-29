@@ -5,6 +5,8 @@ import type { Position } from '../hooks/useDraggable.js';
 import { Button } from '../components/Button.js';
 import { ownUiProps } from '../ownUi.js';
 import { color, FONT, Z_PANEL } from '../theme.js';
+import { clientViewport } from '../viewport.js';
+import { BUTTON_SIZE } from '../FloatingButton.js';
 import { panelPlacement } from './panelLayout.js';
 import { ResizeHandle } from './ResizeHandle.js';
 
@@ -42,7 +44,7 @@ const noticeStyle: CSSProperties = {
 
 /** 패널 틀: 도킹 방식에 맞는 위치, 도킹했을 때의 크기 조절 손잡이, 도구 막대, 내용 */
 export const Panel = ({ settings, buttonPosition, onResize, onResizeEnd, toolbar, children, collapsed = false, onExpand }: PanelProps) => {
-  const placement = panelPlacement(settings, buttonPosition, { width: window.innerWidth, height: window.innerHeight });
+  const placement = panelPlacement(settings, buttonPosition, clientViewport());
   return (
     <aside
       aria-label="React Data X-ray"
@@ -55,7 +57,8 @@ export const Panel = ({ settings, buttonPosition, onResize, onResizeEnd, toolbar
         background: color.bg,
         color: color.text,
         font: FONT,
-        wordBreak: 'break-all',
+        // 긴 URL 만 필요할 때 꺾고, 단어는 가운데서 자르지 않는다.
+        overflowWrap: 'anywhere',
         ...(collapsed ? collapsedPlacement(placement) : placement),
       }}
     >
@@ -74,7 +77,10 @@ export const Panel = ({ settings, buttonPosition, onResize, onResizeEnd, toolbar
           </Button>
         </div>
       ) : (
-        <div style={{ padding: 8, overflow: 'auto', flex: 1 }}>{children}</div>
+        // 오른쪽 도킹이면 플로팅 버튼이 아래쪽을 가리므로 하단 여백을 둔다
+        <div style={{ padding: 8, paddingBottom: settings.dock === 'right' ? BUTTON_SIZE + 20 : 8, overflow: 'auto', flex: 1 }}>
+          {children}
+        </div>
       )}
     </aside>
   );

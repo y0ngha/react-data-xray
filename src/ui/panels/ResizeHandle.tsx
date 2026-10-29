@@ -1,8 +1,10 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 
 import { clamp } from '../../shared/format.js';
+import { clientViewport } from '../viewport.js';
 
-const MIN_SIZE = 160;
+// 도구 막대가 읽힐 최소 너비/높이 (이전 160px 에서 올림)
+const MIN_SIZE = 260;
 // 패널을 키워도 페이지가 이만큼은 보이게 둔다.
 const PAGE_MARGIN = 80;
 
@@ -22,8 +24,7 @@ export const sizeFromPointer = (
 
 /** 포인터를 뗄 때까지 움직임을 따라 크기를 알리고, 뗄 때 끝났음을 알린다. */
 const trackResize = (edge: ResizeEdge, onResize: (size: number) => void, onResizeEnd: () => void): void => {
-  const move = (ev: PointerEvent) =>
-    onResize(sizeFromPointer(edge, ev.clientX, ev.clientY, { width: window.innerWidth, height: window.innerHeight }));
+  const move = (ev: PointerEvent) => onResize(sizeFromPointer(edge, ev.clientX, ev.clientY, clientViewport()));
   const up = () => {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);

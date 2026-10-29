@@ -53,7 +53,8 @@ export const queryParamsOf = (url: string): Record<string, string> | undefined =
   );
 };
 
-export const formatTime = (time: number): string => new Date(time).toLocaleTimeString();
+/** 24시간 HH:MM:SS. 브라우저 언어(오전·PM)를 따르지 않아 패널 문구와 언어가 섞이지 않는다. */
+export const formatTime = (time: number): string => new Date(time).toTimeString().slice(0, 8);
 
 export const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
 

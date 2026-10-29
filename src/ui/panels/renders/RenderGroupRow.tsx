@@ -24,7 +24,7 @@ const isStorm = (group: RenderGroup, windowMs: number): boolean =>
   group.recent / group.instances / Math.max(1, windowMs / WINDOW_MS) >= RENDER_STORM;
 
 const Headline = ({ group, showTime, windowMs }: { group: RenderGroup; showTime: boolean; windowMs: number }) => (
-  <div>
+  <div title={`<${group.name}>`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
     <b style={{ color: isStorm(group, windowMs) ? color.warn : color.text }}>×{group.recent}</b>
     {showTime && <span style={{ color: color.muted }}> · {group.ms.toFixed(1)}ms</span>} &lt;{group.name}&gt;
     {group.instances > 1 && <span style={{ color: color.muted }}> × {group.instances}</span>}

@@ -1,6 +1,7 @@
 import { useRef, useSyncExternalStore, type MouseEvent, type PointerEvent } from 'react';
 
 import { clamp } from '../../shared/format.js';
+import { clientViewport } from '../viewport.js';
 import { useStoredState } from './useStoredState.js';
 
 const POSITION_KEY = 'react-data-xray:button';
@@ -34,13 +35,13 @@ interface Drag {
  * onClick 은 끌지 않고 눌렀다 뗐을 때만 부른다.
  */
 export const useDraggable = (size: number, onClickProp: () => void) => {
-  const [stored, setPosition, savePosition] = useStoredState(POSITION_KEY, parse, () => ({
-    x: window.innerWidth - size - 20,
-    y: window.innerHeight - size - 20,
-  }));
+  const [stored, setPosition, savePosition] = useStoredState(POSITION_KEY, parse, () => {
+    const vp = clientViewport();
+    return { x: vp.width - size - 20, y: vp.height - size - 20 };
+  });
   // 큰 창에서 옮겨 둔 위치를 작은 창에서 열면 화면 밖으로 나가므로, 지금 창 안으로 당겨서 그린다.
-  const width = useSyncExternalStore(subscribeResize, () => window.innerWidth);
-  const height = useSyncExternalStore(subscribeResize, () => window.innerHeight);
+  const width = useSyncExternalStore(subscribeResize, () => clientViewport().width);
+  const height = useSyncExternalStore(subscribeResize, () => clientViewport().height);
   const position = { x: clamp(stored.x, 0, Math.max(0, width - size)), y: clamp(stored.y, 0, Math.max(0, height - size)) };
   const drag = useRef<Drag | null>(null);
 
@@ -52,7 +53,8 @@ export const useDraggable = (size: number, onClickProp: () => void) => {
   const onPointerMove = (e: PointerEvent) => {
     const d = drag.current;
     if (!d) return;
-    const next = { x: clamp(e.clientX - d.dx, 0, window.innerWidth - size), y: clamp(e.clientY - d.dy, 0, window.innerHeight - size) };
+    const vp = clientViewport();
+    const next = { x: clamp(e.clientX - d.dx, 0, vp.width - size), y: clamp(e.clientY - d.dy, 0, vp.height - size) };
     d.moved ||= Math.abs(next.x - d.start.x) + Math.abs(next.y - d.start.y) > DRAG_THRESHOLD;
     if (d.moved) setPosition(next, { persist: false });
   };

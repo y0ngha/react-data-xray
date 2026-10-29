@@ -48,7 +48,7 @@ export const CompareReports = () => {
         Compare
       </Button>
       {open && (
-        <div style={{ flexBasis: '100%' }}>
+        <div style={{ flexBasis: '100%', order: 999 }}>
           {names.length < 2 ? (
             <Muted>Use the Save button or window.__RDX__.snapshot(name) to save two or more snapshots, then compare them here.</Muted>
           ) : (
