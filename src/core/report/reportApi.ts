@@ -5,6 +5,7 @@ import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../re
 import { resetCacheAudit } from '../reactQuery/cacheAudit.js';
 import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
+import { getResetAt, writeResetAt } from './resetAt.js';
 import { buildReport, type RdxReport } from './buildReport.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
@@ -12,7 +13,6 @@ const UPLOAD_MS = 5000;
 const TAB_ID_KEY = 'rdx:tabId';
 const SNAPSHOTS_KEY = 'rdx:snapshots';
 const SNAPSHOT_ORDER_KEY = 'rdx:snapshotOrder';
-const RESET_AT_KEY = 'rdx:resetAt';
 const MAX_SNAPSHOTS = 6;
 
 // 저장한 보고서의 비교용 부분을 이 탭 sessionStorage 에도 남긴다. 고친 뒤 새로고침해도 전후를 비교할 수 있게 한다.
@@ -122,6 +122,10 @@ const keepRenderMonitoring = (): void => {
   setRenderMonitoring(true);
 };
 
+/** dev 서버에 rdx 플러그인이 없어 snapshot 이 파일로 저장하지 못했을 때의 오류 문구. 패널은 이 오류면 탭에만 남긴다. */
+export const NO_PLUGIN_MESSAGE =
+  '[react-data-xray] The dev server has no rdx plugin; could not save. Use window.__RDX__.report() to retrieve the report.';
+
 const report = (): RdxReport => {
   const monitoring = isRenderMonitoring();
   keepRenderMonitoring();
@@ -136,12 +140,10 @@ type Endpoint = 'ready' | 'forbidden-host' | 'missing';
 // dev 서버 미들웨어가 있는지 확인한 결과. snapshot 이 확인이 끝나기 전에 불려도 기다린다.
 let endpoint: Promise<Endpoint> = Promise.resolve('missing');
 
-/** 이 탭에서 마지막으로 reset 한 시각(콘솔의 reset() 도 반영된다) */
-export const getResetAt = (): number | null =>
-  readStored<number | null>(RESET_AT_KEY, (v) => (typeof v === 'number' ? v : undefined), null, 'session');
+export { getResetAt };
 
 const reset = (): void => {
-  writeStored(RESET_AT_KEY, Date.now(), 'session');
+  writeResetAt(Date.now());
   // 시나리오 동안의 렌더를 잡도록 감시부터 켠다(플러그인 확인 전이거나 플러그인이 없어도).
   keepRenderMonitoring();
   clearRecords();
@@ -163,9 +165,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
     );
   }
   if (!send || state === 'missing') {
-    throw new Error(
-      '[react-data-xray] The dev server has no rdx plugin; could not save. Use window.__RDX__.report() to retrieve the report.',
-    );
+    throw new Error(NO_PLUGIN_MESSAGE);
   }
   // 호출 위치가 원본 위치와 변환 전 위치로 갈리지 않게, 진행 중인 소스맵 변환을 기다린다.
   await whenSourcesResolved();

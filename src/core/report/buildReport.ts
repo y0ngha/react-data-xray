@@ -12,10 +12,13 @@ import {
 } from './reactQuerySection.js';
 import { buildRenderSection, RENDER_HOW_TO_READ, RENDER_HOW_TO_READ_EXTRA, type RenderSection } from './renderSection.js';
 import { buildRequestSection, REQUEST_HOW_TO_READ, REQUEST_HOW_TO_READ_EXTRA, type RequestSection } from './requestSection.js';
+import { getResetAt } from './resetAt.js';
 
 /** AI·사람이 읽는 rdx 결과 요약. 응답 본문과 헤더는 넣지 않는다(인증 정보가 섞일 수 있다). */
 export interface RdxReport {
   generatedAt: string;
+  /** 이 탭에서 마지막으로 reset 한 시각(ms). reset 한 적이 없으면 null */
+  resetAt: number | null;
   page: string;
   howToRead: string[];
   requests: RequestSection;
@@ -42,6 +45,7 @@ const HOW_TO_READ = [
   ...REQUEST_HOW_TO_READ_EXTRA,
   ...RENDER_HOW_TO_READ_EXTRA,
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
+  'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
 ];
 
 /** 지금까지 모은 요청과 렌더를 요약한다. drain 이 false 면(주기적인 업로드) 미뤄 둔 분석을 기다리지 않고 지금까지 끝난 것만 담는다. */
@@ -57,6 +61,7 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true)
   const classes = classifyRecords(records, ignored);
   return {
     generatedAt: new Date(now).toISOString(),
+    resetAt: getResetAt(),
     page: typeof location === 'undefined' ? '' : location.pathname,
     howToRead: HOW_TO_READ,
     requests: buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf),

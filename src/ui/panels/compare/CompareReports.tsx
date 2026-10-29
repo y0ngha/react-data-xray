@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useReducer, useState } from 'react';
 
 import { compare } from '../../../core/report/compare.js';
 import { getSnapshot, snapshotNames } from '../../../core/report/reportApi.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
+import { SNAPSHOT_SAVED_EVENT } from './SnapshotButton.js';
 
 const REQUEST_LABELS: ReadonlySet<string> = new Set(['endpoint', 'status']);
 const RENDER_LABELS: ReadonlySet<string> = new Set(['name', 'status', 'renderedAt', 'package']);
@@ -17,6 +18,11 @@ const fmt = (row: Record<string, unknown>, skip: ReadonlySet<string>): string =>
 /** 저장한 스냅샷 둘(전, 후)을 골라 증감을 보인다. */
 export const CompareReports = () => {
   const [open, setOpen] = useState(false);
+  const [, refresh] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    window.addEventListener(SNAPSHOT_SAVED_EVENT, refresh);
+    return () => window.removeEventListener(SNAPSHOT_SAVED_EVENT, refresh);
+  }, []);
   const names = open ? snapshotNames() : [];
   const [before, setBefore] = useState('');
   const [after, setAfter] = useState('');
@@ -44,7 +50,7 @@ export const CompareReports = () => {
       {open && (
         <div style={{ flexBasis: '100%' }}>
           {names.length < 2 ? (
-            <Muted>Save two or more reports with window.__RDX__.snapshot(name) to compare them.</Muted>
+            <Muted>Use the Save button or window.__RDX__.snapshot(name) to save two or more snapshots, then compare them here.</Muted>
           ) : (
             <>
               {pick(before, setBefore, 'before')} → {pick(after, setAfter, 'after')}
