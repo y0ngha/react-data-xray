@@ -3,22 +3,22 @@ import type { RequestRecord } from '../requests/types.js';
 import { fetchCauseDetail, type FetchCause } from './cacheAudit.js';
 
 export const FETCH_CAUSE_LABEL: Record<FetchCause, string> = {
-  initial: '캐시 없음(첫 조회)',
-  mount: '관찰자가 마운트돼 stale 이라 받음',
-  enabled: '관찰자의 enabled 가 켜져 stale 이라 받음',
-  'key-change': '관찰자의 queryKey 가 바뀌어 stale 인 쿼리를 받음',
-  invalidate: '무효화(invalidateQueries)',
-  focus: '포커스·재연결',
+  initial: 'no cache (initial fetch)',
+  mount: 'observer mounted, data stale',
+  enabled: 'observer enabled, data stale',
+  'key-change': 'queryKey changed, data stale',
+  invalidate: 'invalidated (invalidateQueries)',
+  focus: 'focus · reconnect',
   interval: 'refetchInterval',
 };
 
 // 같은 응답을 낭비로 다시 받았을 때만 붙인다. 무효화·첫 조회는 의도된 동작이다(#28 의 분류가 맡는다).
 const FETCH_CAUSE_FIX: Partial<Record<FetchCause, string>> = {
-  enabled: '`enabled` 전환마다 stale 이라 다시 받습니다. 이 관찰자에 `staleTime` 을 주거나 상위 화면의 캐시를 그대로 쓰세요.',
-  mount: '마운트할 때마다 stale 이라 다시 받습니다. 이 관찰자에 `staleTime` 을 주거나 `refetchOnMount: false` 를 쓰세요.',
-  'key-change': 'queryKey 가 바뀔 때마다 stale 이라 다시 받습니다. 이 관찰자에 `staleTime` 을 주거나 `placeholderData` 로 이어 보이세요.',
-  focus: '포커스·재연결마다 stale 이라 다시 받습니다. `staleTime` 을 주거나 `refetchOnWindowFocus: false` 를 쓰세요.',
-  interval: '`refetchInterval` 마다 같은 응답을 받습니다. 간격을 늘리거나 바뀔 때만 받게 하세요.',
+  enabled: "Refetches stale data on every `enabled` toggle. Add `staleTime` to this observer or reuse the parent screen's cache.",
+  mount: 'Refetches stale data on every mount. Add `staleTime` to this observer or set `refetchOnMount: false`.',
+  'key-change': 'Refetches stale data on every queryKey change. Add `staleTime` to this observer or use `placeholderData` for continuity.',
+  focus: 'Refetches stale data on every focus/reconnect. Add `staleTime` or set `refetchOnWindowFocus: false`.',
+  interval: 'Receives the same response on every `refetchInterval`. Increase the interval or refetch only on change.',
 };
 
 export interface FetchCauseInfo {
@@ -42,8 +42,8 @@ export const describeFetchCause = (record: RequestRecord, wasteful: boolean): Fe
   const ctx = queryContextOf(record) ?? (d.dataRecord ? queryContextOf(d.dataRecord) : undefined);
   const evidence = [
     d.staleTime !== undefined && `staleTime ${d.staleTime}ms`,
-    d.ageMs !== undefined && `마지막 갱신 ${d.ageMs}ms 전`,
-    d.invalidated && '무효화됨',
+    d.ageMs !== undefined && `last updated ${d.ageMs}ms ago`,
+    d.invalidated && 'invalidated',
   ]
     .filter(Boolean)
     .join(' · ');

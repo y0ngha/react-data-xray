@@ -48,9 +48,9 @@ describe('CompareReports', () => {
     );
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { container } = render(<CompareReports />);
-    fireEvent.click(screen.getByText('비교'));
-    fireEvent.change(screen.getByLabelText('전'), { target: { value: 'before' } });
-    fireEvent.change(screen.getByLabelText('후'), { target: { value: 'after' } });
+    fireEvent.click(screen.getByText('Compare'));
+    fireEvent.change(screen.getByLabelText('before'), { target: { value: 'before' } });
+    fireEvent.change(screen.getByLabelText('after'), { target: { value: 'after' } });
     expect(container.textContent?.match(/<Row> A\.tsx:1 removed/g)).toHaveLength(1);
     expect(container.textContent).toContain('B.tsx:1');
     expect(container.textContent?.match(/removed removed/g)).toBeNull();
@@ -64,10 +64,10 @@ describe('TabReportButton (ponytail PR5-8)', () => {
     Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true });
     render(<TabReportButton />);
     await act(async () => void fireEvent.click(screen.getByRole('button')));
-    expect(screen.getByRole('status').textContent).toBe('복사됨');
+    expect(screen.getByRole('status').textContent).toBe('Copied');
     writeText.mockRejectedValue(new Error('denied'));
     await act(async () => void fireEvent.click(screen.getByRole('button')));
-    expect(screen.getByRole('status').textContent).toMatch(/^복사 실패: \.rdx\/tabs\/.+\.json$/);
+    expect(screen.getByRole('status').textContent).toMatch(/^Copy failed: \.rdx\/tabs\/.+\.json$/);
   });
 });
 
@@ -75,6 +75,6 @@ describe('ResetButton (ponytail PR5-10)', () => {
   it('지운 시각을 sessionStorage 에서 읽어 새로고침·콘솔 reset 도 반영한다', () => {
     sessionStorage.setItem('rdx:resetAt', JSON.stringify(new Date(2020, 0, 1, 9, 8, 7).getTime()));
     render(<ResetButton />);
-    expect(screen.getByText('09:08:07 이후 기록')).toBeTruthy();
+    expect(screen.getByText('09:08:07 since reset')).toBeTruthy();
   });
 });

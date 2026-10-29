@@ -34,24 +34,24 @@ interface PanelToolbarProps {
  */
 export const PanelToolbar = (props: PanelToolbarProps) => (
   <div style={{ display: 'flex', gap: 4, padding: 8, borderBottom: `1px solid ${color.border}`, flexWrap: 'wrap', alignItems: 'center' }}>
-    <TabGroup label="대상">
-      <Button active={props.scopeName === null && !props.picking} onClick={props.onWholeScreen} title="화면 전체를 분석합니다">
-        ▦ 화면 전체
+    <TabGroup label="Target">
+      <Button active={props.scopeName === null && !props.picking} onClick={props.onWholeScreen} title="Analyze whole page">
+        ▦ Whole page
       </Button>
       <Button active={props.picking} onClick={props.onTogglePicking} title={props.pickTitle}>
-        ⌖ 요소 선택
+        ⌖ Pick element
       </Button>
       {props.scopeName && (
-        <Button active onClick={props.onWholeScreen} title="선택을 풀고 화면 전체로 돌아갑니다">
-          &lt;{props.scopeName}&gt; 안 ✕
+        <Button active onClick={props.onWholeScreen} title="Clear selection, back to whole page">
+          &lt;{props.scopeName}&gt; ✕
         </Button>
       )}
-      <Button active={props.boxesVisible} onClick={props.onToggleBoxes} title="분석 대상 안의 데이터 출처를 화면에 박스로 그립니다">
-        {props.boxesVisible ? '☑' : '☐'} 박스
+      <Button active={props.boxesVisible} onClick={props.onToggleBoxes} title="Draw data source boxes on the page">
+        {props.boxesVisible ? '☑' : '☐'} Boxes
       </Button>
     </TabGroup>
     <span style={{ flex: 1 }} />
-    <TabGroup label="관점">
+    <TabGroup label="View">
       {TAB_GROUPS.map((group) =>
         group.tabs.map((t) => (
           <Button key={t.tab} active={props.activeTab === t.tab} onClick={() => props.onTab(t.tab)} title={`${group.label} › ${t.title}`}>
@@ -66,7 +66,7 @@ export const PanelToolbar = (props: PanelToolbarProps) => (
     <TabReportButton />
     <CompareReports />
     <DockPicker dock={props.dock} onChange={props.onDock} />
-    <Button onClick={props.onClose} title="닫기">
+    <Button onClick={props.onClose} title="Close">
       ✕
     </Button>
   </div>

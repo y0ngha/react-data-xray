@@ -51,7 +51,7 @@ export const keepSnapshot = (name: string, value: RdxReport): void => {
     } catch {
       if (keep.length <= 1) {
         console.warn(
-          `[react-data-xray] '${name}' 보고서를 이 탭에 남기지 못했습니다(저장 공간 부족). 파일(.rdx/${name}.json)에는 저장됐습니다.`,
+          `[react-data-xray] Could not keep the '${name}' report in this tab (storage full). It was saved to the file (.rdx/${name}.json).`,
         );
         return;
       }
@@ -152,18 +152,20 @@ const reset = (): void => {
 const snapshot = async (name: string): Promise<RdxReport> => {
   if (!isReportName(name)) {
     throw new Error(
-      `[react-data-xray] 보고서 이름은 영문·숫자·. _ - 로 64자까지입니다(. 으로 시작하거나 'report' 일 수 없습니다): ${name}`,
+      `[react-data-xray] Report name must be up to 64 characters using letters, digits, ., _, or - (cannot start with . or be 'report'): ${name}`,
     );
   }
   const send = getNativeFetch();
   const state = send ? await endpoint : 'missing';
   if (state === 'forbidden-host') {
     throw new Error(
-      `[react-data-xray] dev 서버가 ${location.host} 에서 온 보고서를 막았습니다. rdx({ allowedHosts: ['${location.hostname}'] }) 로 허용하세요.`,
+      `[react-data-xray] The dev server blocked a report from ${location.host}. Allow it with rdx({ allowedHosts: ['${location.hostname}'] }).`,
     );
   }
   if (!send || state === 'missing') {
-    throw new Error('[react-data-xray] dev 서버에 rdx 플러그인이 없어 저장하지 못했습니다. window.__RDX__.report() 로 받으세요.');
+    throw new Error(
+      '[react-data-xray] The dev server has no rdx plugin; could not save. Use window.__RDX__.report() to retrieve the report.',
+    );
   }
   // 호출 위치가 원본 위치와 변환 전 위치로 갈리지 않게, 진행 중인 소스맵 변환을 기다린다.
   await whenSourcesResolved();
@@ -174,7 +176,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(result),
   }).catch(() => null);
-  if (!res?.ok) throw new Error(`[react-data-xray] .rdx/${name}.json 을 쓰지 못했습니다(${res ? res.status : '응답 없음'}).`);
+  if (!res?.ok) throw new Error(`[react-data-xray] Could not write .rdx/${name}.json (${res ? res.status : 'no response'}).`);
   keepSnapshot(name, result);
   return result;
 };
@@ -184,7 +186,7 @@ const compareSnapshots = async (before: string, after: string): Promise<ReportCo
   const b = getSnapshot(after);
   if (!a || !b)
     throw new Error(
-      `[react-data-xray] 이 탭에서 저장한 보고서가 아닙니다: ${a ? after : before} (저장한 이름: ${snapshotNames().join(', ') || '없음'})`,
+      `[react-data-xray] Not a report saved in this tab: ${a ? after : before} (saved names: ${snapshotNames().join(', ') || 'none'})`,
     );
   const result = compare(a, b);
   const name = `compare-${before}-${after}`;
@@ -210,7 +212,7 @@ const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
   const mark = res?.headers.get(REPORT_HEADER);
   if (mark === 'forbidden-host') {
     console.warn(
-      `[react-data-xray] dev 서버가 ${location.host} 에서 온 보고서를 막았습니다. rdx({ allowedHosts: ['${location.hostname}'] }) 로 허용하세요.`,
+      `[react-data-xray] The dev server blocked a report from ${location.host}. Allow it with rdx({ allowedHosts: ['${location.hostname}'] }).`,
     );
   }
   return mark === '1' ? 'ready' : mark === 'forbidden-host' ? 'forbidden-host' : 'missing';

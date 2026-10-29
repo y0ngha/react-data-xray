@@ -16,6 +16,7 @@ describe('보고서', () => {
     const endpoint = report.requests.endpoints[0];
     expect(endpoint).toMatchObject({ endpoint: 'GET /api/dup', count: 2, duplicates: 1, wasteExamples: ['/api/dup?id=1'] });
     expect(endpoint.callers[0]).toMatchObject({ count: 2, frame: expect.stringContaining('report.test.ts') });
+    // 응답 본문(fetchMock 의 'CPU 경고')은 보고서에 들어가지 않는다
     expect(JSON.stringify(report)).not.toContain('CPU 경고');
     expect(report.renders.monitoring).toBe(false);
   });
@@ -25,7 +26,7 @@ describe('보고서', () => {
     await [0, 1].reduce((prev) => prev.then(load), Promise.resolve());
     await flush();
     const endpoint = buildReport(false).requests.endpoints.find((e) => e.endpoint === 'GET /api/secret');
-    expect(endpoint?.wasteExamples).toEqual(['/api/secret?access_token=(가림)&page=1']);
+    expect(endpoint?.wasteExamples).toEqual(['/api/secret?access_token=(redacted)&page=1']);
     expect(JSON.stringify(buildReport(false))).not.toContain('abc123');
   });
 

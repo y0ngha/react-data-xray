@@ -69,7 +69,7 @@ export const regularInterval = (times: readonly number[]): number | undefined =>
   return mid > 0 && gaps.every((g) => Math.abs(g - mid) <= mid * INTERVAL_TOLERANCE) ? mid : undefined;
 };
 
-const hookLabel = (h: { index: number; type?: string }): string => (h.type ? `${h.type} #${h.index}` : `훅 칸 #${h.index}`);
+const hookLabel = (h: { index: number; type?: string }): string => (h.type ? `${h.type} #${h.index}` : `hook slot #${h.index}`);
 
 const labelFrom = (fiber: Fiber, hookIndex: number, sites: HookSite[] | null | undefined): string => {
   const type = fiber._debugHookTypes?.[hookIndex - 1];

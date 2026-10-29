@@ -1,12 +1,12 @@
 import { color } from '../../theme.js';
 
 const ITEMS: ReadonlyArray<{ color: string; mark: string; label: string }> = [
-  { color: color.accent, mark: '■', label: '요청' },
-  { color: color.warn, mark: '■', label: '낭비' },
-  { color: color.review, mark: '■', label: '확인 필요(주기·포커스)' },
-  { color: color.muted, mark: '■', label: '정상 반복' },
-  { color: color.failed, mark: '■', label: '실패' },
-  { color: color.render, mark: '▮', label: '비교용 렌더 commit(높이 = 렌더된 컴포넌트 수, 자세히는 렌더 › 분석)' },
+  { color: color.accent, mark: '■', label: 'request' },
+  { color: color.warn, mark: '■', label: 'waste' },
+  { color: color.review, mark: '■', label: 'review (polling·focus)' },
+  { color: color.muted, mark: '■', label: 'expected repeat' },
+  { color: color.failed, mark: '■', label: 'failed' },
+  { color: color.render, mark: '▮', label: 'render commit for comparison (height = component count; see Renders › Analysis)' },
 ];
 
 export const TimelineLegend = () => (

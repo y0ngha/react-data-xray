@@ -32,10 +32,10 @@ describe('StackSection', () => {
     await act(async () => createRoot(host).render(<StackSection stack={STACK} />));
     expect(host.textContent).toContain('api.ts');
     expect(host.textContent).not.toContain('axios');
-    expect(host.textContent).toContain('라이브러리 프레임 2개');
+    expect(host.textContent).toContain('2 library frames');
     await act(async () => host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
     expect(host.textContent).toContain('axios');
-    const copy = [...host.querySelectorAll('button')].find((b) => /복사/.test(b.textContent ?? ''));
+    const copy = [...host.querySelectorAll('button')].find((b) => /Copy/.test(b.textContent ?? ''));
     await act(async () => copy!.click());
     expect(writeText).toHaveBeenCalledWith(STACK);
   });

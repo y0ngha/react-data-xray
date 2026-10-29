@@ -71,7 +71,7 @@ describe('중복 요청이 다시 나간 이유', () => {
     recordMounts([], [{ fiber: old, parent: list, branch: list }], 0);
     recordMounts([{ fiber: old, parent: list }], [{ fiber: fresh, parent: list, branch: list }], 100);
     const cause = repeatCauseOf(rec({ component: 'Child', startedAt: 200 }));
-    expect(cause).toEqual({ kind: 'remount', detail: '<Child> 재마운트, 부모 <List> 의 분기 변경' });
+    expect(cause).toEqual({ kind: 'remount', detail: '<Child> remount, parent <List> branch changed' });
   });
 
   it('strict: StrictMode 재실행은 strict 로 남고, 중복이 아니면 원인이 없다', () => {
@@ -80,7 +80,7 @@ describe('중복 요청이 다시 나간 이유', () => {
   });
 
   it('보고서 endpoints[].repeatCauses 에 이유별 수가 들어간다', () => {
-    const cause = { kind: 'deps' as const, detail: '의존성 #1 변경 (1 → 2), 1번째 effect' };
+    const cause = { kind: 'deps' as const, detail: 'dep #1 changed (1 → 2), effect 1' };
     const section = buildRequestSection([rec({ id: 2, repeatCause: cause }), rec({ id: 3, repeatCause: cause })], new Map(), new Set());
     expect(section.endpoints[0].repeatCauses).toEqual([{ ...cause, count: 2 }]);
   });

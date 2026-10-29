@@ -38,8 +38,8 @@ describe('EndpointRow (PR2-6)', () => {
 
   it('실패 코드는 중복 표기와 따로 보인다', () => {
     row({ failedCodes: ['503', 'ERR'] });
-    expect(screen.getByText(/실패 503·ERR/)).toBeTruthy();
-    expect(screen.queryByText(/실패 응답/)).toBeNull();
+    expect(screen.getByText(/failed: 503·ERR/)).toBeTruthy();
+    expect(screen.queryByText(/failed dup:/)).toBeNull();
   });
 });
 
@@ -61,9 +61,9 @@ describe('RequestsTab 지금 경로만 (PR2-7)', () => {
         onToggleIgnore={vi.fn<(e: string) => void>()}
       />,
     );
-    expect(screen.getByText(/5회/)).toBeTruthy();
-    fireEvent.click(screen.getByText('지금 경로만'));
-    expect(screen.getByText(/2회/)).toBeTruthy();
-    expect(screen.queryByText(/5회/)).toBeNull();
+    expect(screen.getByText(/×5/)).toBeTruthy();
+    fireEvent.click(screen.getByText('This route'));
+    expect(screen.getByText(/×2/)).toBeTruthy();
+    expect(screen.queryByText(/×5/)).toBeNull();
   });
 });

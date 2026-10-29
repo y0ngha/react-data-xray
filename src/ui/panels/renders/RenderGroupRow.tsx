@@ -25,10 +25,10 @@ const isStorm = (group: RenderGroup, windowMs: number): boolean =>
 
 const Headline = ({ group, showTime, windowMs }: { group: RenderGroup; showTime: boolean; windowMs: number }) => (
   <div>
-    <b style={{ color: isStorm(group, windowMs) ? color.warn : color.text }}>{group.recent}회</b>
+    <b style={{ color: isStorm(group, windowMs) ? color.warn : color.text }}>×{group.recent}</b>
     {showTime && <span style={{ color: color.muted }}> · {group.ms.toFixed(1)}ms</span>} &lt;{group.name}&gt;
-    {group.instances > 1 && <span style={{ color: color.muted }}> × {group.instances}개</span>}
-    {group.avoidable > 0 && <Badge color={color.review}>줄일 수 있음 {group.avoidable}</Badge>}
+    {group.instances > 1 && <span style={{ color: color.muted }}> × {group.instances}</span>}
+    {group.avoidable > 0 && <Badge color={color.review}>avoidable {group.avoidable}</Badge>}
     {group.package && <Badge color={color.muted}>{group.package}</Badge>}
     {group.location && <span style={{ color: color.muted }}> · {group.location}</span>}
   </div>
@@ -37,18 +37,18 @@ const Headline = ({ group, showTime, windowMs }: { group: RenderGroup; showTime:
 /** 조상 때문에 렌더됐다면, 그 렌더를 시작한 조상. 고칠 곳은 대개 이 조상의 state 변경이다. */
 const Origins = ({ group }: { group: RenderGroup }) =>
   group.origins.length > 0 ? (
-    <Muted>렌더 시작: {group.origins.map((o) => `<${o.name}>(${REASON_LABEL[o.reason]}) ${o.count}회`).join(' · ')}</Muted>
+    <Muted>started by: {group.origins.map((o) => `<${o.name}>(${REASON_LABEL[o.reason]}) ×${o.count}`).join(' · ')}</Muted>
   ) : null;
 
 /** state 때문에 렌더됐다면 값이 바뀐 훅: 어느 훅이, 몇 번, 어떤 간격으로, 무엇에서 무엇으로 */
 const StateHooks = ({ group }: { group: RenderGroup }) =>
   group.stateHooks.length > 0 ? (
     <Muted>
-      바뀐 state:{' '}
+      state changed:{' '}
       {withHookPaths(group.stateHooks, group.fiber)
         .map(
           (h) =>
-            `${h.label} ${h.count}회${h.intervalMs ? ` (${(h.intervalMs / 1000).toFixed(1)}초마다)` : ''} · 최근 ${h.last.from} → ${h.last.to}`,
+            `${h.label} ×${h.count}${h.intervalMs ? ` (every ${(h.intervalMs / 1000).toFixed(1)}s)` : ''} · latest ${h.last.from} → ${h.last.to}`,
         )
         .join(' / ')}
     </Muted>
@@ -58,8 +58,8 @@ const StateHooks = ({ group }: { group: RenderGroup }) =>
 const Impact = ({ group }: { group: RenderGroup }) =>
   group.impact ? (
     <Muted>
-      이 컴포넌트가 일으킨 하위 렌더 {group.impact.renders}회 · 그중 값이 그대로 {group.impact.unchanged}회
-      {group.impact.changedProps.length > 0 && ` · 값이 바뀐 props: ${group.impact.changedProps.join(' → ')}`}
+      child renders triggered: ×{group.impact.renders} · unchanged: ×{group.impact.unchanged}
+      {group.impact.changedProps.length > 0 && ` · changed props: ${group.impact.changedProps.join(' → ')}`}
     </Muted>
   ) : null;
 
@@ -67,8 +67,8 @@ const Impact = ({ group }: { group: RenderGroup }) =>
 const MemoStats = ({ group }: { group: RenderGroup }) =>
   group.memo ? (
     <Muted>
-      memo: 건너뜀 {group.memo.skipped}회 · 다시 렌더 {group.memo.rendered}회
-      {group.memo.neverSkippedProps.length > 0 && ` · 매번 새 참조: ${group.memo.neverSkippedProps.join(', ')}`}
+      memo: skipped ×{group.memo.skipped} · re-rendered ×{group.memo.rendered}
+      {group.memo.neverSkippedProps.length > 0 && ` · always new ref: ${group.memo.neverSkippedProps.join(', ')}`}
     </Muted>
   ) : null;
 
@@ -76,9 +76,9 @@ const MemoStats = ({ group }: { group: RenderGroup }) =>
 const Mounts = ({ group }: { group: RenderGroup }) =>
   group.mounts ? (
     <Muted>
-      마운트 {group.mounts.mounts}회 · 언마운트 {group.mounts.unmounts}회
+      mount ×{group.mounts.mounts} · unmount ×{group.mounts.unmounts}
       {group.mounts.remounts.length > 0 &&
-        ` · 재마운트: ${group.mounts.remounts.map((r) => `${r.parent ? `<${r.parent}> 아래 ` : ''}${r.count}회${r.cause ? '(컴포넌트 타입이 렌더마다 새로 만들어짐)' : ''}`).join(' · ')}`}
+        ` · remount: ${group.mounts.remounts.map((r) => `${r.parent ? `under <${r.parent}> ` : ''}×${r.count}${r.cause ? ' (component type recreated each render)' : ''}`).join(' · ')}`}
     </Muted>
   ) : null;
 
@@ -86,9 +86,9 @@ const Mounts = ({ group }: { group: RenderGroup }) =>
 const Libraries = ({ group }: { group: RenderGroup }) =>
   group.libraries?.length ? (
     <Muted>
-      안쪽 라이브러리:{' '}
+      inner libraries:{' '}
       {group.libraries
-        .map((l) => `${l.package} <${l.name}> ${l.renders}회${l.avoidable > 0 ? `(줄일 수 있음 ${l.avoidable})` : ''}`)
+        .map((l) => `${l.package} <${l.name}> ×${l.renders}${l.avoidable > 0 ? ` (avoidable ${l.avoidable})` : ''}`)
         .join(' · ')}
     </Muted>
   ) : null;
@@ -97,15 +97,15 @@ const Libraries = ({ group }: { group: RenderGroup }) =>
 const NetworkCauses = ({ group }: { group: RenderGroup }) => (
   <>
     <Muted>
-      네트워크 응답으로 {group.network}회 · 네트워크와 무관 {group.recent - group.network}회
+      by network response: ×{group.network} · unrelated to network: ×{group.recent - group.network}
     </Muted>
     {group.causes.slice(0, 3).map((c) => (
       <RequestLink key={c.record.id} record={c.record}>
         <Muted>
-          ⇠ <RequestTitle record={c.record} /> 응답으로 렌더 {c.direct + c.timing + c.parent}회
-          {c.parent > 0 && ` (그중 부모를 따라 ${c.parent}회)`}
-          {c.timing > 0 && ` · 그중 응답 직후 state 변경(시간으로 추정) ${c.timing}회`}
-          {c.sameResponse > 0 && ` · 그중 직전과 같은 응답으로 ${c.sameResponse}회`} <ClassBadge record={c.record} />
+          ⇠ <RequestTitle record={c.record} /> rendered on response ×{c.direct + c.timing + c.parent}
+          {c.parent > 0 && ` (via parent ×${c.parent})`}
+          {c.timing > 0 && ` · state change after response (by timing) ×${c.timing}`}
+          {c.sameResponse > 0 && ` · same response ×${c.sameResponse}`} <ClassBadge record={c.record} />
         </Muted>
       </RequestLink>
     ))}
@@ -116,9 +116,9 @@ const NetworkCauses = ({ group }: { group: RenderGroup }) => (
 const DataSource = ({ source, stat }: { source: Hit; stat?: EndpointStat }) => (
   <RequestLink record={source.record}>
     <Muted>
-      데이터 출처 ← <RequestTitle record={source.record} /> <ClassBadge record={source.record} />
-      {stat && stat.duplicates > 0 && <Badge color={color.warn}>중복 {stat.duplicates}</Badge>}
-      {stat && stat.sameResponses > 0 && <Badge color={color.warn}>같은 응답 {stat.sameResponses}</Badge>}
+      data source ← <RequestTitle record={source.record} /> <ClassBadge record={source.record} />
+      {stat && stat.duplicates > 0 && <Badge color={color.warn}>duplicates {stat.duplicates}</Badge>}
+      {stat && stat.sameResponses > 0 && <Badge color={color.warn}>same response {stat.sameResponses}</Badge>}
     </Muted>
   </RequestLink>
 );

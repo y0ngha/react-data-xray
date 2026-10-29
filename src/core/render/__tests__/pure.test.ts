@@ -135,7 +135,7 @@ describe('summary, groups, advice', () => {
     expect(advice.join()).toContain('props.style');
     expect(advice.join()).toContain('useCallback');
     expect(advice.join()).toContain('Theme');
-    expect(renderAdvice({ ...group, memoized: true }).some((a) => a.includes('React.memo 로 감싸면'))).toBe(false);
+    expect(renderAdvice({ ...group, memoized: true }).some((a) => a.includes('Wrapping it with React.memo'))).toBe(false);
     expect(renderAdvice({ ...group, reasons: { ...group.reasons, 'same-content': 0, 'new-callback': 0, parent: 0, context: 0 } })).toEqual(
       [],
     );
@@ -159,9 +159,9 @@ describe('summary, groups, advice', () => {
       compiled: true,
     };
     const advice = renderAdvice({ ...base, name: 'Leaf', instances: 1, fiber: {} }).join('\n');
-    expect(advice).toContain('useState #4 이(가) 1.0초마다 바뀝니다');
+    expect(advice).toContain('useState #4 changes every 1.0s');
     expect(advice).toContain('React Compiler');
-    expect(advice).not.toContain('React.memo 로 감싸면');
+    expect(advice).not.toContain('Wrapping it with React.memo');
     expect(advice).toContain('<ChartContent>');
   });
 
@@ -195,9 +195,9 @@ describe('summary, groups, advice', () => {
       },
     };
     const first = renderAdvice(group)[0];
-    expect(first).toContain('state(useState #4, 1.0초마다)');
+    expect(first).toContain('state(useState #4, every 1.0s)');
     expect(first).toContain('AnalysisPanel.cooldownMs → ReanalyzeButton.cooldownMs');
-    expect(first).toContain('18회가 사라집니다');
+    expect(first).toContain('eliminates 18');
     expect(sortRenderGroups([{ ...group, name: 'Leaf', impact: undefined, avoidable: 3 }, group], 'avoidable')[0].name).toBe(
       'ChartContent',
     );

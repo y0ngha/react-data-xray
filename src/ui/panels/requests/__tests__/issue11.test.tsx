@@ -22,7 +22,7 @@ describe('엔드포인트 줄의 새로고침 전 수 (#11)', () => {
     renderWithActions(
       <RequestsTab records={records} stats={stats} ignored={new Set()} onToggleIgnore={vi.fn<(endpoint: string) => void>()} />,
     );
-    expect(screen.getAllByText(/새로고침 전/)).toHaveLength(1);
-    expect(screen.getByText(/새로고침 전 2/)).toBeTruthy();
+    expect(screen.getAllByText(/before reload:/)).toHaveLength(1);
+    expect(screen.getByText(/before reload: 2/)).toBeTruthy();
   });
 });

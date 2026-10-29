@@ -81,8 +81,8 @@ const RUNTIME_FRAME = /react-stack-top-frame|jsx-dev-runtime|jsx-runtime|react_j
 /** 번들 경로에서 패키지 이름: node_modules/@scope/pkg/ 의 마지막 것, Vite 사전 번들은 파일 이름(@mui_material → @mui/material) */
 const packageOfPath = (path: string): string => {
   const dep = /\.vite\/deps\/([^/?:]+?)\.js/.exec(path)?.[1];
-  if (dep) return dep.startsWith('chunk-') ? '(번들)' : dep.replace(/^(@[^_]+)_/, '$1/');
-  return /^.*node_modules\/(@[^/]+\/[^/?:]+|[^/?:]+)\//.exec(path)?.[1] ?? '(번들)';
+  if (dep) return dep.startsWith('chunk-') ? '(bundle)' : dep.replace(/^(@[^_]+)_/, '$1/');
+  return /^.*node_modules\/(@[^/]+\/[^/?:]+|[^/?:]+)\//.exec(path)?.[1] ?? '(bundle)';
 };
 
 /**

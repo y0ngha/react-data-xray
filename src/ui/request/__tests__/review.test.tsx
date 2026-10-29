@@ -22,11 +22,11 @@ describe('RequestDetail FollowUps (PR2-8)', () => {
   it('상세를 연 뒤 끝난 뒤따르는 조회도 반영한다', async () => {
     const save = done('POST', '/api/save');
     render(<RequestDetail record={save} onBack={() => undefined} />);
-    expect(screen.queryByText(/이 요청 뒤에 다시 받은 요청/)).toBeNull();
+    expect(screen.queryByText(/Requests refetched after this one/)).toBeNull();
     await act(async () => {
       done('GET', '/api/after');
     });
-    await waitFor(() => expect(screen.getByText(/이 요청 뒤에 다시 받은 요청/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Requests refetched after this one/)).toBeTruthy());
   });
 });
 
@@ -34,7 +34,7 @@ describe('StackSection (ponytail PR2-7)', () => {
   it('앱 프레임이 없으면 접지 않고 전체를 보인다', () => {
     const html = renderToStaticMarkup(<StackSection stack={'at f (http://l/node_modules/ky/a.js:1:2)'} />);
     expect(html).toContain('ky/a.js');
-    expect(html).not.toContain('펼치기');
+    expect(html).not.toContain('expand');
   });
 });
 
@@ -43,7 +43,7 @@ describe('ConsumerList MountNote (PR4-7)', () => {
     mounts.remounts = [{ parent: 'List', count: 3, lastAt: 1, cause: 'type-changed' }];
     const record = { id: 1, kind: 'fetch', method: 'GET', url: '/a', startedAt: 0, durationMs: 1, component: 'Row' } as RequestRecord;
     const html = renderToStaticMarkup(<ConsumerList record={record} />);
-    expect(html).toContain('렌더 중에 정의한 컴포넌트');
-    expect(html).not.toContain('때문에 재마운트');
+    expect(html).toContain('component defined during render');
+    expect(html).not.toContain('caused remount');
   });
 });

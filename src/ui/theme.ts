@@ -29,7 +29,7 @@ export const color = {
 export const FONT = '12px/1.5 ui-monospace, Menlo, monospace';
 export const SMALL_FONT = '10px/1.4 ui-monospace, Menlo, monospace';
 
-export const MATCH_LABEL: Record<MatchKind, string> = { exact: '정확', derived: '파생', text: '추정' };
+export const MATCH_LABEL: Record<MatchKind, string> = { exact: 'exact', derived: 'derived', text: 'guessed' };
 export const MATCH_COLOR: Record<MatchKind, string> = { exact: color.exact, derived: color.derived, text: color.guess };
 
 /** 낭비는 빨강, 확인 필요는 노랑, 정상은 회색 */

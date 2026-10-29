@@ -34,7 +34,7 @@ export const EndpointRow = ({ stat, ignored, route, focus, onSelect, onToggleIgn
       <div style={{ display: 'flex', gap: 8 }}>
         <button
           type="button"
-          title="이 엔드포인트의 요청 목록 보기"
+          title="View request list for this endpoint"
           onClick={() => onSelect(stat.endpoint)}
           style={{ ...plainButtonStyle, flex: 1, color: titleColor(stat, ignored) }}
         >
@@ -43,21 +43,25 @@ export const EndpointRow = ({ stat, ignored, route, focus, onSelect, onToggleIgn
         <Button
           subtle
           onClick={() => onToggleIgnore(stat.endpoint)}
-          title="이 엔드포인트의 중복·같은 응답을 낭비로 세지 않습니다(의도된 동작일 때)"
+          title="Do not count duplicates and same responses as waste for this endpoint (when intentional)"
         >
-          {ignored ? '무시 해제' : '무시'}
+          {ignored ? 'Unignore' : 'Ignore'}
         </Button>
       </div>
       <Muted>
-        {stat.count}회 · 평균 {stat.avgMs}ms
-        {stat.idVariants && <span title="경로 안의 ID 를 :id 로 묶었습니다"> · ID {stat.idVariants}종</span>}
-        {!!stat.restoredCount && <span title="같은 탭에서 새로고침하기 전 페이지의 요청"> · 새로고침 전 {stat.restoredCount}</span>}
-        {stat.duplicates > 0 && <span style={{ color: color.warn }}> · 중복 {stat.duplicates}</span>}
-        {stat.sameResponses > 0 && <span style={{ color: color.warn }}> · 같은 응답 {stat.sameResponses}</span>}
-        {!!stat.failedDuplicates && <span style={{ color: color.warn, fontWeight: 600 }}> · 실패 응답 {stat.failedDuplicates}</span>}
-        {!!stat.failedCodes && <span title="낭비 여부와 무관하게 실패한 요청의 상태 코드"> · 실패 {stat.failedCodes.join('·')}</span>}
-        {stat.review > 0 && <span style={{ color: color.review }}> · 확인 필요 {stat.review}</span>}
-        {stat.explained > 0 && <span> · 정상 반복 {stat.explained}</span>}
+        ×{stat.count} · avg {stat.avgMs}ms
+        {stat.idVariants && <span title="IDs in the path are grouped as :id"> · ID {stat.idVariants} variants</span>}
+        {!!stat.restoredCount && (
+          <span title="Requests from the page before reload in this tab"> · before reload: {stat.restoredCount}</span>
+        )}
+        {stat.duplicates > 0 && <span style={{ color: color.warn }}> · duplicates: {stat.duplicates}</span>}
+        {stat.sameResponses > 0 && <span style={{ color: color.warn }}> · same resp: {stat.sameResponses}</span>}
+        {!!stat.failedDuplicates && <span style={{ color: color.warn, fontWeight: 600 }}> · failed dup: {stat.failedDuplicates}</span>}
+        {!!stat.failedCodes && (
+          <span title="Status codes of failed requests regardless of waste"> · failed: {stat.failedCodes.join('·')}</span>
+        )}
+        {stat.review > 0 && <span style={{ color: color.review }}> · review: {stat.review}</span>}
+        {stat.explained > 0 && <span> · expected: {stat.explained}</span>}
       </Muted>
       {sitesShown(stat, route).map((site) => (
         <Muted key={`${site.route}|${site.component}`}>

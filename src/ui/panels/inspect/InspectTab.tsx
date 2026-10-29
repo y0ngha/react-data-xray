@@ -17,7 +17,7 @@ const HitList = ({ hits, stats }: { hits: readonly Hit[]; stats: ReadonlyMap<str
 
 /** 데이터 › 출처: 클릭한 요소의 데이터가 어느 API 응답에서 왔는지 */
 export const InspectTab = ({ result, stats }: { result: InspectResult | null; stats: ReadonlyMap<string, EndpointStat> }) => {
-  if (!result) return <Muted>[요소 선택]으로 화면의 요소를 고르면 그 요소의 출처와, 그 컴포넌트 안만 분석한 결과를 보여 줍니다.</Muted>;
+  if (!result) return <Muted>Use [Pick element] to select an element and see its data source and a scoped analysis.</Muted>;
   const withHits = result.components.filter((c) => c.hits.length > 0);
   return (
     <div>
@@ -35,11 +35,11 @@ export const InspectTab = ({ result, stats }: { result: InspectResult | null; st
       ))}
       {withHits.length === 0 && result.guesses.length > 0 && (
         <div style={{ marginTop: 8 }}>
-          <Muted>컴포넌트 데이터로는 못 찾아 화면 글자로 찾은 결과입니다.</Muted>
+          <Muted>No match via component data; results are based on page text.</Muted>
           <HitList hits={result.guesses} stats={stats} />
         </div>
       )}
-      {withHits.length === 0 && result.guesses.length === 0 && <Muted>연결된 API 응답을 찾지 못했습니다.</Muted>}
+      {withHits.length === 0 && result.guesses.length === 0 && <Muted>No linked API response found.</Muted>}
     </div>
   );
 };

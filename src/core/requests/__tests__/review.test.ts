@@ -39,7 +39,7 @@ describe('재마운트 원인 (PR4-7)', () => {
 
   it('요청 시작 전 5초 안의 재마운트만 원인으로 쓴다', () => {
     mounts.remounts = [{ parent: 'List', count: 1, lastAt: 9_000 }];
-    expect(run(rec())?.detail).toBe('<Child> 재마운트, 부모 <List> 의 분기 변경');
+    expect(run(rec())?.detail).toBe('<Child> remount, parent <List> branch changed');
     mounts.remounts = [{ parent: 'List', count: 1, lastAt: 4_000 }]; // 6초 전
     expect(run(rec())).toBeUndefined();
     mounts.remounts = [{ parent: 'List', count: 1, lastAt: 10_500 }]; // 요청 뒤
@@ -48,7 +48,7 @@ describe('재마운트 원인 (PR4-7)', () => {
 
   it('type-changed 는 렌더 중 컴포넌트 정의 처방을 쓴다', () => {
     mounts.remounts = [{ parent: 'List', count: 3, lastAt: 9_900, cause: 'type-changed' }];
-    expect(run(rec())?.detail).toContain('렌더 중 컴포넌트 정의');
+    expect(run(rec())?.detail).toContain('component defined during render');
   });
 });
 

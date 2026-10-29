@@ -18,12 +18,12 @@ const MountNote = ({ name }: { name: string }) => {
   if (mounts === 0 && unmounts === 0) return null;
   return (
     <Muted>
-      마운트 {mounts} · 언마운트 {unmounts}
+      mount {mounts} · unmount {unmounts}
       {remounts
         .map((r) =>
           r.cause === 'type-changed'
-            ? ` · 부모 <${r.parent || '루트'}> 가 렌더 중에 정의한 컴포넌트라 재마운트 ×${r.count}`
-            : ` · 부모 <${r.parent || '루트'}> 때문에 재마운트 ×${r.count}`,
+            ? ` · component defined during render in <${r.parent || 'root'}>, remount ×${r.count}`
+            : ` · <${r.parent || 'root'}> caused remount ×${r.count}`,
         )
         .join('')}
     </Muted>
@@ -48,14 +48,14 @@ export const ConsumerList = ({ record }: { record: RequestRecord }) => {
     setHighlight(!highlight);
   };
   return (
-    <Section title={`이 요청의 데이터를 쓰는 컴포넌트 (${consumers.length})`}>
+    <Section title={`Components using this response (${consumers.length})`}>
       <div style={codeBlockStyle}>
         {consumers.length === 0 ? (
           <>
-            <Muted>지금 화면에서 이 응답 객체를 들고 있는 컴포넌트를 찾지 못했습니다(가공된 데이터일 수 있습니다).</Muted>
+            <Muted>No component found holding this response object (data may be transformed).</Muted>
             {record.component && (
               <div>
-                요청을 보낸 컴포넌트 &lt;{record.component}&gt; <MountNote name={record.component} />
+                Sending component &lt;{record.component}&gt; <MountNote name={record.component} />
               </div>
             )}
           </>
@@ -66,8 +66,8 @@ export const ConsumerList = ({ record }: { record: RequestRecord }) => {
                 &lt;{name}&gt; {list.length > 1 && `× ${list.length}`} <Muted>← {list[0].via}</Muted> <MountNote name={name} />
               </div>
             ))}
-            <Button subtle active={highlight} onClick={toggle} title="이 컴포넌트들을 화면에서 주황 점선으로 강조합니다">
-              화면에서 강조
+            <Button subtle active={highlight} onClick={toggle} title="Highlight these components on the page with an orange dashed border">
+              Highlight
             </Button>
           </>
         )}

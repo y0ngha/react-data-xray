@@ -11,9 +11,9 @@ const REFRESH_MS = 1000;
 export const CacheAuditView = ({ records }: { records: readonly RequestRecord[] }) => {
   useNow(REFRESH_MS);
   const { classOf } = useRequestActions();
-  if (findQueryClients().length === 0) return <Muted>화면에서 React Query(QueryClientProvider)를 찾지 못했습니다.</Muted>;
+  if (findQueryClients().length === 0) return <Muted>React Query (QueryClientProvider) not found on the page.</Muted>;
   const findings = auditQueryCache(classOf, records);
-  if (findings.length === 0) return <Muted>캐시키 설계 문제를 찾지 못했습니다. 화면을 조작하면 다시 확인합니다.</Muted>;
+  if (findings.length === 0) return <Muted>No cache key issues found. Interact with the page to recheck.</Muted>;
   return (
     <div>
       {findings.map((f) => (
@@ -27,12 +27,14 @@ export const CacheAuditView = ({ records }: { records: readonly RequestRecord[] 
           </div>
           <Muted>
             queryKey: {f.keys.join(' · ')}
-            {f.count ? (f.kind === 'double-invalidate' ? ` · ${f.count}회` : ` · 키 ${f.count}개`) : ''}
+            {f.count ? (f.kind === 'double-invalidate' ? ` · ×${f.count}` : ` · ${f.count} keys`) : ''}
           </Muted>
-          {f.requests.length > 0 && <Muted>요청: {f.requests.join(' · ')}</Muted>}
+          {f.requests.length > 0 && <Muted>requests: {f.requests.join(' · ')}</Muted>}
           <div>{CACHE_FINDING_TEXT[f.kind].fix}</div>
           {f.stacks
-            ? f.stacks.map((st, i) => <Muted key={`${i ? '뒤' : '앞'}${st}`}>{`${i ? '뒤' : '앞'}: ${st.split('\n')[0]}`}</Muted>)
+            ? f.stacks.map((st, i) => (
+                <Muted key={`${i ? 'after' : 'before'}${st}`}>{`${i ? 'after' : 'before'}: ${st.split('\n')[0]}`}</Muted>
+              ))
             : f.stack && <Muted>{f.stack.split('\n').slice(1, 3).join(' ')}</Muted>}
         </div>
       ))}

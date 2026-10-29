@@ -46,7 +46,7 @@ describe('ClassBadge, RequestParams', () => {
     const { container, rerender } = renderWithActions(<ClassBadge record={record} />);
     expect(container.textContent).toBe('');
     renderWithActions(<ClassBadge record={record} short />, () => 'same-response');
-    expect(screen.getByText('같은 응답')).toBeTruthy();
+    expect(screen.getByText('same-response')).toBeTruthy();
     rerender(<span />);
   });
 
@@ -54,7 +54,7 @@ describe('ClassBadge, RequestParams', () => {
     renderWithActions(<RequestParams record={makeRecord({ bodyUnreadable: true })} />);
     expect(screen.getByText(/query: \?id=7&id=8/)).toBeTruthy();
     expect(screen.getByText(/payload: \{"id":7\}/)).toBeTruthy();
-    expect(screen.getByText(/읽을 수 없는 본문/)).toBeTruthy();
+    expect(screen.getByText(/body not readable/)).toBeTruthy();
   });
 });
 
@@ -69,15 +69,15 @@ describe('RequestDetail', () => {
     registerBody(record, { data: { id: 7, name: 'cpu' } });
     const onBack = vi.fn<() => void>();
     renderWithActions(<RequestDetail record={record} focus={{ path: '$.data', via: 'props.item' }} onBack={onBack} />, () => 'duplicate');
-    expect(screen.getByText(/이 컴포넌트가 쓰는 데이터: \$\.data ← props\.item/)).toBeTruthy();
-    expect(screen.getByText('중복 요청')).toBeTruthy();
-    expect(screen.getByText(/창 포커스/)).toBeTruthy();
+    expect(screen.getByText(/Data used by this component: \$\.data ← props\.item/)).toBeTruthy();
+    expect(screen.getByText('duplicate request')).toBeTruthy();
+    expect(screen.getByText(/window focus/)).toBeTruthy();
     expect(screen.getByText('at App (App.tsx:1)')).toBeTruthy();
     expect(screen.getByText('7, 8')).toBeTruthy();
     expect(screen.getByText('x-token:')).toBeTruthy();
     expect(screen.getAllByText(/"name": "cpu"/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/이 요청의 데이터를 쓰는 컴포넌트 \(0\)/)).toBeTruthy();
-    fireEvent.click(screen.getByText('← 뒤로'));
+    expect(screen.getByText(/Components using this response \(0\)/)).toBeTruthy();
+    fireEvent.click(screen.getByText('← Back'));
     expect(onBack).toHaveBeenCalled();
   });
 
@@ -87,21 +87,21 @@ describe('RequestDetail', () => {
     flushQueue(); // 원문 보관은 미뤄 둔다
     const { unmount } = renderWithActions(<RequestDetail record={textOnly} onBack={() => undefined} />);
     expect(screen.getByText(/"raw": true/)).toBeTruthy();
-    expect(screen.getAllByText('(없음)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('(none)').length).toBeGreaterThan(0);
     unmount();
     renderWithActions(
       <RequestDetail record={makeRecord({ bodyUnreadable: true, error: 'TypeError: x', status: 0 })} onBack={() => undefined} />,
     );
-    expect(screen.getByText(/바로 읽을 수 없는 본문/)).toBeTruthy();
-    expect(screen.getByText(/아직 받지 못했습니다/)).toBeTruthy();
-    expect(screen.getByText(/실패 \(TypeError: x\)/)).toBeTruthy();
+    expect(screen.getByText(/body not readable inline/)).toBeTruthy();
+    expect(screen.getByText(/not yet received/)).toBeTruthy();
+    expect(screen.getByText(/failed \(TypeError: x\)/)).toBeTruthy();
   });
 
   it('복사 버튼은 펼침을 바꾸지 않고 클립보드에 쓴다', () => {
     const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     renderWithActions(<RequestDetail record={makeRecord()} onBack={() => undefined} />);
-    fireEvent.click(screen.getAllByText('복사')[0]);
+    fireEvent.click(screen.getAllByText('Copy')[0]);
     expect(writeText).toHaveBeenCalledWith('{\n  "id": 7\n}');
   });
 });

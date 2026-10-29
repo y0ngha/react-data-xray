@@ -47,7 +47,7 @@ describe('박스 라벨 (#29)', () => {
     await fetch('/api/i29').then((r) => r.json());
     renderWithActions(<Boxes />, (r) => (r.url === '/api/i29' ? 'duplicate' : 'ok'));
     await act(flush);
-    expect(screen.getAllByRole('button', { name: /\/api\/i29\s*요청 ×2/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /\/api\/i29\s*req ×2/ }).length).toBeGreaterThan(0);
   });
 
   it('라벨 title 에 지표 설명이 있다', async () => {
@@ -55,7 +55,7 @@ describe('박스 라벨 (#29)', () => {
     await act(flush);
     renderWithActions(<Boxes />);
     await act(flush);
-    expect(screen.getAllByRole('button')[0].title).toContain('렌더 N 은 이 응답을 쓰는 컴포넌트의 렌더 수');
+    expect(screen.getAllByRole('button')[0].title).toContain('renders N = render count of components using this response');
   });
 
   it('overlap_labels: 같은 자리의 두 박스 라벨은 서로 붙지 않는다', async () => {

@@ -595,7 +595,7 @@ const cancelledBy = (at: number, records: readonly RequestRecord[]): RequestReco
 /** 취소된 요청이 있으면 requests 에 원인과 함께 남긴다 */
 const withCancelled = (m: { at: number; finding: CacheFinding }, records: readonly RequestRecord[]): CacheFinding =>
   Object.assign({}, m.finding, {
-    requests: cancelledBy(m.at, records).map((r) => `${describeRequest(r)} (무효화가 겹쳐 취소됨)`),
+    requests: cancelledBy(m.at, records).map((r) => `${describeRequest(r)} (cancelled by overlapping invalidation)`),
   });
 
 /** 지금 점검한다. classOf 는 같은 응답 재요청 판정에 쓴다. */
@@ -813,27 +813,27 @@ export const findingId = (f: CacheFinding): string => `${f.kind}|${f.keys.join('
 
 export const CACHE_FINDING_TEXT: Record<CacheFindingKind, { title: string; fix: string }> = {
   'duplicate-cache': {
-    title: '같은 요청을 서로 다른 키로 캐시합니다',
-    fix: '같은 데이터면 queryKey 를 하나로 맞추세요. 키가 다르면 캐시를 나눠 써서 같은 요청이 여러 번 나갑니다.',
+    title: 'Same request cached under different keys',
+    fix: 'If the data is the same, align the queryKey. Different keys split the cache and send the same request multiple times.',
   },
   'key-missing-param': {
-    title: '같은 키로 서로 다른 요청을 가져왔습니다',
-    fix: '쿼리 함수가 쓰는 값(URL 파라미터, 필터 등)을 queryKey 에 넣으세요. 빠지면 다른 조건의 데이터가 같은 캐시를 덮어씁니다.',
+    title: 'Different requests fetched under the same key',
+    fix: 'Include values used by the query function (URL params, filters, etc.) in the queryKey. Without them, data from different conditions overwrites the same cache entry.',
   },
   'invalidate-miss': {
-    title: '무효화한 키와 맞는 쿼리가 없었습니다',
-    fix: '이 화면에서 지금까지 만든 쿼리 중 이 키(접두사)와 맞는 것이 없습니다. queryKey 와 모양이 같은지 확인하세요. 다른 화면의 쿼리를 미리 무효화한 것이라면 무시해도 됩니다.',
+    title: 'No query matched the invalidated key',
+    fix: 'None of the queries created so far on this page match this key (prefix). Check that the shape matches queryKey. If you are pre-invalidating a query on another page, this can be ignored.',
   },
   'invalidate-unloaded': {
-    title: '아직 불러오지 않은 키를 무효화했습니다',
-    fix: '같은 모양(앞 두 요소)의 쿼리는 있었고 이 값의 쿼리만 아직 없습니다. 상속 범위 무효화 같은 정상 동작이라 고칠 것은 없습니다.',
+    title: 'Invalidated a key that has not been fetched yet',
+    fix: 'A query with the same shape (first two elements) exists, but not with this exact value. This is expected for broad-scope invalidation — nothing to fix.',
   },
   'double-invalidate': {
-    title: '같은 쿼리를 겹쳐 무효화했습니다',
-    fix: '넓은 무효화가 좁은 무효화를 덮습니다. 한쪽만 남기세요. 뒤의 무효화가 앞의 재조회를 취소하고 다시 받아 같은 요청이 두 번 나갑니다.',
+    title: 'Same query invalidated twice',
+    fix: 'A broad invalidation overlaps a narrow one. Keep only one. The second invalidation cancels the first refetch and triggers another, sending the same request twice.',
   },
   'stale-zero': {
-    title: 'staleTime 이 0 이라 같은 응답을 다시 받습니다',
-    fix: '자주 바뀌지 않는 데이터면 staleTime 을 늘리세요(예: 30_000). 화면을 옮기거나 포커스가 돌아올 때마다 같은 요청이 나갑니다.',
+    title: 'staleTime is 0 — same response fetched again',
+    fix: 'For data that changes infrequently, increase staleTime (e.g. 30_000). The same request is sent every time the page changes or focus returns.',
   },
 };

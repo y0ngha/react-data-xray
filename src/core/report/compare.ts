@@ -87,9 +87,10 @@ const findingId = (f: ComparableReport['reactQuery']['findings'][number]): strin
 export const compare = (a: ComparableReport, b: ComparableReport): ReportComparison => {
   const warnings: string[] = [];
   if (a.renders.windowSeconds !== b.renders.windowSeconds) {
-    warnings.push(`측정 구간이 다르다 (${a.renders.windowSeconds}초 / ${b.renders.windowSeconds}초)`);
+    warnings.push(`measurement windows differ (${a.renders.windowSeconds}s / ${b.renders.windowSeconds}s)`);
   }
-  if (!a.renders.monitoring || !b.renders.monitoring) warnings.push('렌더 감시가 꺼진 보고서가 있어 렌더 비교는 믿기 어렵다');
+  if (!a.renders.monitoring || !b.renders.monitoring)
+    warnings.push('render monitoring was off in one of the reports; render comparison may be unreliable');
   const before = new Set(a.reactQuery.findings.map(findingId));
   const after = new Set(b.reactQuery.findings.map(findingId));
   return {

@@ -23,7 +23,7 @@ export const FetchCause = ({ record }: { record: RequestRecord }) => {
   }, [record, wasteful]);
   if (!info && !cancel) return null;
   return (
-    <Section title="fetch 원인">
+    <Section title="fetch cause">
       {info && (
         <div>
           {info.label}
@@ -37,9 +37,9 @@ export const FetchCause = ({ record }: { record: RequestRecord }) => {
       )}
       {cancel && (
         <div>
-          무효화가 겹쳐 취소됨
-          <Muted>앞 무효화: {cancel[0].split('\n')[0]}</Muted>
-          <Muted>뒤 무효화: {cancel[1].split('\n')[0]}</Muted>
+          cancelled by overlapping invalidation
+          <Muted>earlier invalidation: {cancel[0].split('\n')[0]}</Muted>
+          <Muted>later invalidation: {cancel[1].split('\n')[0]}</Muted>
         </div>
       )}
     </Section>

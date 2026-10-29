@@ -38,16 +38,16 @@ export const CompareReports = () => {
   );
   return (
     <>
-      <Button active={open} onClick={() => setOpen(!open)} title="snapshot 으로 저장한 두 보고서를 비교합니다">
-        비교
+      <Button active={open} onClick={() => setOpen(!open)} title="Compare two reports saved with snapshot">
+        Compare
       </Button>
       {open && (
         <div style={{ flexBasis: '100%' }}>
           {names.length < 2 ? (
-            <Muted>window.__RDX__.snapshot(이름) 으로 보고서를 둘 이상 저장하면 비교할 수 있습니다.</Muted>
+            <Muted>Save two or more reports with window.__RDX__.snapshot(name) to compare them.</Muted>
           ) : (
             <>
-              {pick(before, setBefore, '전')} → {pick(after, setAfter, '후')}
+              {pick(before, setBefore, 'before')} → {pick(after, setAfter, 'after')}
             </>
           )}
           {result && (
@@ -66,10 +66,10 @@ export const CompareReports = () => {
                 </div>
               ))}
               {result.reactQuery.added.map((id) => (
-                <div key={`+${id}`}>React Query 새 지적: {id}</div>
+                <div key={`+${id}`}>React Query new finding: {id}</div>
               ))}
               {result.reactQuery.resolved.map((id) => (
-                <div key={`-${id}`}>React Query 해결: {id}</div>
+                <div key={`-${id}`}>React Query resolved: {id}</div>
               ))}
             </div>
           )}

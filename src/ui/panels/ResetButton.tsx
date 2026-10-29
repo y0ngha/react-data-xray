@@ -18,11 +18,11 @@ export const ResetButton = () => {
           window.__RDX__?.reset();
           redraw();
         }}
-        title="요청 기록, 렌더 통계, 배지 수를 지우고 지금부터 다시 잽니다. 무시로 지정한 엔드포인트는 유지됩니다."
+        title="Clear request records, render stats, and badge counts. Ignored endpoints are kept."
       >
-        기록 지우기
+        Clear records
       </Button>
-      {at !== null && <span style={{ color: color.muted }}>{clock(at)} 이후 기록</span>}
+      {at !== null && <span style={{ color: color.muted }}>{clock(at)} since reset</span>}
     </>
   );
 };

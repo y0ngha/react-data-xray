@@ -22,18 +22,18 @@ export const HitRow = ({ hit, stat }: { hit: Hit; stat?: EndpointStat }) => (
       <RequestParams record={hit.record} />
       <div>
         <ClassBadge record={hit.record} />
-        {stat && stat.count > 1 && <Badge color={isWastefulStat(stat) ? color.warn : color.muted}>최근 {stat.count}회 호출</Badge>}
+        {stat && stat.count > 1 && <Badge color={isWastefulStat(stat) ? color.warn : color.muted}>×{stat.count} calls</Badge>}
       </div>
       <div>
-        경로: <code>{hit.path}</code> ← <code>{hit.via}</code>
+        path: <code>{hit.path}</code> ← <code>{hit.via}</code>
       </div>
       {hit.queryKey !== undefined && (
         <div>
           queryKey: <code>{formatJson(hit.queryKey)}</code>
         </div>
       )}
-      <Muted>값: {formatJson(valueAt(hit.record.body, hit.path))}</Muted>
-      <div style={{ color: color.accent }}>클릭하면 요청 상세와 전체 값을 봅니다</div>
+      <Muted>value: {formatJson(valueAt(hit.record.body, hit.path))}</Muted>
+      <div style={{ color: color.accent }}>Click to see request detail and full value</div>
     </RequestLink>
   </div>
 );

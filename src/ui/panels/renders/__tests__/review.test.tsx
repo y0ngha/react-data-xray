@@ -85,7 +85,7 @@ describe('렌더 탭 계산(리뷰 반영)', () => {
       flushQueue();
     });
     // 행이 다시 그려지게 한다(큐는 돌리지 않는다)
-    act(() => fireEvent.click(screen.getByText('횟수순')));
+    act(() => fireEvent.click(screen.getByText('Most renders')));
     expect(screen.getByText(/<Counter>/)).toBeTruthy();
     expect(bodyRuns).toBe(before);
   });
@@ -113,7 +113,7 @@ describe('폭주 색(RENDER_STORM)', () => {
   });
   const colorOf = (recent: number, windowMs: number): string => {
     const { unmount } = render(<RenderGroupRow group={group(recent)} showTime={false} windowMs={windowMs} />);
-    const color = screen.getByText(`${recent}회`).style.color;
+    const color = screen.getByText(`×${recent}`).style.color;
     unmount();
     return color;
   };

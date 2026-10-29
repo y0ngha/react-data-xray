@@ -17,7 +17,7 @@ const setup = () => {
       onSelect={onSelect}
     />,
   );
-  return { onSelect, rdx: screen.getByRole('button', { name: /React Data X-ray 열기/ }) };
+  return { onSelect, rdx: screen.getByRole('button', { name: /Open React Data X-ray/ }) };
 };
 
 describe('FloatingButton 내역 (ponytail PR5-6, PR5-11)', () => {

@@ -14,7 +14,7 @@ const MAX_TEXT = 10_000;
 // 인증 정보가 저장소에 남지 않게 가린다(헤더 이름, 본문·쿼리의 키).
 const SENSITIVE = /authorization|cookie|token|secret|password|passwd|pwd|api-?_?key|session/i;
 const SENSITIVE_IN_TEXT = /"[^"]*(token|secret|password|passwd|pwd|api_?key|authorization)[^"]*"\s*:/i;
-const HIDDEN = '(가림)';
+const HIDDEN = '(redacted)';
 
 const redactHeaders = (headers: Record<string, string> | undefined): Record<string, string> | undefined =>
   headers && Object.fromEntries(Object.entries(headers).map(([k, v]) => [k, SENSITIVE.test(k) ? HIDDEN : v]));
@@ -23,7 +23,7 @@ const redactHeaders = (headers: Record<string, string> | undefined): Record<stri
 const redactText = (text: string | undefined): string | undefined => {
   if (text === undefined) return undefined;
   if (SENSITIVE_IN_TEXT.test(text)) return HIDDEN;
-  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n… (새로고침 전 기록은 10KB 까지만 남깁니다)` : text;
+  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n… (before-reload records kept up to 10KB)` : text;
 };
 
 /** 쿼리에서 비밀값 이름의 값을 가린다(?token=…). */

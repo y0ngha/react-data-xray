@@ -56,7 +56,7 @@ describe('store', () => {
     const r = createRecord('fetch', 'GET', '/api/big');
     keepResponseText(r, 'x'.repeat(100_001), { compare: false });
     flushQueue();
-    expect(r.responseText).toHaveLength(100_000 + '\n… (100KB 이후 생략)'.length);
+    expect(r.responseText).toHaveLength(100_000 + '\n… (truncated after 100KB)'.length);
   });
 
   it('응답 본문의 객체를 출처와 함께 등록하고, 같은 응답이 두 번 들어와도 한 번만 등록한다', () => {
