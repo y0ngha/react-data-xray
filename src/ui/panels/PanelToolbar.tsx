@@ -43,8 +43,11 @@ export const PanelToolbar = (props: PanelToolbarProps) => (
         ⌖ Pick element
       </Button>
       {props.scopeName && (
-        <Button active onClick={props.onWholeScreen} title="Clear selection, back to whole page">
-          &lt;{props.scopeName}&gt; ✕
+        <Button active onClick={props.onWholeScreen} title={`<${props.scopeName}> — clear selection`}>
+          <span style={{ display: 'inline-block', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', verticalAlign: 'bottom' }}>
+            &lt;{props.scopeName}&gt;
+          </span>
+          {' ✕'}
         </Button>
       )}
       <Button active={props.boxesVisible} onClick={props.onToggleBoxes} title="Draw data source boxes on the page">

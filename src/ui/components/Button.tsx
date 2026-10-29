@@ -25,6 +25,7 @@ export const Button = ({ children, onClick, active = false, title, subtle = fals
       padding: subtle ? '0 6px' : '2px 8px',
       cursor: 'pointer',
       font: 'inherit',
+      whiteSpace: 'nowrap',
     }}
   >
     {children}

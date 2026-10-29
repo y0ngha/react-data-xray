@@ -39,7 +39,7 @@ describe('RequestsTab', () => {
     fireEvent.click(screen.getByText('GET /api/a ✕'));
     expect(screen.getAllByText(/GET \/api\//)).toHaveLength(3);
     fireEvent.click(screen.getByText('By endpoint'));
-    expect(screen.getByText(/×2 · avg/)).toBeTruthy();
+    expect(screen.getByText((_, el) => el?.tagName === 'DIV' && (el.textContent ?? '').startsWith('×2 · avg'))).toBeTruthy();
   });
 });
 
@@ -113,7 +113,7 @@ describe('패널 배치', () => {
 
   it('끌어서 크기를 바꾸되 최소 크기와 페이지 여백을 지킨다', () => {
     expect(sizeFromPointer('top', 0, 500, viewport)).toBe(300);
-    expect(sizeFromPointer('top', 0, 790, viewport)).toBe(160);
+    expect(sizeFromPointer('top', 0, 790, viewport)).toBe(260);
     expect(sizeFromPointer('left', 0, 0, viewport)).toBe(920);
   });
 

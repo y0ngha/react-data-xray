@@ -1,10 +1,9 @@
 import { useReducer } from 'react';
 
 import { getResetAt } from '../../core/report/reportApi.js';
+import { formatTime } from '../../shared/format.js';
 import { Button } from '../components/Button.js';
 import { color } from '../theme.js';
-
-const clock = (t: number) => new Date(t).toTimeString().slice(0, 8);
 
 /** `window.__RDX__.reset()` 과 같은 동작(요청 기록·렌더 통계·캐시 감시 초기화. 무시 지정은 그대로)과 지운 시각 */
 export const ResetButton = () => {
@@ -22,7 +21,7 @@ export const ResetButton = () => {
       >
         Clear records
       </Button>
-      {at !== null && <span style={{ color: color.muted }}>{clock(at)} since reset</span>}
+      {at !== null && <span style={{ color: color.muted }}>{formatTime(at)} since reset</span>}
     </>
   );
 };

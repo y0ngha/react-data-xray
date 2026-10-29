@@ -16,7 +16,8 @@ import { layoutTimeline, type BarLayout } from './timelineLayout.js';
 
 const TICK_MS = 500;
 const DEFAULT_WIDTH = 456;
-const MIN_WIDTH = 240;
+// 오른쪽 도킹 최소 폭(260)에서 패널 안쪽 여백을 뺀 폭보다 작아야 차트가 잘리지 않는다.
+const MIN_WIDTH = 160;
 
 /** 네트워크 › 타임라인: 최근 20초의 요청과, 비교용으로 렌더 commit 을 함께 그린다. */
 export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) => {
@@ -34,7 +35,7 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
   };
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, color: color.muted }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6, color: color.muted }}>
         <span>Network timeline · last 20s</span>
         <TimelineLegend />
         <span style={{ marginLeft: 'auto' }}>

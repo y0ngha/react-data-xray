@@ -35,6 +35,13 @@ describe('저장되는 설정', () => {
     act(() => result.current.update({ dock: 'bottom', bottomHeight: 400 }));
     expect(JSON.parse(localStorage.getItem('react-data-xray:dock')!)).toMatchObject({ dock: 'bottom', bottomHeight: 400 });
   });
+
+  it('저장된 bottomHeight/rightWidth 가 최소값보다 작으면 최소값으로 올린다', () => {
+    localStorage.setItem('react-data-xray:dock', JSON.stringify({ dock: 'right', bottomHeight: 100, rightWidth: 200 }));
+    const { result } = renderHook(() => useDockSettings());
+    expect(result.current.settings.bottomHeight).toBe(260);
+    expect(result.current.settings.rightWidth).toBe(260);
+  });
 });
 
 describe('useDraggable', () => {
