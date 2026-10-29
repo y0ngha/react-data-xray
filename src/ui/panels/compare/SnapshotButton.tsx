@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 
 import { keepSnapshot, NO_PLUGIN_MESSAGE, snapshotNames } from '../../../core/report/reportApi.js';
 import { isReportName } from '../../../shared/reportPath.js';
+import { useFlash } from '../../hooks/useFlash.js';
 import { Button } from '../../components/Button.js';
 import { color } from '../../theme.js';
 
 /** 저장에 성공하면 보낸다. 옆의 CompareReports 가 이름 목록을 다시 읽는다. */
 export const SNAPSHOT_SAVED_EVENT = 'rdx:snapshot-saved';
+
+const FLASH_MS = 4000;
 
 const defaultName = (): string => {
   const names = new Set(snapshotNames());
@@ -16,11 +19,12 @@ const defaultName = (): string => {
   return n === 1 ? 'after' : `after-${n}`;
 };
 
-type Phase = { kind: 'idle' } | { kind: 'open'; name: string; error: string } | { kind: 'done'; status: string };
+type Phase = { kind: 'idle' } | { kind: 'open'; name: string; error: string };
 
 /** 도구 막대의 스냅샷 저장. 이름을 받아 window.__RDX__.snapshot(name) 을 부른다(콘솔과 같은 동작). */
 export const SnapshotButton = () => {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
+  const [flash, setFlash] = useFlash(FLASH_MS);
   const inputRef = useRef<HTMLInputElement>(null);
   // 입력란이 열리면 바로 이름을 고칠 수 있게 한다.
   useEffect(() => {
@@ -37,7 +41,8 @@ export const SnapshotButton = () => {
     try {
       await window.__RDX__!.snapshot(name);
       window.dispatchEvent(new Event(SNAPSHOT_SAVED_EVENT));
-      setPhase({ kind: 'done', status: `Saved to .rdx/${name}.json` });
+      setPhase({ kind: 'idle' });
+      setFlash(`Saved to .rdx/${name}.json`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg === NO_PLUGIN_MESSAGE) {
@@ -45,7 +50,8 @@ export const SnapshotButton = () => {
         const rpt = window.__RDX__!.report();
         keepSnapshot(name, rpt);
         window.dispatchEvent(new Event(SNAPSHOT_SAVED_EVENT));
-        setPhase({ kind: 'done', status: 'Tab only — no dev-server plugin' });
+        setPhase({ kind: 'idle' });
+        setFlash('Tab only — no dev-server plugin');
       } else {
         setPhase({ kind: 'open', name, error: msg.replace('[react-data-xray] ', '').slice(0, 80) });
       }
@@ -54,19 +60,11 @@ export const SnapshotButton = () => {
 
   if (phase.kind === 'idle') {
     return (
-      <Button onClick={open} title="Save a named snapshot to compare before/after">
-        Save
-      </Button>
-    );
-  }
-
-  if (phase.kind === 'done') {
-    return (
       <>
-        <Button onClick={open} title="Save another snapshot">
+        <Button onClick={open} title="Save a named snapshot to compare before/after">
           Save
         </Button>
-        <span style={{ color: color.muted, marginLeft: 4 }}>{phase.status}</span>
+        {flash && <span style={{ color: color.muted, marginLeft: 4 }}>{flash}</span>}
       </>
     );
   }

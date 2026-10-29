@@ -11,7 +11,7 @@ window.__RDX__.reset();                   // start a fresh measurement
 // … interact with the page …
 const report = await window.__RDX__.report();
 await window.__RDX__.snapshot('before');  // saves to .rdx/before.json (plugin required, see below)
-                                          // or use the panel's Save button (same effect)
+                                          // or Measure › Save in the panel toolbar (same effect)
 ```
 
 **Read from a file**: attach the plugin to your dev server and it will write `.rdx/report.json` whenever the report changes (at most every 5s). A `.gitignore` entry is created automatically.

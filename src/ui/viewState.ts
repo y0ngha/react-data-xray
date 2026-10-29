@@ -8,6 +8,8 @@ export const OPEN_KEY = 'react-data-xray:open';
 /** 화면 박스 표시 토글 */
 export const BOXES_KEY = 'react-data-xray:boxes';
 export const TAB_KEY = 'react-data-xray:tab';
+/** 도구 막대 Measure 행 펼침 상태 */
+export const MEASURE_KEY = 'react-data-xray:measure';
 
 const TABS: readonly Tab[] = TAB_GROUPS.flatMap((g) => g.tabs.map((t) => t.tab));
 
@@ -17,7 +19,7 @@ export const parseTab = (raw: unknown): Tab | undefined => TABS.find((t) => t ==
 /** 기억한 화면 상태를 지운다. rdx 가 오류로 멈췄을 때, 새로고침하면 같은 화면이 다시 열려 또 깨지지 않게 한다. */
 export const resetViewState = (): void => {
   try {
-    [OPEN_KEY, BOXES_KEY, TAB_KEY].forEach((key) => sessionStorage.removeItem(key));
+    [OPEN_KEY, BOXES_KEY, TAB_KEY, MEASURE_KEY].forEach((key) => sessionStorage.removeItem(key));
   } catch {
     // 저장소를 못 쓰면 넘어간다.
   }

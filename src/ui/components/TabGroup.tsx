@@ -2,8 +2,8 @@ import type { ReactNode } from 'react';
 
 import { color } from '../theme.js';
 
-/** 탭을 영역(데이터·네트워크·렌더)별로 묶어 앞에 영역 이름을 붙인다. */
-export const TabGroup = ({ label, children }: { label: string; children: ReactNode }) => (
+/** 탭을 영역(데이터·네트워크·렌더)별로 묶어 앞에 영역 이름을 붙인다. 버튼 이름이 곧 묶음 이름이면 label 을 뺀다. */
+export const TabGroup = ({ label, children }: { label?: string; children: ReactNode }) => (
   <span
     style={{
       display: 'inline-flex',
@@ -14,7 +14,7 @@ export const TabGroup = ({ label, children }: { label: string; children: ReactNo
       borderLeft: `1px solid ${color.border}`,
     }}
   >
-    <span style={{ color: color.muted, fontSize: 10, marginRight: 2, whiteSpace: 'nowrap' }}>{label}</span>
+    {label && <span style={{ color: color.muted, fontSize: 10, marginRight: 2, whiteSpace: 'nowrap' }}>{label}</span>}
     {children}
   </span>
 );
