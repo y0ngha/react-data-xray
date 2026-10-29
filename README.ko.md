@@ -156,7 +156,7 @@ RDX 는 "이 state 가 1초마다 바뀌는데 값이 실제로 바뀐 건 버�
 |---|---|---|
 | 체크박스 클릭 한 번의 렌더+commit (평균) | 15.8 ms | 7.4 ms |
 
-측정은 `window.__RDX__.reset()` → 체크박스 클릭 → `window.__RDX__.snapshot('before')` / `snapshot('after')` 순서로 했습니다(패널의 **Save** 버튼으로도 같은 동작을 할 수 있습니다). 자세한 워크플로는 아래 [AI 에이전트와 함께 쓰기](#ai-에이전트와-함께-쓰기) 절을 보세요.
+측정은 `window.__RDX__.reset()` → 체크박스 클릭 → `window.__RDX__.snapshot('before')` / `snapshot('after')` 순서로 했습니다(패널 도구 막대의 **Measure** 를 펼쳐 Clear records → Save → Compare 로도 할 수 있습니다). 자세한 워크플로는 아래 [AI 에이전트와 함께 쓰기](#ai-에이전트와-함께-쓰기) 절을 보세요.
 
 ### 기존 대형 앱에 붙이자마자 나온 중복 요청
 

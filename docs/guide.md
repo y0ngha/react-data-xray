@@ -4,10 +4,18 @@ Back to [README](../README.md)
 
 > See the [feature tour video (45s)](./media/rdx-feature-tour.mp4) for an end-to-end walkthrough.
 
-The toolbar at the top of the panel has two groups.
+The toolbar at the top of the panel has two rows.
 
-- **Target** (left): what to look at. Default is **▦ Whole page**. Use **⌖ Pick element** to select a single component and scope everything to it. **☐ Boxes** draws labels on the page.
-- **View** (right): choose between **Data · Network Requests · Network Timeline · Renders**.
+**Row 1** — always visible, four groups separated by a border:
+
+- **Target**: what to look at. Default is **▦ Whole page**. Use **⌖ Pick element** to select a single component and scope everything to it. **☐ Boxes** draws labels on the page.
+- **View**: choose between **Data · Network Requests · Network Timeline · Renders**.
+- **Measure**: toggle to show the measurement row below. Shows `since HH:MM` when a reset has happened.
+- **Window** (far right): display mode icons and **✕** close.
+
+**Row 2** — visible only when **Measure** is expanded:
+
+**Clear records** (+ time since reset) › **Save** (enter a name, press Save or Enter) › **Compare** (pick two snapshots to diff) › **Copy report path** (copies the path to this tab's report for sharing with an AI agent).
 
 Select a component, then switch views — only the requests used by that component and its renders remain.
 
