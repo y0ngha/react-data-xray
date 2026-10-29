@@ -156,7 +156,7 @@ On an internal admin screen with a tree of ~100 items, clicking one checkbox re-
 |---|---|---|
 | Render + commit per checkbox click (average) | 15.8 ms | 7.4 ms |
 
-Measurement sequence: `window.__RDX__.reset()` → click the checkbox → `window.__RDX__.snapshot('before')` / `snapshot('after')`. See the [Working with AI agents](#working-with-ai-agents) section below for the full workflow.
+Measurement sequence: `window.__RDX__.reset()` → click the checkbox → `window.__RDX__.snapshot('before')` / `snapshot('after')` (or use the panel's **Save** button next to Compare). See the [Working with AI agents](#working-with-ai-agents) section below for the full workflow.
 
 ### Duplicate requests on the first screen of an existing large app
 

@@ -11,6 +11,7 @@ window.__RDX__.reset();                   // start a fresh measurement
 // … interact with the page …
 const report = await window.__RDX__.report();
 await window.__RDX__.snapshot('before');  // saves to .rdx/before.json (plugin required, see below)
+                                          // or use the panel's Save button (same effect)
 ```
 
 **Read from a file**: attach the plugin to your dev server and it will write `.rdx/report.json` whenever the report changes (at most every 5s). A `.gitignore` entry is created automatically.
@@ -55,6 +56,7 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 | `renders.windowSeconds` | The window covered by render data. After `reset()`: everything since then (up to 2 min). Otherwise: the last 10s |
 | `renders.truncated` · `droppedInstances` | Whether rendered instances exceeded 5000 and the count excluded (those with fewest renders). When true, `components[]` counts may be lower than actual |
 | `renders.components[]` | `renders` · `avoidable`, per-reason counts, `stateChanges` (changed hooks and periodicity), `startedRenders` (child renders started by this component and which props changed), `causedBy`, `renderedAt`, `networkCauses`, `changedProps`, `advice` |
+| `resetAt` | ms epoch of the last `reset()` call in this tab; `null` if never reset. When comparing two snapshots, check that both have a `resetAt` — if only one does, the comparison may mix post-reset and pre-reset data |
 | `howToRead` | How to interpret the fields above |
 
 - `snapshot(name)`: name may contain letters, digits, and `. _ -`, up to 64 characters; `report` is reserved. Rejected if the plugin is not running.

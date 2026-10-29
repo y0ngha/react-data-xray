@@ -3,6 +3,7 @@ import { TabGroup } from '../components/TabGroup.js';
 import type { Dock } from '../hooks/useDockSettings.js';
 import { color } from '../theme.js';
 import { CompareReports } from './compare/CompareReports.js';
+import { SnapshotButton } from './compare/SnapshotButton.js';
 import { DockPicker } from './DockPicker.js';
 import { ResetButton } from './ResetButton.js';
 import { TabReportButton } from './TabReportButton.js';
@@ -64,6 +65,7 @@ export const PanelToolbar = (props: PanelToolbarProps) => (
     <span style={{ width: 8 }} />
     <ResetButton />
     <TabReportButton />
+    <SnapshotButton />
     <CompareReports />
     <DockPicker dock={props.dock} onChange={props.onDock} />
     <Button onClick={props.onClose} title="Close">
