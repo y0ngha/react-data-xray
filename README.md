@@ -1,55 +1,59 @@
+[한국어](./README.ko.md)
+
 <div align="center">
 
 # react-data-xray (RDX)
 
-**화면의 값을 클릭하면 어느 API 응답의 어느 필드인지 보여 주고,<br/>낭비되는 요청과 렌더를 찾아 주는 React 개발 도구**
+**Click a value on screen to see which API response field it came from,<br/>and find wasted requests and renders in your React app**
 
-[![React](https://img.shields.io/badge/React-%E2%89%A518-black?style=flat)](#지원-환경)
+[![React](https://img.shields.io/badge/React-%E2%89%A518-black?style=flat)](#supported-environments)
 [![license](https://img.shields.io/badge/license-MIT-black?style=flat)](./LICENSE)
 
-<img src="./docs/media/hero-pick.gif" alt="검색 결과 한 줄을 클릭하면 그 글자가 GET /api/search 응답의 $[0].name 에서 왔다고 알려 주는 화면" width="860" />
+<img src="./docs/media/hero-pick.gif" alt="Clicking a row in search results shows that the text came from GET /api/search response at $[0].name" width="860" />
 
 </div>
 
-Network 탭과 React DevTools 를 오가며 짐작하던 질문에, 개발 중인 화면 위에서 바로 답합니다.
+Answer questions you used to chase across the Network tab and React DevTools, right on the page you are building.
 
-- **이 값은 어디서 왔나**: 요소를 클릭하면 요청 URL, 응답 안의 위치(`$.data.summary.total`), React Query 키를 보여 줍니다.
-- **같은 요청이 왜 또 나가나**: 엔드포인트별 호출 수와 중복, 같은 응답을 다시 받은 횟수를 세고 요청을 보낸 코드를 보여 줍니다.
-- **왜 자꾸 렌더되나**: 바뀐 state 와 그 주기, 렌더를 일으킨 컴포넌트와 응답, 고치는 방법을 알려 줍니다.
-- **React Query 캐시 키가 맞나**: 같은 요청을 다른 키로 캐시하거나, 키에 인자가 빠진 곳을 찾습니다.
+- **Where did this value come from**: click an element to see the request URL, the path inside the response (`$.data.summary.total`), and the React Query key.
+- **Why is the same request going out again**: count calls and duplicates per endpoint, same-response refetches, and show the caller code.
+- **Why does this keep re-rendering**: show which state changed and how often, which component and response caused the render, and how to fix it.
+- **Are the React Query cache keys right**: find requests cached under different keys for the same data, or keys missing an argument.
 
-| 이미 쓰는 도구 | 보여 주는 것 | RDX 가 더하는 것 |
+Use it to check a screen the first time you attach RDX, to compare before and after a fix with `reset` → interact → `snapshot`, or to audit wasted requests and renders before a PR or QA pass.
+
+| Tool you already use | What it shows | What RDX adds |
 |---|---|---|
-| Network 탭 | 어떤 요청이 나갔는지 | 그 응답을 화면의 어느 컴포넌트가 쓰는지 |
-| React DevTools | props, state, 렌더 시간 | 그 값이 어느 요청에서 왔는지, 그 렌더를 일으킨 응답 |
-| TanStack Query Devtools | 캐시에 든 쿼리와 키 | 어느 컴포넌트가 쓰는지, 키 설계가 잘못된 곳 |
+| Network tab | Which requests went out | Which component on screen uses that response |
+| React DevTools | Props, state, render time | Which request that value came from, which response caused the render |
+| TanStack Query Devtools | Queries and keys in the cache | Which component uses each, where the key design is wrong |
 
-## 지원 환경
+## Supported environments
 
-- React 18, 19. 개발 서버에서만 동작(production 빌드에서는 아무것도 하지 않음)
-- Vite, Create React App, Next.js App Router(15.3 이상). Pages Router 는 아직 확인하지 않았습니다.
-- `fetch`, `XMLHttpRequest` 로 받은 JSON 응답. 데이터를 가져오는 라이브러리(React Query, SWR, axios, redux 등)는 가리지 않습니다.
+- React 18, 19. Works only in the dev server — does nothing in a production build.
+- Vite, Create React App, Next.js App Router (15.3+). Pages Router is not verified yet.
+- JSON responses from `fetch` and `XMLHttpRequest`. Works with any data-fetching library (React Query, SWR, axios, redux, etc.).
 
-## 시작하기
+## Getting started
 
-### 1. 설치
+### 1. Install
 
-아직 npm 에 배포하기 전이라, 저장소를 받아 빌드한 뒤 앱에 연결합니다. 빌드에는 [pnpm](https://pnpm.io) 이 필요합니다.
+RDX is not on npm yet. Clone the repo, build it, and link it to your app. You need [pnpm](https://pnpm.io) to build.
 
 ```bash
 git clone https://github.com/y0ngha/react-data-xray.git
 cd react-data-xray && pnpm install && pnpm build
 
-# 앱 폴더에서. 두 폴더를 나란히 뒀다면 경로는 ../react-data-xray
+# In your app folder. If both folders are side by side, the path is ../react-data-xray
 pnpm add -D file:../react-data-xray   # npm i -D file:../react-data-xray, yarn add -D file:../react-data-xray
 ```
 
-### 2. 앱에 넣기
+### 2. Add to your app
 
-`import 'react-data-xray'` 로 요청과 렌더를 지켜보기 시작하고, `<RdxDevtools />` 로 화면 오른쪽 아래에 버튼과 패널을 띄웁니다. import 는 다른 import 보다 먼저 둡니다. 늦게 불러오면 그 전에 나간 요청과 렌더는 보지 못합니다.
+`import 'react-data-xray'` starts watching requests and renders. `<RdxDevtools />` shows the button and panel in the bottom-right corner. Put the import before all other imports — anything that runs before it will not be captured.
 
 ```tsx
-// main.tsx (Create React App 은 index.tsx)
+// main.tsx (or index.tsx for Create React App)
 import 'react-data-xray';
 import { RdxDevtools } from 'react-data-xray';
 import { createRoot } from 'react-dom/client';
@@ -66,17 +70,17 @@ createRoot(document.getElementById('root')!).render(
 <details>
 <summary><b>Next.js App Router</b></summary>
 
-Next.js 에는 시작 파일이 없어서 `instrumentation-client.ts`(브라우저에서 React 보다 먼저 실행되는 파일)에 import 를 둡니다. `src` 폴더를 쓰지 않으면 경로에서 `src/` 를 빼세요.
+Next.js has no single entry file, so put the import in `instrumentation-client.ts` (runs in the browser before React). Drop `src/` from the path if you are not using a `src` folder.
 
 ```ts
-// src/instrumentation-client.ts 맨 위에
+// At the top of src/instrumentation-client.ts
 import 'react-data-xray';
 ```
 
-패널은 `'use client'` 인 Provider 안에 둡니다. 이미 Provider 파일이 있다면 한 줄만 더하면 됩니다.
+Put the panel inside a `'use client'` Provider. If you already have a Provider file, add one line.
 
 ```tsx
-// src/app/providers.tsx: 루트 레이아웃이 <Providers>{children}</Providers> 로 감싼다
+// src/app/providers.tsx: the root layout wraps children with <Providers>{children}</Providers>
 'use client';
 import { RdxDevtools } from 'react-data-xray';
 
@@ -92,75 +96,101 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 </details>
 
-### 3. 써 보기
+### 3. Try it
 
-1. 오른쪽 아래 **RDX** 버튼으로 패널을 엽니다.
-2. 패널의 **⌖ 요소 선택**(<kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd>)을 누르고, API 에서 받아 온 숫자나 글자를 클릭합니다.
-3. 패널에 `GET /api/...` 와 `$[0].name` 같은 위치가 나오면 성공입니다. **네트워크 요청**, **렌더** 로 같은 컴포넌트를 다른 각도에서 봅니다.
+1. Open the panel with the **RDX** button in the bottom-right corner.
+2. Click **⌖ Pick element** (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd>), then click any number or text that came from an API.
+3. If the panel shows `GET /api/...` and a path like `$[0].name`, it is working. Use the **Network** and **Renders** tabs to see the same component from different angles.
 
 <details>
-<summary><b>잘 안 될 때</b></summary>
+<summary><b>Troubleshooting</b></summary>
 
-- **버튼이 안 보입니다**: `<RdxDevtools />` 가 실제로 그려지는 곳에 있는지, 개발 서버인지 확인합니다.
-- **처음 나간 요청이 안 보입니다**: `import 'react-data-xray'` 가 다른 import 보다 앞에 있는지 확인합니다. Next.js 라면 `instrumentation-client.ts` 가 `app` 폴더와 같은 높이(`src` 를 쓰면 `src/` 안)에 있어야 합니다.
-- **클릭해도 출처가 안 나옵니다**: 그 값이 JSON 응답에서 왔는지 확인합니다. 서버에서 그려 보낸 값은 이어지지 않습니다.
-- **단축키가 브라우저와 겹칩니다**: 패널의 버튼을 쓰거나 `<RdxDevtools hotkey={{ key: 'x', shift: true }} />` 로 바꿉니다.
+- **The button does not appear**: check that `<RdxDevtools />` is actually rendered and that you are on the dev server.
+- **Early requests are missing**: make sure `import 'react-data-xray'` comes before all other imports. For Next.js, `instrumentation-client.ts` must sit at the same level as the `app` folder (inside `src/` if you use one).
+- **Clicking shows no source**: check that the value comes from a JSON response. Data rendered on the server is not traced.
+- **Shortcut conflicts with the browser**: use the panel button, or change it with `<RdxDevtools hotkey={{ key: 'x', shift: true }} />`.
 
 </details>
 
-## 이런 문제를 찾습니다
+## Problems it finds
 
-### 응답 → 렌더 → 다시 요청, 끝나지 않는 고리
+### Response → render → request again — a loop that never ends
 
-실제 서비스(Next.js 16, React 19)의 공지 팝업에서 `useEffect` 의존성에 그 effect 가 채우는 state 를 넣은 경우입니다. 응답이 올 때마다 state 가 바뀌어 effect 가 다시 돌고, 6초 동안 요청이 1,713번 나갔습니다.
-
-<table>
-  <tr>
-    <td width="50%" align="center"><b>고치기 전</b></td>
-    <td width="50%" align="center"><b>고친 뒤</b></td>
-  </tr>
-  <tr>
-    <td><img src="./docs/media/loop-before.gif" alt="고치기 전: /api/notices 요청이 쉬지 않고 쌓이고, 렌더 화면이 고리를 짚는다" /></td>
-    <td><img src="./docs/media/loop-after.gif" alt="고친 뒤: /api/notices 요청이 처음 한 번만 나간다" /></td>
-  </tr>
-</table>
-
-Network 탭은 같은 요청이 쌓이는 것만, React DevTools 는 팝업이 자주 렌더되는 것만 보여 줍니다. RDX 는 둘을 이어 "응답을 받을 때마다 이 컴포넌트가 렌더되고, 그 요청은 `useNoticePopup` 의 `useEffect` 에서 다시 나간다"고 짚습니다. → [전체 영상](./docs/media/rdx-effect-loop-before-after.mp4)
-
-### 버튼 문구 하나에 화면 전체가 매초 렌더
-
-같은 서비스에 실제로 있던 문제입니다. "재분석 가능까지 0:18" 버튼의 남은 시간을 위쪽 컴포넌트가 state 로 들고 1초마다 줄여서, 분석 패널 전체가 매초 렌더되고 있었습니다.
+In a notification popup in a production service (Next.js 16, React 19), a `useEffect` listed the state it fills as a dependency. Every response changed that state, re-ran the effect, and sent 1,713 requests in six seconds.
 
 <table>
   <tr>
-    <td width="50%" align="center"><b>고치기 전</b></td>
-    <td width="50%" align="center"><b>고친 뒤</b></td>
+    <td width="50%" align="center"><b>Before</b></td>
+    <td width="50%" align="center"><b>After</b></td>
   </tr>
   <tr>
-    <td><img src="./docs/media/cooldown-before.gif" alt="고치기 전: ChartContent 의 useState 가 1초마다 바뀌어 하위를 렌더한다는 진단" /></td>
-    <td><img src="./docs/media/cooldown-after.gif" alt="고친 뒤: ReanalyzeButton 만 렌더된다" /></td>
+    <td><img src="./docs/media/loop-before.gif" alt="Before: /api/notices requests pile up without stopping, and the Renders tab points to the loop" /></td>
+    <td><img src="./docs/media/loop-after.gif" alt="After: /api/notices fires only once" /></td>
   </tr>
 </table>
 
-RDX 는 "이 state 가 1초마다 바뀌는데 값이 실제로 바뀐 건 버튼까지 내려가는 prop 하나뿐이니, state 를 버튼 가까이로 내리라"고 짚었습니다. 그대로 고치자 10초 동안의 렌더가 80회에서 10회로 줄었습니다. → [전체 영상](./docs/media/rdx-cooldown-before-after.mp4)
+The Network tab only shows the pile-up; React DevTools only shows frequent renders. RDX connects the two: "this component re-renders on every response, and the request goes out again from `useNoticePopup`'s `useEffect`." → [Full video](./docs/media/rdx-effect-loop-before-after.mp4)
 
-## 문서
+### One button label re-renders the whole page every second
 
-- [화면 둘러보기](./docs/guide.md): 박스, 요소 선택, 네트워크, 렌더, React Query 캐시 점검, 패널 쓰기 팁
-- [AI 에이전트와 함께 쓰기](./docs/ai.md): `window.__RDX__`, `.rdx/report.json` 보고서, Claude Code 스킬
+In the same service, a countdown button ("Re-analyze available in 0:18") had its remaining time held in state by a parent component, which ticked every second and caused the entire analysis panel to re-render.
 
-## 알아 둘 것
+<table>
+  <tr>
+    <td width="50%" align="center"><b>Before</b></td>
+    <td width="50%" align="center"><b>After</b></td>
+  </tr>
+  <tr>
+    <td><img src="./docs/media/cooldown-before.gif" alt="Before: ChartContent's useState changes every second and re-renders all children" /></td>
+    <td><img src="./docs/media/cooldown-after.gif" alt="After: only ReanalyzeButton re-renders" /></td>
+  </tr>
+</table>
 
-- 기록은 브라우저와 내 개발 서버에만 남고 다른 곳으로 보내지 않습니다.
-- JSON 응답만 화면 요소와 이어집니다. Next.js 의 서버 컴포넌트, Server Action 으로 받은 데이터는 요청 목록에만 나옵니다. 같은 앱에서도 브라우저가 `fetch` 로 받는 데이터(검색, React Query 등)는 이어집니다. WebSocket, SSE, Service Worker 안의 요청은 보지 않습니다.
-- 응답을 `map` 등으로 가공해 state 에 넣으면 같은 객체로 이을 수 없어서, 응답이 도착한 직후에 바뀐 state 를 그 응답 때문이라고 추정합니다. 우연히 겹친 렌더가 붙을 수 있습니다.
-- 요청을 보낸 코드의 원래 파일 위치는 Vite 처럼 파일을 하나씩 보내는 개발 서버에서만 보여 줍니다. webpack, Turbopack 에서는 함수 이름으로 찾으세요.
-- 컴포넌트를 렌더한 JSX 위치는 개발 빌드에서만 나옵니다. React 19 는 개발 서버가 변환한 코드의 줄을 소스맵으로 원본 줄로 바꾸므로, 소스맵을 받기 전 잠깐은 변환된 줄이 보일 수 있습니다.
+RDX pointed out: "this state changes every second but only one prop reaching the button actually changes — move the state closer to the button." After the fix, renders in a 10-second window dropped from 80 to 10. → [Full video](./docs/media/rdx-cooldown-before-after.mp4)
 
-## 기여
+### Diagnose with the report, fix with AI, measure again
 
-개발 환경과 규칙은 [CONTRIBUTING.md](./CONTRIBUTING.md)에 있습니다.
+On an internal admin screen with a tree of ~100 items, clicking one checkbox re-rendered every row. The report showed a high `startedRenders` count and flagged `changedProps.newCallback` as the repeated cause. AI read the report, proposed wrapping rows in `memo` and keeping callback and object references stable, and after the fix the same scenario was measured again (dev build).
 
-## 라이선스
+| | Before | After |
+|---|---|---|
+| Render + commit per checkbox click (average) | 15.8 ms | 7.4 ms |
+
+Measurement sequence: `window.__RDX__.reset()` → click the checkbox → `window.__RDX__.snapshot('before')` / `snapshot('after')`. See the [Working with AI agents](#working-with-ai-agents) section below for the full workflow.
+
+### Duplicate requests on the first screen of an existing large app
+
+Attaching RDX to an existing service (React 18 + Vite, legacy `fetch` mixed with React Query), the very first screen showed two duplicate-request causes right away: one because an effect dependency changed (a callback built from a value that arrived late), and one because a parent's loading branch caused a child to remount, firing its mount-effect request twice. RDX works on existing code from day one — it is not only for new projects.
+
+## Working with AI agents
+
+Export the RDX report for AI to read, and AI will run the measure → diagnose → fix → re-measure loop for you. Use these three steps in the browser console or an AI tool:
+
+```js
+window.__RDX__.reset();                  // clear records and start a fresh measurement
+// … interact with the screen …
+await window.__RDX__.snapshot('before'); // save to .rdx/before.json
+```
+
+If you use Claude Code, copy the [`rdx-perf`](./skills/rdx-perf/SKILL.md) skill from the package. It runs the above sequence automatically when you ask "this screen is slow" or similar. For full details, see [Working with AI agents](./docs/ai.md).
+
+## Docs
+
+- [UI tour](./docs/guide.md): Boxes, Pick element, Network, Renders, React Query cache audit, panel tips
+- [Working with AI agents](./docs/ai.md): `window.__RDX__`, `.rdx/report.json` report, Claude Code skill
+
+## Good to know
+
+- Records stay in the browser and your dev server only — nothing is sent anywhere else.
+- Only JSON responses are linked to screen elements. Data from Next.js Server Components or Server Actions appears in the request list but is not traced to elements. Data the browser fetches with `fetch` (search, React Query, etc.) is traced even in the same app. WebSocket, SSE, and Service Worker requests are not captured.
+- If a response is transformed with `map` or similar before being put into state, RDX cannot match the same object, so it attributes a state change that happens right after a response to that response. An unrelated render that coincides may be attached.
+- Caller code file locations are shown only with dev servers that serve files individually, like Vite. With webpack or Turbopack, search by function name instead.
+- The JSX location that caused a render is available only in dev builds. In React 19, the dev server transforms source and then maps lines back via source maps, so the transformed line may appear briefly before the source map arrives.
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the dev setup and rules.
+
+## License
 
 [MIT](./LICENSE)

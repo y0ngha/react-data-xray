@@ -1,105 +1,104 @@
-# RDX 화면 둘러보기
+# RDX UI Tour
 
-[README](../README.md) 로 돌아가기
+Back to [README](../README.md)
 
-> 전체 흐름은 [기능 둘러보기 영상(45초)](./media/rdx-feature-tour.mp4)에 있습니다.
+> See the [feature tour video (45s)](./media/rdx-feature-tour.mp4) for an end-to-end walkthrough.
 
-패널 위쪽 도구 막대는 두 묶음입니다.
+The toolbar at the top of the panel has two groups.
 
-- **대상**(왼쪽): 무엇을 볼지 고릅니다. 기본은 **▦ 화면 전체**, **⌖ 요소 선택** 으로 컴포넌트 하나를 고르면 그 안만 봅니다. **☐ 박스** 는 화면에 라벨을 그립니다.
-- **관점**(오른쪽): **데이터 · 네트워크 요청 · 네트워크 타임라인 · 렌더** 중 무엇을 볼지 고릅니다.
+- **Target** (left): what to look at. Default is **▦ Whole page**. Use **⌖ Pick element** to select a single component and scope everything to it. **☐ Boxes** draws labels on the page.
+- **View** (right): choose between **Data · Network Requests · Network Timeline · Renders**.
 
-컴포넌트 하나를 고르고 관점만 바꾸면, 그 컴포넌트가 쓰는 요청과 그 컴포넌트의 렌더만 남습니다.
+Select a component, then switch views — only the requests used by that component and its renders remain.
 
-## 박스: 응답 데이터를 쓰는 컴포넌트에 라벨 붙이기
+## Boxes: labeling components that use response data
 
-<img src="./media/tour-01-boxes-whole-screen.jpg" alt="검색 결과마다 /api/search 라벨이 붙은 화면" width="860" />
+<img src="./media/tour-01-boxes-whole-screen.jpg" alt="Each search result is labeled with /api/search" width="860" />
 
-응답 데이터를 props 로 받는 컴포넌트마다 테두리와 라벨을 그립니다.
+Draws a border and label on every component that receives response data as props.
 
 ```
-GET /api/projects  ×6 · 중복 2 · 같은 응답 3   ↻12(불필요 9)
+GET /api/projects  req ×6 · duplicates 2 · same response 3   renders: 12 · avoidable: 9
 ```
 
-- `×6`: 이 요청이 6번 나갔습니다. `중복 2` 는 2초 안에 같은 요청이 또 나간 수, `같은 응답 3` 은 직전과 응답이 똑같았던 수입니다.
-- `↻12(불필요 9)`: 최근 10초에 12번 렌더됐고, 그중 9번은 줄일 수 있었습니다. props·state·context 값이 그대로인데 부모를 따라 렌더됐거나, 내용이 같은 새 객체·새 함수를 받은 렌더입니다.
-- 테두리 색: 초록은 응답 데이터를 그대로 씀, 파랑은 가공했지만 값이 같음, 빨강은 그 데이터를 준 요청이 낭비입니다. 렌더될 때마다 보라색으로 깜빡입니다.
+- `req ×6`: this request was sent 6 times. `duplicates 2` is the count of repeat requests within 2s; `same response 3` is the count where the response was identical to the previous one.
+- `renders: 12 · avoidable: 9`: components using this response rendered 12 times in the last 10s; 9 were avoidable — renders where props, state, and context were unchanged but the component re-rendered with its parent, or received a new object or function with the same content.
+- Border color: green = exact response data used as-is, blue = derived (transformed but values match), red = the request providing that data is wasteful. Flashes purple on each render.
 
-## 요소 선택: 이 글자는 어느 응답의 어느 필드인가
+## Pick element: which response field is this text from?
 
-<img src="./media/tour-02-element-pick-data.jpg" alt="ResultItem 을 고르면 GET /api/search 의 $[0].name 이라고 보여 준다" width="860" />
+<img src="./media/tour-02-element-pick-data.jpg" alt="Picking ResultItem shows GET /api/search · $[0].name" width="860" />
 
-클릭한 요소에서 가장 가까운, 응답 데이터를 가진 컴포넌트를 찾아 요청, 보낸 값, 응답 안의 위치, 값, React Query 키를 보여 줍니다. 찾은 근거는 세 단계입니다.
+Finds the nearest component that holds response data and shows the request, sent values, path inside the response, value, and React Query key. The confidence level is one of three:
 
-| 표시 | 뜻 |
+| Label | Meaning |
 |---|---|
-| `정확` | 응답으로 받은 객체를 그대로 받았습니다 |
-| `파생` | 가공한 새 객체지만 필드 값이 응답의 한 항목과 같습니다 |
-| `추정` | 화면 글자와 같은 값이 응답 안에 있습니다. 우연일 수 있어 마지막 수단으로만 씁니다 |
+| `exact` | The component received the response object directly |
+| `derived` | A transformed object, but field values match a response item |
+| `guessed` | A text value on screen matches something inside the response. May be coincidence — used as a last resort |
 
-## 네트워크: 엔드포인트별 낭비와 시간 흐름
+## Network: endpoint waste and timeline
 
 <table>
   <tr>
-    <td width="50%"><img src="./media/tour-07-network-endpoints.jpg" alt="엔드포인트별 호출 수와 평균 응답 시간" /></td>
-    <td width="50%"><img src="./media/tour-09-network-timeline.jpg" alt="최근 20초의 요청 막대와 렌더 시점" /></td>
+    <td width="50%"><img src="./media/tour-07-network-endpoints.jpg" alt="Per-endpoint call count and average response time" /></td>
+    <td width="50%"><img src="./media/tour-09-network-timeline.jpg" alt="Request bars and render commits over the last 20s" /></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>네트워크 요청</b>: 엔드포인트별 호출 수 · 중복 · 같은 응답 · 평균 응답 시간</sub></td>
-    <td align="center"><sub><b>네트워크 타임라인</b>: 최근 20초의 요청과 렌더 시점, 몰린 요청, 실패한 요청</sub></td>
+    <td align="center"><sub><b>Network Requests</b>: per-endpoint count · duplicates · same responses · avg response time</sub></td>
+    <td align="center"><sub><b>Network Timeline</b>: requests and render commits over the last 20s, with burst and failure markers</sub></td>
   </tr>
 </table>
 
-이유가 있는 반복은 낭비로 세지 않고 따로 표시합니다. 일정한 간격의 polling, 창으로 돌아왔을 때의 자동 재요청, 첫 로딩 때 몰린 요청, 개발 모드에서 React 가 effect 를 두 번 실행하는 것(StrictMode)이 그렇습니다. 빨간 표시가 늘 켜져 있으면 진짜 문제가 묻히기 때문입니다.
+Repeats that have a reason are shown separately rather than counted as waste: regular polling, automatic refetch when the window regains focus, bursts during initial load, and React running effects twice in development (StrictMode). Without this, persistent red markers would hide real problems.
 
-Next.js 의 Server Action 은 모두 페이지 주소로 보내지지만, 함수 이름으로 나눠 보여 줍니다(`POST /NVDA (getBarsAction)`).
+Next.js Server Actions all go to the page URL, but rdx splits them by function name (`POST /NVDA (getBarsAction)`).
 
-요청을 클릭하면 **요청 상세**가 열립니다. 헤더와 본문, 요청을 보낸 코드, 그 응답을 쓰는 컴포넌트가 나옵니다.
+Click a request to open **request detail**: headers, body, caller code, and components that use the response.
 
-<img src="./media/tour-06-request-detail.jpg" alt="요청 상세: 이 요청의 데이터를 쓰는 컴포넌트와 요청을 보낸 코드" width="860" />
+<img src="./media/tour-06-request-detail.jpg" alt="Request detail: components using this response and the code that sent the request" width="860" />
 
-## 렌더: 무엇이, 왜, 누구 때문에 렌더됐나
+## Renders: what rendered, why, and caused by what?
 
-<img src="./media/tour-10-render.jpg" alt="렌더 화면: 바뀐 state 와 주기, 하위에 미친 영향, 고치는 방법" width="860" />
+<img src="./media/tour-10-render.jpg" alt="Renders tab: changed state, periodicity, downstream impact, and how to fix" width="860" />
 
-최근 10초(측정 시작을 눌렀다면 그 뒤 최대 2분) 동안 자주 렌더된 컴포넌트를, 줄일 수 있는 것부터 보여 줍니다.
+Shows components that rendered most in the window — since the last **Clear records** (up to 2 min), or the last 10s if no reset has happened — sorted by most avoidable renders first.
 
-- **바뀐 state**: 어느 훅이 무엇에서 무엇으로 바뀌었는지(`useState #70 · 22000 → 21000`). 일정한 간격으로 바뀌면 타이머를 의심하라고 알려 줍니다. `#70` 은 그 컴포넌트가 훅을 부른 순서로, 커스텀 훅 안에서 부른 것까지 셉니다.
-- **렌더를 일으킨 것**: 상위 컴포넌트, 그리고 그 렌더를 일으킨 응답. 응답 객체를 가공해 state 에 넣었다면 "응답 직후"로 시간을 근거로 잇습니다.
-- **렌더를 시작한 컴포넌트에서 본 영향**: 하위 렌더 수, 그중 값이 그대로였던 수, 값이 실제로 바뀐 props.
-- **고치는 방법**: 값이 바뀐 곳이 좁으면 state 를 그 가까이로 내리라고, 응답마다 effect 가 요청을 다시 보내면 의존성을 보라고 합니다. React Compiler 를 쓰는 컴포넌트에는 `React.memo` 를 권하지 않습니다.
+- **Changed state**: which hook changed and from what to what (`useState #70 · 22000 → 21000`). A regular interval signals a timer. `#70` is the call order of the hook in that component, counting hooks inside custom hooks too.
+- **What caused the render**: an ancestor component, and the response that triggered it. If the response was transformed before being stored in state, the link is made by timing ("right after response").
+- **Impact started from this component**: child render count, how many had unchanged values, and which props actually changed.
+- **How to fix**: if the changed value is narrow, move state closer to it. If an effect re-sends a request after every response, check its dependencies. `React.memo` is not suggested for components compiled by React Compiler.
 
-응답을 받을 때마다 렌더되고 그 요청이 effect 에서 다시 나가는 고리는 이렇게 짚습니다.
+A cycle where every response triggers a render that re-sends the request is diagnosed like this:
 
-<img src="./media/loop-render-diagnosis.jpg" alt="렌더 화면: GET /api/notices 응답을 받을 때마다 NoticePopup 이 렌더되고 그 요청은 effect 안에서 다시 나간다는 진단" width="860" />
+<img src="./media/loop-render-diagnosis.jpg" alt="Renders tab: GET /api/notices response causes NoticePopup to render, and the request goes out again from inside an effect" width="860" />
 
-## React Query 캐시 설계 점검
+## React Query cache key audit
 
-<img src="./media/react-query-audit.gif" alt="실제 화면 흐름에서 React Query 캐시 실수가 지적되는 모습" width="860" />
+<img src="./media/react-query-audit.gif" alt="React Query cache mistakes detected as you use the page" width="860" />
 
-**네트워크 요청 › React Query** 에서 캐시 설계 실수를 찾습니다. 앱 코드를 고치지 않아도 화면의 `QueryClientProvider` 를 찾아 지켜봅니다.
+**Network Requests › React Query** finds cache key design mistakes. No app code changes needed — rdx locates the `QueryClientProvider` on the page and observes it.
 
-| 지적 | 이런 실수입니다 |
+| Finding | What went wrong |
 |---|---|
-| 같은 요청을 서로 다른 키로 캐시 | 같은 요청을 두 `queryKey` 가 따로 받아 캐시를 나눠 쓰고, 요청이 두 번 나갑니다 |
-| 같은 키로 서로 다른 요청을 가져옴 | 쿼리 함수가 쓰는 값(검색어, 필터)이 `queryKey` 에 빠져, 다른 조건의 데이터가 같은 캐시를 덮어씁니다 |
-| staleTime 0 이라 같은 응답을 다시 받음 | 다시 나타나거나 창으로 돌아올 때마다 같은 응답을 또 받습니다 |
-| 맞는 쿼리가 없는 무효화 | `invalidateQueries` 에 준 키와 맞는 쿼리가 이 화면에 없었습니다. 낙관적 업데이트 뒤에 키를 잘못 쓰면 화면이 서버 값으로 돌아오지 않습니다. 부른 코드 위치를 함께 보여 줍니다 |
+| Same request cached under different keys | Two `queryKey`s receive the same request separately, splitting the cache and sending the request twice |
+| Different requests fetched under the same key | A value the query function uses (search term, filter) is missing from `queryKey`; data from different conditions overwrites the same cache entry |
+| staleTime is 0 — same response fetched again | The same response is fetched again every time the component re-appears or the window regains focus |
+| No query matched the invalidated key | The key passed to `invalidateQueries` matched no query on this page. After an optimistic update, a wrong key means the UI never reverts to the server value. The call site is shown alongside the finding |
 
-판정 방식 때문에 생기는 한계가 있습니다.
+There are limits inherent to how findings are detected.
 
-- 위의 세 가지는 캐시 데이터를 `fetch`·XHR 의 JSON 응답과 맞춰 보는 방식입니다. Server Action 처럼 JSON 이 아닌 응답으로 채운 쿼리는 판정하지 않습니다.
-- 무효화는 **이 화면에서 지금까지 만든 쿼리**와만 비교합니다. 다른 화면의 쿼리를 미리 무효화하는 코드라면 지적돼도 괜찮습니다.
+- The first three findings work by comparing cached data against JSON responses from `fetch`/XHR. Queries populated via non-JSON responses (e.g. Server Actions) are not audited.
+- The invalidation finding compares only against queries created on this page so far. Pre-invalidating a query for another page will produce a finding that can be safely ignored.
 
-영상은 실제 서비스의 검색과 관심종목 기능에 위의 네 가지 실수를 일부러 넣고 평소처럼 쓴 장면입니다. 첫 번째 실수가 검색어 두 개에서 한 번씩 잡혀 지적은 다섯 건이었고, 실수를 되돌린 원래 코드에서는 지적이 없었습니다. → [전체 영상](./media/rdx-react-query-audit.mp4)
+The animation shows four intentional mistakes added to a real service's search and watchlist features, used normally. The first mistake was caught once per search term — five findings total. The original code with the mistakes removed produced no findings. → [Full video](./media/rdx-react-query-audit.mp4)
 
-## 패널 쓰기 팁
+## Panel tips
 
-<img src="./media/panel-ux.gif" alt="패널을 눌러도 앱의 드롭다운이 닫히지 않고, 앱 모달이 열리면 패널이 접힌다" width="860" />
+<img src="./media/panel-ux.gif" alt="App dropdown stays open when panel is clicked; panel collapses when an app modal opens" width="860" />
 
-- **표시 방식**: 패널 오른쪽 위에서 작게 보기(▭), 하단 고정(⬓), 오른쪽 고정(◨), 별도 창(⧉)을 고릅니다. 고정했을 때는 안쪽 가장자리를 끌어 크기를 바꿉니다. RDX 버튼도 끌어서 옮길 수 있습니다.
-- **앱과 겹칠 때**: 패널을 눌러도 앱의 드롭다운은 닫히지 않고, 입력 중이던 칸의 포커스도 유지됩니다. 앱에 모달이 열리면 고정한 패널을 도구 막대만 남기고 접습니다. **펼치기** 로 다시 엽니다. → [전후 영상](./media/rdx-panel-ux-before-after.mp4)
-- **새로고침해도 남는 것**: 같은 탭이라면 패널 상태와 요청 기록이 남습니다. 응답 원문은 10KB 까지만 저장하고, 탭을 닫으면 지웁니다. 이름에 token·password·authorization 같은 말이 든 값은 가려서 저장하지만, 이름으로 판단하므로 모든 비밀 값을 가린다고 보장하지는 않습니다.
-- **새 탭에서도 남는 것**: 표시 방식, 버튼 위치, 무시 목록(일부러 반복하는 엔드포인트).
-- **버튼의 숫자**: 지금 문제 수(낭비 요청이 있는 엔드포인트 + 렌더가 몰리는 컴포넌트)입니다. 새 문제가 생기면 잠깐 색이 바뀝니다.
-
+- **Display mode**: choose Small (▭), Dock bottom (⬓), Dock right (◨), or Undock (⧉) from the top-right of the panel. When docked, drag the inner edge to resize. The RDX button can also be dragged.
+- **Coexisting with the app**: clicking the panel does not close app dropdowns or steal focus from inputs. When a modal opens, the docked panel collapses to its toolbar only. Click **Expand** to restore it. → [Before/after video](./media/rdx-panel-ux-before-after.mp4)
+- **Persists across reloads** (same tab): panel state and request records. Response bodies are saved up to 100KB; cleared when the tab closes. Values whose names contain words like token, password, or authorization are stored as `(redacted)`, but detection is name-based so not every secret value is guaranteed to be redacted.
+- **Persists across tabs**: display mode, button position, ignore list (endpoints marked as intentional repeats).
+- **Button count**: current problem count (endpoints with wasted requests + components with a render storm). Briefly changes color when a new problem appears.

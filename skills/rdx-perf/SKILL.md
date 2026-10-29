@@ -1,84 +1,78 @@
 ---
 name: rdx-perf
-description: react-data-xray(rdx)로 React 화면의 낭비 요청과 불필요한 렌더를 재고, 원인을 코드에서 확인해 고친 뒤 다시 재서 전후를 비교한다. "이 화면 느려", "요청이 너무 많이 나가", "렌더가 너무 잦아", "rdx 보고서 보고 고쳐 줘", "성능 점검", "리렌더 줄여 줘", "API 중복 호출", "폴링 줄여 줘", "React Query 캐시 키 점검" 같은 요청에 쓴다. 앱에 rdx 가 붙어 있지 않으면 붙이는 방법부터 안내한다.
+description: Use react-data-xray (rdx) to measure wasted requests and avoidable renders on a React page, trace root causes in code, fix them, and re-measure to compare before and after. Use this skill when the user says things like "this screen is slow", "too many requests", "too many re-renders", "fix from the rdx report", "duplicate API calls", "React Query cache key check", "reduce polling", "performance audit", or the Korean equivalents "이 화면 느려", "요청이 너무 많이 나가", "렌더가 너무 잦아", "rdx 보고서 보고 고쳐 줘", "API 중복 호출", "폴링 줄여 줘". If rdx is not installed in the app, explain how to add it first.
 ---
 
-# rdx 로 화면 성능 고치기
+# Fix page performance with rdx
 
-AI 로 빠르게 만든 화면은 실제 렌더·요청 비용을 확인하지 않은 채 넘어가기 쉽다. 이 스킬은 rdx 가 모은 근거로
-**측정 → 원인 확인 → 수정 → 다시 측정** 을 한 바퀴 돈다. rdx 출력은 출발점일 뿐이다. 코드에서 확인한 것만 고친다.
+AI-generated pages often ship without verifying actual render and request costs. This skill uses rdx evidence to run one full loop: **measure → diagnose → fix → re-measure**. The report is only a starting point. Fix only what you can confirm in code.
 
-## 1. 준비 확인
+## 1. Check setup
 
-1. 앱 진입 파일에 `import { RdxDevtools } from 'react-data-xray'` 와 `<RdxDevtools />` 가 있는지 본다. react-dom 보다 먼저 import 해야 한다.
-2. dev 서버에 보고서 플러그인이 붙어 있는지 본다.
-   - Vite: `vite.config` 의 `plugins` 에 `rdx()`(`import { rdx } from 'react-data-xray/vite'`)
-   - webpack: `devServer.setupMiddlewares` 에서 `rdxReportMiddleware()`(`react-data-xray/middleware`)
-3. 없으면 붙이는 방법을 사용자에게 알려 주고 멈춘다. 사용자의 빌드 설정은 허락 없이 고치지 않는다.
-4. 보고서를 읽는 길은 둘이다.
-   - 파일: 플러그인이 5초마다 `.rdx/report.json` 에 쓴다(dev 명령을 실행한 폴더 기준).
-   - 브라우저 도구가 있으면: `window.__RDX__.report()`
+1. Verify that the app entry file has `import { RdxDevtools } from 'react-data-xray'` and `<RdxDevtools />` (it must be imported before react-dom).
+2. Check whether the report plugin is attached to the dev server.
+   - Vite: `rdx()` in `plugins` (`import { rdx } from 'react-data-xray/vite'`)
+   - webpack: `rdxReportMiddleware()` in `devServer.setupMiddlewares` (`react-data-xray/middleware`)
+3. If either is missing, explain how to add it and stop. Do not modify the user's build config without permission.
+4. Two ways to read the report:
+   - File: the plugin writes `.rdx/report.json` every 5s (relative to the directory where the dev command runs).
+   - Browser tool: `window.__RDX__.report()`
 
-## 2. 측정
+## 2. Measure
 
-시나리오마다 처음 상태에서 시작한다. 브라우저 도구가 있으면 직접, 없으면 사용자에게 한 줄씩 요청한다.
+Start each scenario from a clean state. Use the browser tool directly if available; otherwise ask the user to run each step.
 
-1. 고칠 화면을 연다.
-2. `window.__RDX__.reset()` 으로 기록과 렌더 통계를 비운다. 브라우저 도구가 없으면 사용자에게 페이지를 새로 열어 달라고 한다
-   (같은 탭은 새로고침 전 기록을 이어 가므로, 새 탭에서 연다).
-3. 시나리오를 실행한다.
-   - 가만히 둔 30초: 폴링·주기 요청, 화면이 혼자 렌더되는지(2분을 넘기지 않는다)
-   - 문제가 된 조작: 필터 변경, 탭 이동, 스크롤 등
-4. `await window.__RDX__.snapshot('before-<시나리오>')` 로 저장한다. `.rdx/before-<시나리오>.json` 이 생긴다.
-   플러그인이 없거나 쓰지 못하면 거부되니, 그때는 `report()` 결과를 직접 받아 둔다.
-   브라우저 도구가 없으면 5초 기다린 뒤 `.rdx/report.json` 을 그 이름으로 복사해 둔다.
-5. `renders.monitoring` 이 false 면 렌더 정보가 비어 있다(reset 없이 처음 report 를 부른 경우). 한 번 더 측정한다.
-6. `renders.windowSeconds` 는 렌더를 센 구간이다. reset 하지 않았으면 최근 10초뿐이니 비교할 때는 꼭 reset 부터 한다.
-   reset 뒤 2분이 넘으면 앞부분이 빠진다. `requests.dropped` 가 0 보다 크면 요청도 잘린 것이니 시나리오를 짧게 나눠 다시 잰다.
+1. Open the page to fix.
+2. Run `window.__RDX__.reset()` to clear records and render stats. Without a browser tool, ask the user to open the page in a new tab (same-tab reload keeps pre-reload records).
+3. Run the scenario:
+   - Idle for 30s: checks for polling, periodic renders, or the page rendering on its own (do not exceed 2 min).
+   - The problematic interaction: filter change, tab switch, scroll, etc.
+4. Save: `await window.__RDX__.snapshot('before-<scenario>')` → creates `.rdx/before-<scenario>.json`. If the plugin is unavailable or rejected, read `report()` directly. Without a browser tool, wait 5s then copy `.rdx/report.json` under that name.
+5. If `renders.monitoring` is false, render data is empty (first `report()` call without a reset). Measure once more.
+6. `renders.windowSeconds` shows how much of the window was captured. Without a reset, it is the last 10s only — always reset before a measurement you will compare. After reset, data beyond 2 min is dropped. If `requests.dropped` is greater than 0, split the scenario into shorter runs.
 
-## 3. 결과 읽기
+## 3. Read the results
 
-필드 뜻은 보고서의 `howToRead` 가 기준이다. 이 문서에 옮겨 적지 않으니(rdx 버전마다 필드가 늘어난다) 결과를 읽기 전에 먼저 읽는다.
-보는 순서만 정한다.
+The `howToRead` field in the report is authoritative. This document does not duplicate it (fields grow with each rdx version), so read it before reading the results. Only the order of inspection is prescribed here.
 
-1. `requests.endpoints`: 낭비 많은 순. `ignored: true` 는 사용자가 의도된 반복으로 지정한 것이라 고치지 않는다.
-2. `reactQuery.findings`: 각 항목의 `fix` 를 따른다.
-3. `renders.components`: 줄일 수 있는 렌더 많은 순. 고칠 곳은 대개 그 컴포넌트가 아니라 `causedBy` 의 조상이다.
+1. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
+2. `reactQuery.findings`: follow each item's `fix`.
+3. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
 
-## 4. 원인 확인(고치기 전에 반드시)
+## 4. Confirm the root cause (required before fixing)
 
-- `callers` 의 함수 이름과 `causedBy`·`renderedAt` 으로 코드를 연다. 줄 번호가 http 주소로 남은 줄은 소스맵이 없는 것이라 줄이 어긋날 수 있으니 함수 이름으로 찾는다.
-- 진단이 코드와 맞는지 확인한다. 예: "화면 밖 카드도 폴링한다"는 진단은 LazyLoad 가 화면 밖 카드를 언마운트한다면 틀린 것이다.
-- 확신이 없으면 고치지 말고 사용자에게 근거와 함께 묻는다.
+- Open code using the function name from `callers` and the `causedBy` / `renderedAt` paths. Lines that remain as http addresses have no source map — find them by function name.
+- Verify the diagnosis against the code. Example: "cards off-screen are still polling" is wrong if LazyLoad unmounts off-screen cards.
+- If unsure, do not fix. Ask the user with the evidence.
 
-## 5. 처방
+## 5. Prescriptions
 
-| 진단 | 처방 |
+| Finding | Fix |
 |---|---|
-| 중복 요청(같은 화면에서 두 컴포넌트가 같은 요청) | 공통 조상에서 한 번 받기, React Query 로 옮겨 캐시 공유 |
-| 같은 응답 재요청 + 그 응답으로 렌더(`fromSameResponse`) | 같은 응답이면 setState 를 건너뛰기, React Query 의 structural sharing, `staleTime` 늘리기 |
-| 주기 요청이 숨은 탭·화면 밖에서도 돎 | `document.hidden`·화면 표시 여부로 폴링 멈춤(`refetchInterval` 조건) |
-| 부모를 따라 렌더(`causedBy` 가 조상) | 원인 조상의 불필요한 setState 를 먼저 고치고, 그다음 `React.memo` |
-| 같은 내용 새 참조(`changedProps.sameContent`) | 부모에서 `useMemo`, 응답을 구조적 공유로 받기 |
-| 새 콜백(`changedProps.newCallback`) | 부모에서 `useCallback` |
-| context 변경 | 자주 바뀌는 값과 아닌 값의 context 분리, Provider value 를 `useMemo` |
-| React Query 키 문제 | `reactQuery.findings[].fix` |
+| Duplicate requests (two components send the same request) | Fetch once in a common ancestor; move to React Query for cache sharing |
+| Same-response refetch + renders caused by it (`fromSameResponse`) | Skip `setState` when the response is unchanged; use React Query structural sharing; increase `staleTime` |
+| Polling running in hidden tab or off-screen | Pause polling on `document.hidden` or when the component is off-screen (`refetchInterval` condition) |
+| Parent render causes child (`causedBy` is an ancestor) | Fix the unnecessary `setState` in the ancestor first, then consider `React.memo` |
+| Same content, new reference (`changedProps.sameContent`) | `useMemo` in the parent; use structural sharing for responses |
+| New callback (`changedProps.newCallback`) | `useCallback` in the parent |
+| Context change | Split frequently-changing and stable values into separate contexts; `useMemo` for Provider value |
+| React Query key problem | Follow `reactQuery.findings[].fix` |
 
-## 6. 지킬 것
+## 6. Constraints
 
-- 동작을 바꾸지 않는다. 예: `setSummary({ ...data, before: summary })` 처럼 이전 값을 쓰는 화면은 같은 응답일 때 setState 를 건너뛰면 증감 표시가 달라질 수 있다. 그 값을 쓰는 곳을 먼저 확인한다.
-- 한 번에 한 원인만 고치고 다시 잰다. 여러 개를 한꺼번에 고치면 무엇이 효과였는지 모른다.
-- 대상 저장소의 테스트·린트 규칙(AGENTS.md, CLAUDE.md 등)을 따른다.
+- Do not change behavior. Example: `setSummary({ ...data, before: summary })` uses the previous value — skipping `setState` on same responses would break the delta display. Check all usages first.
+- Fix one root cause at a time, then re-measure. Fixing several at once makes it impossible to know which one helped.
+- Follow the test and lint rules of the target repository (AGENTS.md, CLAUDE.md, etc.).
 
-## 7. 다시 측정하고 보고
+## 7. Re-measure and report
 
-1. 같은 시나리오를 2번과 같은 순서로 다시 실행하고 `snapshot('after-<시나리오>')` 로 저장한다.
-2. before/after 를 비교한다: 엔드포인트별 `count`·`duplicates`·`sameResponses`, 컴포넌트별 `renders`·`avoidable`.
-3. 나아지지 않았으면 그 수정은 되돌린다.
-4. 사용자에게 표로 보고한다: 무엇을 왜 고쳤는지(코드 위치), 전후 수치, 확인하지 못한 것.
+1. Run the same scenario again following the same steps as section 2, then save with `snapshot('after-<scenario>')`.
+2. Compare before and after: `count` · `duplicates` · `sameResponses` per endpoint; `renders` · `avoidable` per component.
+3. If a metric did not improve, revert that change.
+4. Report to the user in a table: what was fixed and why (code location), before/after numbers, and anything that could not be confirmed.
 
-## 참고
+## Notes
 
-- 렌더 정보는 dev 빌드에서만 정확하다(React 18 의 `_debugSource` 가 있어야 `renderedAt` 이 나온다).
-- `.rdx/` 는 rdx 가 `.gitignore` 를 만들어 저장소에 올라가지 않는다.
-- 보고서에는 응답 본문과 헤더가 들어가지 않는다. URL 쿼리는 들어간다.
+- Render data is only accurate in a dev build (React 18's `_debugSource` is required for `renderedAt`).
+- rdx creates `.rdx/.gitignore` automatically so the directory is not committed.
+- Response bodies and headers are not included in the report. URL query strings are.
