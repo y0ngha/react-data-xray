@@ -68,9 +68,9 @@ export const Panel = ({ settings, buttonPosition, onResize, onResizeEnd, toolbar
       {toolbar}
       {collapsed ? (
         <div style={noticeStyle}>
-          <span>앱 대화상자가 열려 있어 가리지 않게 패널을 접었습니다.</span>
+          <span>An app dialog is open; panel collapsed to stay out of the way.</span>
           <Button onClick={onExpand ?? noop} subtle>
-            펼치기
+            Expand
           </Button>
         </div>
       ) : (

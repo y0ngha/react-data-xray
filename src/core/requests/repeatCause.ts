@@ -50,7 +50,7 @@ const depsSearch = (component: string) => {
       if (f.child) stack.push(f.child);
       if (!isComposite(f) || !f.alternate || getComponentName(f) !== component) continue;
       const c = changedDep(f);
-      if (c) return `의존성 #${c.dep + 1} 변경 (${previewValue(c.prev)} → ${previewValue(c.next)}), ${c.effect}번째 effect`;
+      if (c) return `dep #${c.dep + 1} changed (${previewValue(c.prev)} → ${previewValue(c.next)}), effect ${c.effect}`;
     }
     return PENDING;
   };
@@ -61,13 +61,13 @@ const remountCauseOf = (record: RequestRecord, component: string): RepeatCause |
     (r) => r.lastAt <= record.startedAt && record.startedAt - r.lastAt <= REMOUNT_WINDOW_MS,
   );
   if (!remount) return undefined;
-  const parent = `부모 <${remount.parent || '루트'}>`;
+  const parent = `parent <${remount.parent || 'root'}>`;
   return {
     kind: 'remount',
     detail:
       remount.cause === 'type-changed'
-        ? `<${component}> 재마운트, ${parent} 가 렌더 중에 컴포넌트를 정의해 타입이 매번 바뀜(렌더 중 컴포넌트 정의)`
-        : `<${component}> 재마운트, ${parent} 의 분기 변경`,
+        ? `<${component}> remount, ${parent} defines a component during render so the type changes every render (component defined during render)`
+        : `<${component}> remount, ${parent} branch changed`,
   };
 };
 
@@ -76,7 +76,7 @@ const repeatCauseSearch = (record: RequestRecord) => {
   let deps: ReturnType<typeof depsSearch> | undefined;
   return (): RepeatCause | undefined | typeof PENDING => {
     if (!record.duplicateOf) return undefined;
-    if (record.strictModeReplay) return { kind: 'strict', detail: 'StrictMode 가 개발 중에 effect 를 다시 실행했습니다' };
+    if (record.strictModeReplay) return { kind: 'strict', detail: 'StrictMode re-ran the effect during development' };
     const component = record.component;
     if (!component) return undefined;
     const found = (deps ??= depsSearch(component))();

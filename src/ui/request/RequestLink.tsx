@@ -13,7 +13,7 @@ export const RequestLink = ({ record, focus, children }: { record: RequestRecord
   return (
     <button
       type="button"
-      title="클릭하면 요청 상세(헤더, Request/Response Body)를 봅니다"
+      title="Click to see request details (headers, Request/Response Body)"
       onClick={() => open(record, focus)}
       onMouseEnter={() => hover(record)}
       onMouseLeave={() => hover(null)}

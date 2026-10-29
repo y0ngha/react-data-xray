@@ -60,6 +60,6 @@ describe('탭마다 보고서', () => {
   it('경로를 만드는 탭 id 와 index 는 받지 않는다', async () => {
     expect((await post('tab=..%2Fx', {})).status).toBe(400);
     expect((await post('tab=index', {})).status).toBe(400);
-    expect(() => reportFileFor('../x')).toThrow('잘못된 탭 id');
+    expect(() => reportFileFor('../x')).toThrow('invalid tab id');
   });
 });

@@ -21,9 +21,9 @@ const rec = (status: number): RequestRecord => ({
 
 describe('ClassBadge 실패 응답', () => {
   it('503_vs_200: 503 중복은 실패 응답이 붙고 200 중복은 그대로', () => {
-    expect(renderToStaticMarkup(<ClassBadge record={rec(503)} />)).toContain('중복 요청 · 실패 응답');
+    expect(renderToStaticMarkup(<ClassBadge record={rec(503)} />)).toContain('duplicate request · failed response');
     const ok = renderToStaticMarkup(<ClassBadge record={rec(200)} />);
-    expect(ok).toContain('중복 요청');
-    expect(ok).not.toContain('실패 응답');
+    expect(ok).toContain('duplicate request');
+    expect(ok).not.toContain('failed response');
   });
 });

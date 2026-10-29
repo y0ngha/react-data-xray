@@ -99,7 +99,8 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
     [analysis.classOf, openRequest],
   );
 
-  const pickTitle = settings.dock === 'window' ? '원래 창에서 요소를 클릭하세요' : `요소 선택 (Ctrl/Cmd+Shift+${hotkey.key.toUpperCase()})`;
+  const pickTitle =
+    settings.dock === 'window' ? 'Click an element in the original window' : `Pick element (Ctrl/Cmd+Shift+${hotkey.key.toUpperCase()})`;
 
   const panel = (
     <Panel

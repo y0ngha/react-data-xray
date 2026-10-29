@@ -45,7 +45,7 @@ const setText = (el: HTMLElement, text: string): void => {
 
 const paintMetrics = ({ box, metrics }: BoxElements, statOf: StatOf): void => {
   const text = statSummary(statOf(box.hit.record));
-  setText(metrics, text ? ` 요청 ${text}` : '');
+  setText(metrics, text ? ` req ${text}` : '');
 };
 
 /**
@@ -89,8 +89,8 @@ const paintRenders = ({ box, root, label, count }: BoxElements, now: number): vo
   const recent = render?.recent ?? 0;
   count.style.display = recent > 0 ? '' : 'none';
   count.style.color = recent >= RENDER_STORM ? '#7f1d1d' : '#000';
-  setText(count, recent > 0 ? `렌더 ${recent}${render!.avoidable > 0 ? ` · 불필요 ${render!.avoidable}` : ''}` : '');
-  label.title = `클릭하면 요청 상세를 봅니다. 요청 ×N 은 이 요청의 호출 수, 렌더 N 은 이 응답을 쓰는 컴포넌트의 렌더 수입니다${render ? `. 이 응답을 쓰는 컴포넌트가 최근 10초에 ${render.recent}번 렌더됐고, 그중 ${render.avoidable}번은 값이 그대로였습니다` : ''}`;
+  setText(count, recent > 0 ? `renders: ${recent}${render!.avoidable > 0 ? ` · avoidable: ${render!.avoidable}` : ''}` : '');
+  label.title = `Click to see request details. ×N = call count for this request, renders N = render count of components using this response${render ? `. Components using this response rendered ${render.recent} times in the last 10s; ${render.avoidable} were avoidable` : ''}`;
 };
 
 /**
@@ -194,7 +194,7 @@ const SourceBox = memo(function SourceBox({ box, waste, onOpen, register }: Sour
     >
       <button
         type="button"
-        title="클릭하면 요청 상세를 봅니다"
+        title="Click to see request details"
         onClick={() => onOpen(box.hit.record)}
         style={{
           position: 'absolute',

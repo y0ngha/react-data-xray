@@ -49,23 +49,27 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
     <div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
         <Button active={view === 'endpoints'} onClick={() => setView('endpoints')}>
-          엔드포인트별
+          By endpoint
         </Button>
         <Button active={view === 'log'} onClick={() => setView('log')}>
-          전체 기록
+          All requests
         </Button>
-        <Button active={view === 'cache'} onClick={() => setView('cache')} title="React Query 캐시키 설계 점검">
+        <Button active={view === 'cache'} onClick={() => setView('cache')} title="Check React Query cache key design">
           React Query
         </Button>
         {view === 'log' && filter && (
-          <Button onClick={() => setFilter(null)} title="필터 해제">
+          <Button onClick={() => setFilter(null)} title="Clear filter">
             {filter} ✕
           </Button>
         )}
-        <Button active={currentOnly} onClick={() => setCurrentOnly(!currentOnly)} title="지금 경로(location.pathname)에서 보낸 요청만 보기">
-          지금 경로만
+        <Button
+          active={currentOnly}
+          onClick={() => setCurrentOnly(!currentOnly)}
+          title="Show only requests from the current route (location.pathname)"
+        >
+          This route
         </Button>
-        <span style={{ color: color.muted, marginLeft: 'auto' }}>최근 {records.length}건</span>
+        <span style={{ color: color.muted, marginLeft: 'auto' }}>{records.length} req</span>
       </div>
       {view === 'cache' && <CacheAuditView records={records} />}
       {view === 'endpoints' &&

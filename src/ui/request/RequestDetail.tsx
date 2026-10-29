@@ -21,8 +21,8 @@ import { RequestStatusLine } from './RequestSummary.js';
 const MAX_DETAIL_TEXT = 200_000;
 
 const TRIGGER_TEXT: Record<NonNullable<RequestRecord['trigger']>, string> = {
-  focus: '창 포커스·탭 전환 직후에 나간 요청입니다(라이브러리의 자동 재요청).',
-  reconnect: '네트워크 재연결 직후에 나간 요청입니다.',
+  focus: 'Sent immediately after window focus or tab switch (auto refetch by library).',
+  reconnect: 'Sent immediately after network reconnection.',
 };
 
 const requestBodyText = (record: RequestRecord): string | undefined =>
@@ -37,9 +37,9 @@ const responseBodyText = (record: RequestRecord): string | undefined => {
 const RequestBodySection = ({ record }: { record: RequestRecord }) => {
   const text = requestBodyText(record);
   const content = record.bodyUnreadable ? (
-    <Muted>(Blob·스트림처럼 바로 읽을 수 없는 본문)</Muted>
+    <Muted>(body not readable inline, e.g. Blob or stream)</Muted>
   ) : text === undefined ? (
-    <Muted>(없음)</Muted>
+    <Muted>(none)</Muted>
   ) : (
     <CodeBlock text={text} />
   );
@@ -57,7 +57,7 @@ const ResponseBodySection = ({ record }: { record: RequestRecord }) => {
   const text = useMemo(() => responseBodyText({ ...record, body, responseText }), [record, body, responseText]);
   return (
     <Section title="Response Body" copy={text}>
-      {text === undefined ? <Muted>(텍스트가 아닌 응답이거나 아직 받지 못했습니다)</Muted> : <CodeBlock text={text} />}
+      {text === undefined ? <Muted>(non-text response or not yet received)</Muted> : <CodeBlock text={text} />}
     </Section>
   );
 };
@@ -65,9 +65,9 @@ const ResponseBodySection = ({ record }: { record: RequestRecord }) => {
 const RepeatInfo = ({ record }: { record: RequestRecord }) => (
   <div style={{ marginTop: 4 }}>
     <ClassBadge record={record} />
-    {record.duplicateOf && <Muted>앞선 요청 #{record.duplicateOf}</Muted>}
-    {record.sameResponseAs && <Muted>같은 응답 #{record.sameResponseAs}</Muted>}
-    {record.repeatCause && <Muted>다시 나간 이유: {record.repeatCause.detail}</Muted>}
+    {record.duplicateOf && <Muted>earlier request #{record.duplicateOf}</Muted>}
+    {record.sameResponseAs && <Muted>same response #{record.sameResponseAs}</Muted>}
+    {record.repeatCause && <Muted>repeat cause: {record.repeatCause.detail}</Muted>}
   </div>
 );
 
@@ -81,7 +81,7 @@ const QueryCaller = ({ record }: { record: RequestRecord }) => {
         {query.observer && ` · ${query.observer}`}
       </Muted>
     );
-  return record.noAppFrame ? <Muted>보낸 앱 코드를 찾지 못했습니다(비동기 경계에서 스택이 끊김)</Muted> : null;
+  return record.noAppFrame ? <Muted>Caller not found (stack cut at async boundary).</Muted> : null;
 };
 
 // 변경 요청 뒤 1초 안에 다시 나간 조회. 근거는 시간 근접이고, React Query 면 queryKey 를 덧붙인다.
@@ -91,13 +91,13 @@ const FollowUps = ({ record }: { record: RequestRecord }) => {
   const list = useMemo(() => followUps(record, records, (r) => queryContextOf(r)?.queryKey), [record, records]);
   if (!list.length) return null;
   return (
-    <Section title="이 요청 뒤에 다시 받은 요청 (1초 안, 시간 근접)">
+    <Section title="Requests refetched after this one (within 1s, by timing)">
       {list.map((f) => (
         <div key={f.endpoint}>
           {f.endpoint} ×{f.count}
           {f.queryKey && <Muted>React Query {f.queryKey}</Muted>}
-          {f.sameResponse > 0 && <Muted>같은 응답 {f.sameResponse}건(무효화 범위가 넓을 수 있음)</Muted>}
-          {f.periodic && <Muted>주기 요청(변경과 무관할 수 있음)</Muted>}
+          {f.sameResponse > 0 && <Muted>same response ×{f.sameResponse} (invalidation scope may be broad)</Muted>}
+          {f.periodic && <Muted>polling (may be unrelated to this change)</Muted>}
         </div>
       ))}
     </Section>
@@ -107,15 +107,15 @@ const FollowUps = ({ record }: { record: RequestRecord }) => {
 /** 요청 상세: 컴포넌트가 쓰는 데이터, 쓰는 컴포넌트, 보낸 코드, Query, 헤더, 본문 */
 export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord; focus?: Focus; onBack: () => void }) => (
   <div>
-    <Button onClick={onBack}>← 뒤로</Button>
+    <Button onClick={onBack}>← Back</Button>
     <div style={{ marginTop: 8 }}>
       <b>{record.method}</b> {record.url}
     </div>
     <RequestStatusLine record={record} />
     <RepeatInfo record={record} />
     {focus && (
-      <Section title={`이 컴포넌트가 쓰는 데이터: ${focus.path} ← ${focus.via}`}>
-        <CodeBlock text={JSON.stringify(valueAt(record.body, focus.path), null, 2) ?? '(값 없음)'} />
+      <Section title={`Data used by this component: ${focus.path} ← ${focus.via}`}>
+        <CodeBlock text={JSON.stringify(valueAt(record.body, focus.path), null, 2) ?? '(no value)'} />
       </Section>
     )}
     {record.trigger && <Muted>{TRIGGER_TEXT[record.trigger]}</Muted>}

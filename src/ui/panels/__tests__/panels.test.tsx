@@ -30,30 +30,30 @@ describe('RequestsTab', () => {
     const stats = getEndpointStats(records, classifyRecords(records, new Set()));
     const onToggleIgnore = vi.fn<(endpoint: string) => void>();
     renderWithActions(<RequestsTab records={records} stats={stats} ignored={new Set(['GET /api/b'])} onToggleIgnore={onToggleIgnore} />);
-    expect(screen.getByText(/최근 3건/)).toBeTruthy();
-    expect(screen.getByText('무시 해제')).toBeTruthy();
-    fireEvent.click(screen.getAllByText('무시')[0]);
+    expect(screen.getByText(/3 req/)).toBeTruthy();
+    expect(screen.getByText('Unignore')).toBeTruthy();
+    fireEvent.click(screen.getAllByText('Ignore')[0]);
     expect(onToggleIgnore).toHaveBeenCalledWith('GET /api/a');
     fireEvent.click(screen.getByText('GET /api/a'));
     expect(screen.getAllByText('GET /api/a')).toHaveLength(2);
     fireEvent.click(screen.getByText('GET /api/a ✕'));
     expect(screen.getAllByText(/GET \/api\//)).toHaveLength(3);
-    fireEvent.click(screen.getByText('엔드포인트별'));
-    expect(screen.getByText(/2회 · 평균/)).toBeTruthy();
+    fireEvent.click(screen.getByText('By endpoint'));
+    expect(screen.getByText(/×2 · avg/)).toBeTruthy();
   });
 });
 
 describe('InspectTab', () => {
   it('검사 전, 결과 없음, 글자로 추정한 결과를 구분해 보여 준다', () => {
     const { rerender } = renderWithActions(<InspectTab result={null} stats={new Map()} />);
-    expect(screen.getByText(/요소 선택\]으로 화면의 요소를 고르면/)).toBeTruthy();
+    expect(screen.getByText(/Pick element\] to select an element and see/)).toBeTruthy();
     rerender(<InspectTab result={{ components: [{ depth: 0, name: 'A', hits: [], fiber: null }], guesses: [] }} stats={new Map()} />);
-    expect(screen.getByText('연결된 API 응답을 찾지 못했습니다.')).toBeTruthy();
+    expect(screen.getByText('No linked API response found.')).toBeTruthy();
     const record = finished('/api/g');
     record.body = { v: 'x' };
     rerender(<InspectTab result={{ components: [], guesses: [{ record, path: '$.v', via: 'text', match: 'text' }] }} stats={new Map()} />);
-    expect(screen.getByText(/화면 글자로 찾은 결과/)).toBeTruthy();
-    expect(screen.getByText('추정')).toBeTruthy();
+    expect(screen.getByText(/results are based on page text/)).toBeTruthy();
+    expect(screen.getByText('guessed')).toBeTruthy();
   });
 });
 
@@ -94,9 +94,9 @@ describe('타임라인', () => {
     fireEvent.mouseLeave(bar);
     expect(screen.queryByRole('tooltip')).toBeNull();
     act(() => {
-      fireEvent.click(screen.getByText('❚❚ 멈춤'));
+      fireEvent.click(screen.getByText('❚❚ Pause'));
     });
-    expect(screen.getByText('▶ 재개')).toBeTruthy();
+    expect(screen.getByText('▶ Resume')).toBeTruthy();
   });
 });
 
@@ -120,7 +120,7 @@ describe('패널 배치', () => {
   it('도킹 버튼은 고른 방식을 알린다', () => {
     const onChange = vi.fn<(dock: string) => void>();
     renderWithActions(<DockPicker dock="float" onChange={onChange} />);
-    fireEvent.click(screen.getByTitle('오른쪽에 도킹'));
+    fireEvent.click(screen.getByTitle('Dock right'));
     expect(onChange).toHaveBeenCalledWith('right');
   });
 });
@@ -152,20 +152,20 @@ describe('RenderGroupRow', () => {
     renderWithActions(
       <RenderGroupRow group={group} source={{ record, path: '$', via: 'props.item', match: 'exact' }} stat={stat} showTime />,
     );
-    expect(screen.getByText('중복 2')).toBeTruthy();
-    expect(screen.getByText('같은 응답 1')).toBeTruthy();
-    expect(screen.getByText(/네트워크 응답으로 3회 · 네트워크와 무관 1회/)).toBeTruthy();
-    expect(screen.getByText(/그중 부모를 따라 2회/)).toBeTruthy();
-    expect(screen.getByText(/React.memo 로 감싸면/)).toBeTruthy();
+    expect(screen.getByText('duplicates 2')).toBeTruthy();
+    expect(screen.getByText('same response 1')).toBeTruthy();
+    expect(screen.getByText(/by network response: ×3 · unrelated to network: ×1/)).toBeTruthy();
+    expect(screen.getByText(/via parent ×2/)).toBeTruthy();
+    expect(screen.getByText(/Wrapping it with React\.memo can prevent this/)).toBeTruthy();
     expect(screen.getByText(/src\/Page\.tsx:12/)).toBeTruthy();
-    expect(screen.getByText(/렌더 시작: <Page>\(state\) 4회/)).toBeTruthy();
-    expect(screen.getByText(/직전과 같은 응답으로 2회/)).toBeTruthy();
+    expect(screen.getByText(/started by: <Page>\(state\) ×4/)).toBeTruthy();
+    expect(screen.getByText(/same response ×2/)).toBeTruthy();
   });
 });
 
 describe('React Query 보기', () => {
   it('화면에 QueryClientProvider 가 없으면 찾지 못했다고 알린다', () => {
     renderWithActions(<CacheAuditView records={[]} />);
-    expect(screen.getByText(/React Query\(QueryClientProvider\)를 찾지 못했습니다/)).toBeTruthy();
+    expect(screen.getByText(/React Query \(QueryClientProvider\) not found on the page/)).toBeTruthy();
   });
 });

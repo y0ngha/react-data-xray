@@ -9,7 +9,7 @@ export const RequestParams = ({ record }: { record: RequestRecord }) => {
     <>
       {query && <Muted>query: {truncate(safeDecode(query))}</Muted>}
       {record.requestBody && <Muted>payload: {truncate(record.requestBody)}</Muted>}
-      {record.bodyUnreadable && <Muted>payload: (읽을 수 없는 본문, 중복 판정 제외)</Muted>}
+      {record.bodyUnreadable && <Muted>payload: (body not readable, excluded from duplicate detection)</Muted>}
     </>
   );
 };

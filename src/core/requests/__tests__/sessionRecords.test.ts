@@ -23,7 +23,7 @@ describe('탭 안에서 요청 기록 이어 가기', () => {
     const [restored] = getRecords();
     expect(restored).toMatchObject({ url: '/api/users', restored: true, responseText: '{"users":[1]}' });
     expect(restored.body).toBeUndefined();
-    expect(restored.requestHeaders).toEqual({ authorization: '(가림)', accept: 'application/json' });
+    expect(restored.requestHeaders).toEqual({ authorization: '(redacted)', accept: 'application/json' });
     const next = createRecord('fetch', 'GET', '/api/users');
     flushQueue();
     expect(next.id).toBeGreaterThan(restored.id);
@@ -49,7 +49,11 @@ describe('탭 안에서 요청 기록 이어 가기', () => {
     expect(raw).not.toMatch(/pw"|t0k3n|token=abc/);
     clearRecords();
     installSessionRecords();
-    expect(getRecords()[0]).toMatchObject({ url: '/api/login?token=(가림)&page=1', requestBody: '(가림)', responseText: '(가림)' });
+    expect(getRecords()[0]).toMatchObject({
+      url: '/api/login?token=(redacted)&page=1',
+      requestBody: '(redacted)',
+      responseText: '(redacted)',
+    });
     expect(sessionStorage.getItem(KEY)).toBeNull();
   });
 

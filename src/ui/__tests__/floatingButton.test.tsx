@@ -16,10 +16,10 @@ afterEach(() => vi.useRealTimers());
 
 it('문제가 있으면 개수를 달고 이름에도 넣으며, 없으면 달지 않는다', () => {
   const { rerender } = render(<FloatingButton position={{ x: 0, y: 0 }} issues={3} alert={false} handlers={handlers} />);
-  const button = screen.getByRole('button', { name: 'React Data X-ray 열기 (문제 3개)' });
+  const button = screen.getByRole('button', { name: 'Open React Data X-ray (3 issues)' });
   expect(button.textContent).toBe('RDX3');
   rerender(<FloatingButton position={{ x: 0, y: 0 }} issues={0} alert={false} handlers={handlers} />);
-  expect(screen.getByRole('button', { name: 'React Data X-ray 열기' }).textContent).toBe('RDX');
+  expect(screen.getByRole('button', { name: 'Open React Data X-ray' }).textContent).toBe('RDX');
 });
 
 const burst = (prefix: string): RequestRecord[] =>

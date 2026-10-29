@@ -22,15 +22,15 @@ export const TabReportButton = () => {
     const clipboard = (holder.current?.ownerDocument.defaultView ?? window).navigator.clipboard;
     try {
       await clipboard.writeText(path);
-      setNotice('복사됨');
+      setNotice('Copied');
     } catch {
-      setNotice(`복사 실패: ${path}`);
+      setNotice(`Copy failed: ${path}`);
     }
   };
   return (
     <span ref={holder}>
-      <Button onClick={() => void copy()} title={`이 탭 보고서 경로 복사: ${path}`}>
-        탭 {id}
+      <Button onClick={() => void copy()} title={`Copy report path for this tab: ${path}`}>
+        Tab {id}
       </Button>
       {notice && <output style={{ color: color.muted, marginLeft: 4 }}>{notice}</output>}
     </span>

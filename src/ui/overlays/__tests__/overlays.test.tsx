@@ -65,7 +65,7 @@ describe('오버레이', () => {
     const latest = getRecords().filter((r) => r.url === '/api/overlay');
     renderWithActions(<ScreenBoxes classes={new Map(latest.slice(1).map((r) => [r.id, 'duplicate' as RequestClass]))} />);
     await act(flush);
-    expect(screen.getAllByRole('button', { name: /\/api\/overlay\s*요청 ×2 · 중복 1/ })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /\/api\/overlay\s*req ×2 · duplicates 1/ })).toHaveLength(2);
   });
 
   it('요청 강조는 그 응답을 쓰는 컴포넌트에 이름을 붙인다', async () => {

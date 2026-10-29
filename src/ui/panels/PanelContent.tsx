@@ -49,7 +49,7 @@ export const PanelContent = ({
   onToggleIgnore,
 }: PanelContentProps) => (
   <>
-    {picking && <div style={{ color: color.accent, marginBottom: 8 }}>분석할 요소를 화면에서 클릭하세요. (Esc 취소)</div>}
+    {picking && <div style={{ color: color.accent, marginBottom: 8 }}>Click an element on the page to inspect it. (Esc to cancel)</div>}
     {/* 요청마다 새로 만들어, 이전 요청 상세의 상태(화면에서 강조 등)가 남지 않게 한다. */}
     {selected && <RequestDetail key={selected.record.id} record={selected.record} focus={selected.focus} onBack={onBack} />}
     {/* 상세를 여는 동안에도 탭 상태(필터, 타임라인 멈춤 등)를 잃지 않도록 숨기기만 한다.
@@ -57,14 +57,17 @@ export const PanelContent = ({
     <div style={{ display: selected ? 'none' : undefined }}>
       {scope && tab !== 'inspect' && (
         <Muted>
-          분석 대상: &lt;{scope.name}&gt; 안{tab !== 'renders' && ` · 이 안의 컴포넌트가 쓰는 요청 ${analysis.records.length}건`}
+          Scope: &lt;{scope.name}&gt;{tab !== 'renders' && ` · ${analysis.records.length} req inside`}
         </Muted>
       )}
       {tab === 'inspect' && (
         <>
           {/* 클릭한 요소의 출처. 컴포넌트 밖을 눌러 대상을 못 정했어도 결과는 보여 준다. */}
           <InspectTab result={result} stats={analysis.statsByEndpoint} />
-          <SourcesByApi boxes={boxes} title={scope ? `<${scope.name}> 안에서 데이터를 쓰는 컴포넌트` : '화면에서 데이터를 쓰는 컴포넌트'} />
+          <SourcesByApi
+            boxes={boxes}
+            title={scope ? `Components using data inside <${scope.name}>` : 'Components using data on the page'}
+          />
         </>
       )}
       {tab === 'requests' && (

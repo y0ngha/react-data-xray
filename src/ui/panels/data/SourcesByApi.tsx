@@ -35,7 +35,7 @@ export const SourcesByApi = ({ boxes, title }: { boxes: readonly Box[]; title: s
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ color: color.heading }}>{title}</div>
-      {uses.length === 0 && <Muted>응답 데이터를 props 로 받는 컴포넌트를 찾지 못했습니다.</Muted>}
+      {uses.length === 0 && <Muted>No component found that receives response data as props.</Muted>}
       {uses.map((use) => (
         <div key={use.endpoint} style={rowStyle}>
           <RequestLink record={use.latest}>

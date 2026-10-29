@@ -36,10 +36,10 @@ describe('RequestsTab 경로·컴포넌트 (#12)', () => {
   it('current_route_filter: 지금 경로만 보면 그 경로의 요청만 남는다', () => {
     history.pushState({}, '', '/projects');
     tab();
-    fireEvent.click(screen.getByText('지금 경로만'));
+    fireEvent.click(screen.getByText('This route'));
     expect(screen.queryByText(/SummaryWidget/)).toBeNull();
     expect(screen.getByText(/SummaryCard/)).toBeTruthy();
-    fireEvent.click(screen.getByText('전체 기록'));
+    fireEvent.click(screen.getByText('All requests'));
     expect(screen.getAllByText(/GET \/api\/s/).length).toBe(2);
   });
 });

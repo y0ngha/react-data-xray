@@ -18,7 +18,7 @@ export const isTabId = (id: string): boolean => /^[\w-]{1,64}$/.test(id);
 export const TABS_INDEX = 'index';
 /** 이 탭의 보고서 파일(.rdx 기준 상대 경로) */
 export const reportFileFor = (tabId: string): string => {
-  if (!isTabId(tabId) || tabId === TABS_INDEX) throw new Error(`잘못된 탭 id: ${tabId}`);
+  if (!isTabId(tabId) || tabId === TABS_INDEX) throw new Error(`invalid tab id: ${tabId}`);
   return `tabs/${tabId}.json`;
 };
 /** 이 시간 동안 갱신이 없는 탭은 닫힌 것으로 보고 파일을 지운다 */

@@ -34,7 +34,7 @@ describe('compare', () => {
     expect(r.reactQuery).toEqual({ added: ['k2 "b"'], resolved: ['k1 "a"'] });
   });
   it('측정 구간이 다르면 경고', () => {
-    expect(compare(make([], [], 10), make([], [], 120)).warnings).toEqual(['측정 구간이 다르다 (10초 / 120초)']);
+    expect(compare(make([], [], 10), make([], [], 120)).warnings).toEqual(['measurement windows differ (10s / 120s)']);
     expect(compare(make([], [], 10), make([], [], 10)).warnings).toEqual([]);
   });
 });

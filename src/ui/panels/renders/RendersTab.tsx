@@ -21,9 +21,9 @@ import { useRenderGroups } from './useRenderGroups.js';
 const REFRESH_MS = 1000;
 
 const SORTS: ReadonlyArray<{ sort: RenderSort; label: string; title?: string }> = [
-  { sort: 'avoidable', label: '줄일 수 있는 렌더순', title: '줄일 수 있는 렌더(같은 내용 새 참조, 새 콜백, 부모 렌더)가 많은 순' },
-  { sort: 'count', label: '횟수순' },
-  { sort: 'time', label: '시간순', title: '자식을 뺀 자기 자신의 렌더 시간 합' },
+  { sort: 'avoidable', label: 'Most avoidable', title: 'Most avoidable renders (same content new ref, new callback, parent render)' },
+  { sort: 'count', label: 'Most renders' },
+  { sort: 'time', label: 'Most time', title: 'Total self render time excluding children' },
 ];
 
 // 출처 검사는 비싸서, 컴포넌트가 다시 렌더되기 전(state·props 객체가 그대로)에는 지난 결과를 쓴다.
@@ -46,10 +46,10 @@ const sourceOf = (group: RenderGroup): Hit | undefined => {
 
 /** 지금 보는 구간. reset 했으면 reset 시각 이후(보고서와 같은 구간), 아니면 최근 10초 */
 const windowLabel = (now: number, windowMs: number): string => {
-  if (windowMs <= WINDOW_MS) return '최근 10초';
+  if (windowMs <= WINDOW_MS) return 'last 10s';
   const t = new Date(now - windowMs);
   const hms = [t.getHours(), t.getMinutes(), t.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
-  return `${hms} 이후 ${Math.round(windowMs / 1000)}초`;
+  return `since ${hms} (${Math.round(windowMs / 1000)}s)`;
 };
 
 /** 렌더 › 분석: reset 뒤에는 그 이후, 아니면 최근 10초 렌더를 컴포넌트별로 묶어 이유, 줄이는 방법, 네트워크 원인을 보여 준다. */
@@ -76,15 +76,15 @@ export const RendersTab = ({
   return (
     <div ref={host}>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-        <Muted>렌더 분석 · {windowLabel(now, windowMs)} ·</Muted>
+        <Muted>Render analysis · {windowLabel(now, windowMs)} ·</Muted>
         {SORTS.map((s) => (
           <Button key={s.sort} active={sort === s.sort} onClick={() => setSort(s.sort)} title={s.title}>
             {s.label}
           </Button>
         ))}
       </div>
-      {computed?.truncated && <Muted>인스턴스가 너무 많아 렌더 적은 {computed.droppedInstances}개는 뺐습니다.</Muted>}
-      {computed && rows.length === 0 && <Muted>아직 렌더가 없습니다. 화면을 조작해 보세요.</Muted>}
+      {computed?.truncated && <Muted>Too many instances; {computed.droppedInstances} with fewest renders were excluded.</Muted>}
+      {computed && rows.length === 0 && <Muted>No renders yet. Interact with the page.</Muted>}
       {rows.map(({ group, source }, i) => (
         <RenderGroupRow
           key={group.key ?? group.name}

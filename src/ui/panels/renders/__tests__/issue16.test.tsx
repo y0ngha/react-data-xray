@@ -48,7 +48,7 @@ describe('reset 뒤 렌더 구간(#16)', () => {
   it('window_label: 기본은 최근 10초', async () => {
     render(<RendersTab statsByEndpoint={new Map()} />);
     await act(async () => flushQueue());
-    expect(screen.getByText(/최근 10초/)).toBeTruthy();
+    expect(screen.getByText(/last 10s/)).toBeTruthy();
   });
 
   it('window_label: reset 뒤 오래 지나면 시각 이후 N초', async () => {
@@ -60,6 +60,6 @@ describe('reset 뒤 렌더 구간(#16)', () => {
     render(<RendersTab statsByEndpoint={new Map()} />);
     await act(async () => flushQueue());
     Date.now = realNow;
-    expect(screen.getByText(/\d\d:\d\d:\d\d 이후 47초/)).toBeTruthy();
+    expect(screen.getByText(/since \d\d:\d\d:\d\d \(47s\)/)).toBeTruthy();
   });
 });

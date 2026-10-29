@@ -89,7 +89,7 @@ describe('타입이 바뀐 재마운트 (#33)', () => {
     expect(stats.remounts).toEqual([{ parent: 'InlineTable', count: ROWS * 2, lastAt: expect.any(Number), cause: 'type-changed' }]);
     const c = buildRenderSection(true, Date.now()).components.find((x) => x.name === 'Cell')!;
     expect(c.mounts?.remounts[0].cause).toBe('type-changed');
-    expect(c.advice.some((a) => a.includes('렌더 중에 컴포넌트를 정의하지 말고'))).toBe(true);
+    expect(c.advice.some((a) => a.includes('Define the component at module level'))).toBe(true);
   });
 
   it('key 만 바뀐 재마운트는 type-changed 가 아니고 처방도 없다', () => {
@@ -102,7 +102,7 @@ describe('타입이 바뀐 재마운트 (#33)', () => {
       buildRenderSection(true, Date.now())
         .components.find((x) => x.name === 'StableCell')
         ?.advice.join(),
-    ).not.toContain('컴포넌트를 정의하지');
+    ).not.toContain('Define the component at module level');
     expect(g.mounts?.remounts[0]).not.toHaveProperty('cause');
   });
 
@@ -116,6 +116,6 @@ describe('타입이 바뀐 재마운트 (#33)', () => {
       buildRenderSection(true, Date.now())
         .components.find((x) => x.name === 'Panel')
         ?.advice.join(),
-    ).not.toContain('컴포넌트를 정의하지');
+    ).not.toContain('Define the component at module level');
   });
 });

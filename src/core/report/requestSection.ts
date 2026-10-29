@@ -53,13 +53,16 @@ export interface RequestSection {
 
 /** 순서는 buildReport 가 다른 섹션 줄과 맞춘다. */
 export const REQUEST_HOW_TO_READ = {
-  waste: 'requests.endpoints 는 낭비(duplicates: 2초 안 같은 요청, sameResponses: 직전과 똑같은 응답) 많은 순이다.',
-  review: 'review 는 주기 요청·포커스 재요청처럼 의도일 수 있지만 점검할 반복이다.',
-  ignored: 'ignored: true 인 엔드포인트는 사용자가 의도된 반복으로 지정한 것이라 고치지 않는다.',
-  restored: '요청 집계에는 같은 탭에서 새로고침하기 전의 요청도 들어 있다. 새로고침 전후를 가르려면 restoredCount 를 본다.',
+  waste:
+    'requests.endpoints is sorted by most waste (duplicates: same request within 2s, sameResponses: response identical to the previous one).',
+  review: 'review is repetition that may be intentional — polling, focus refetch — but should be checked.',
+  ignored: 'An endpoint with ignored: true was marked by the user as an expected repeat and is not counted as waste.',
+  restored:
+    'The request totals include requests from before a same-tab page reload. Use restoredCount to distinguish pre- and post-reload requests.',
   callers:
-    'callers 는 소스맵으로 원본 위치(src/…:줄:열)로 바꾼 것이다. http 주소로 남은 줄은 소스맵이 없어 변환된 코드 기준이라 줄 번호가 어긋날 수 있으니 함수 이름으로 찾는다.',
-  dropped: 'requests.dropped 가 0 보다 크면 기록 상한(200건)을 넘어 오래된 요청이 빠진 것이다. 전후 비교는 시나리오를 짧게 나눠 다시 잰다.',
+    'callers are resolved to original locations (src/…:line:col) via source maps. Lines that remain as http addresses have no source map and use transformed-code line numbers, which may be off — find them by function name instead.',
+  dropped:
+    'When requests.dropped is greater than 0, the record limit (200) was exceeded and older requests were dropped. Split the scenario into shorter segments and measure again.',
 };
 
 // 첫 줄은 대개 앱의 공통 fetch 함수라 그것만으로는 어디서 보냈는지 모른다. 바깥으로 몇 줄 더 본다.
@@ -170,9 +173,9 @@ export const buildRequestSection = (
 
 // 새 howToRead 줄은 여기에 더한다.
 export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
-  'failedDuplicates 는 duplicates·sameResponses 중 실패 응답(4xx·5xx, 네트워크 오류)인 수다. 코드의 낭비가 아니라 재시도나 로컬 환경(백엔드 꺼짐) 문제일 수 있어 상태 코드부터 본다.',
-  'refetchReasons 는 같은 응답으로 다시 받은 React Query 재조회의 원인별 수다. stale-elapsed(staleTime 이 지나 다시 받음)·after-invalidate(무효화했지만 바뀐 것 없음)는 확인할 반복이고 낭비로 세지 않는다(review). stale-zero(staleTime 0 이라 매번 받음)는 낭비(sameResponses)에 그대로 남으니 staleTime 을 늘린다. 새로고침 전 기록과의 같은 응답은 낭비로 세지 않는다.',
-  'callers 의 route 는 요청을 보낸 시점의 경로(쿼리 제외), component 는 호출 스택의 대문자 이름 함수로 짐작한 보낸 컴포넌트다. 없으면 알 수 없는 것이다.',
-  'repeatCauses 는 중복(duplicates) 요청이 다시 나간 이유별 수다. deps(effect 의존성 #순번이 바뀜: 의존성 정리), remount(부모의 분기 변경으로 자식이 언마운트됐다 다시 마운트됨: 부모 분기 정리), strict(StrictMode 재실행, 고칠 것 없음). 없으면 알 수 없는 것이다.',
-  'callers 의 queryKey·observer 는 React Query 가 보낸 요청의 쿼리 키와 useQuery 를 그린 컴포넌트다. noAppFrame 은 ky 의 타이머처럼 비동기 경계에서 스택이 끊겨 보낸 코드 위치를 모른다는 뜻이다(frame 은 라이브러리 내부이니 queryKey 로 찾는다).',
+  'failedDuplicates is the count of duplicates and sameResponses that were failed responses (4xx, 5xx, or network error). These may be retries or a local environment issue (backend down) rather than code waste — check the status code first.',
+  'refetchReasons is a breakdown by cause of React Query refetches that received the same response. stale-elapsed (refetched after staleTime expired) and after-invalidate (invalidated but response unchanged) are repeats to review but are not counted as waste. stale-zero (staleTime is 0, so fetched every time) stays in sameResponses as waste — increase staleTime. Same-response matches against pre-reload records are not counted as waste.',
+  'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
+  'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
+  'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
 ];

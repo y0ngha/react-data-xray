@@ -13,10 +13,7 @@ export class RdxErrorBoundary extends Component<{ children: ReactNode }, { faile
   componentDidCatch(error: unknown): void {
     // 기억한 화면 상태를 지워, 새로고침하면 rdx 가 처음 상태로 다시 뜨게 한다(같은 화면이 다시 열려 또 깨지지 않게).
     resetViewState();
-    console.warn(
-      '[react-data-xray] 오류가 나서 rdx 를 숨겼습니다. 앱은 계속 동작하고, 새로고침하면 rdx 가 처음 상태로 다시 뜹니다.',
-      error,
-    );
+    console.warn('[react-data-xray] An error occurred and rdx was hidden. The app continues to work; reload to reset rdx.', error);
   }
 
   render(): ReactNode {

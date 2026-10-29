@@ -12,9 +12,9 @@ const rep = (dup: number, win: number) => ({
 it('패널에서 두 스냅샷을 골라 비교한다', () => {
   sessionStorage.setItem('rdx:snapshots', JSON.stringify({ before: rep(4, 10), after: rep(1, 120) }));
   render(<CompareReports />);
-  fireEvent.click(screen.getByText('비교'));
-  fireEvent.change(screen.getByLabelText('전'), { target: { value: 'before' } });
-  fireEvent.change(screen.getByLabelText('후'), { target: { value: 'after' } });
+  fireEvent.click(screen.getByText('Compare'));
+  fireEvent.change(screen.getByLabelText('before'), { target: { value: 'before' } });
+  fireEvent.change(screen.getByLabelText('after'), { target: { value: 'after' } });
   expect(screen.getByText(/duplicates -3/)).toBeTruthy();
-  expect(screen.getByText(/측정 구간이 다르다 \(10초 \/ 120초\)/)).toBeTruthy();
+  expect(screen.getByText(/measurement windows differ \(10s \/ 120s\)/)).toBeTruthy();
 });

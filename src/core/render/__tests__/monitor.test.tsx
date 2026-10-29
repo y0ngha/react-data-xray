@@ -254,7 +254,7 @@ describe('렌더의 네트워크 원인', () => {
     expect(notices.causes[0].record.url).toBe('/api/notices');
     expect(notices.causes[0].timing).toBeGreaterThanOrEqual(5);
     expect(notices.network).toBeGreaterThanOrEqual(5);
-    expect(renderAdvice(notices)[0]).toContain('응답 → state → effect → 다시 요청 고리');
+    expect(renderAdvice(notices)[0]).toContain('response → state → effect → request loop');
   });
 
   it('네트워크와 무관한 state 변경 렌더는 원인을 붙이지 않는다', () => {

@@ -23,15 +23,15 @@ export type RequestClass =
   | 'ok';
 
 export const CLASS_LABEL: Record<RequestClass, string> = {
-  duplicate: '중복 요청',
-  'same-response': '같은 응답 재요청',
-  periodic: '주기 요청',
-  'strict-mode': 'StrictMode 가능성',
-  'focus-refetch': '포커스 재요청',
-  'stale-elapsed': '캐시 만료 후 재조회',
-  'after-invalidate': '무효화 후 바뀐 것 없음',
-  'reconnect-refetch': '재연결 재요청',
-  ignored: '무시함',
+  duplicate: 'duplicate request',
+  'same-response': 'same-response refetch',
+  periodic: 'polling',
+  'strict-mode': 'possible StrictMode',
+  'focus-refetch': 'focus refetch',
+  'stale-elapsed': 'refetch after stale',
+  'after-invalidate': 'unchanged after invalidation',
+  'reconnect-refetch': 'reconnect refetch',
+  ignored: 'ignored',
   ok: '',
 };
 

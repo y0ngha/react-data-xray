@@ -111,7 +111,7 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
 export const keepResponseText = (record: RequestRecord, text: string, { compare }: { compare: boolean }): void => {
   enqueue(() => {
     if (isStale(record)) return true;
-    record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (100KB 이후 생략)` : text;
+    record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (truncated after 100KB)` : text;
     if (compare) record.sameResponseAs = detectSameResponse(record, text);
     notify();
     return true;

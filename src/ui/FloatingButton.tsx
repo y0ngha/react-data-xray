@@ -58,8 +58,8 @@ const Rdx = ({
     ref={buttonRef}
     aria-describedby={describedBy}
     type="button"
-    aria-label={`React Data X-ray 열기${issues > 0 ? ` (문제 ${issues}개)` : ''}`}
-    title={`React Data X-ray (드래그로 이동)${issues > 0 ? ` · 문제 ${issues}개` : ''}`}
+    aria-label={`Open React Data X-ray${issues > 0 ? ` (${issues} issues)` : ''}`}
+    title={`React Data X-ray (drag to move)${issues > 0 ? ` · ${issues} issues` : ''}`}
     {...handlers}
     style={{
       position: 'fixed',
@@ -145,9 +145,9 @@ const BreakdownPopup = ({
         zIndex: Z_PANEL,
       }}
     >
-      {section('낭비 요청', breakdown.waste, 'requests', (n) => n)}
-      {section('렌더 폭주', breakdown.storming, 'renders', (n) => `<${n}>`)}
-      <div style={{ marginTop: 4, color: color.muted }}>렌더 폭주는 최근 10초 기준이라 시간이 지나면 빠집니다.</div>
+      {section('wasted requests', breakdown.waste, 'requests', (n) => n)}
+      {section('render storm', breakdown.storming, 'renders', (n) => `<${n}>`)}
+      <div style={{ marginTop: 4, color: color.muted }}>Render storm is based on the last 10s and will clear over time.</div>
     </div>
   );
 };

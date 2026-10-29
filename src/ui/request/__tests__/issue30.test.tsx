@@ -53,7 +53,7 @@ describe('요청 상세 fetch 원인', () => {
     mocks.describeFetchCause.mockReturnValue(undefined);
     mocks.overlapCancelOf.mockReturnValue(['at a (a.ts:1:1)', 'at b (b.ts:2:2)']);
     const html = renderToStaticMarkup(<FetchCause record={rec} />);
-    expect(html).toContain('무효화가 겹쳐 취소됨');
+    expect(html).toContain('cancelled by overlapping invalidation');
     expect(html).toContain('a.ts:1:1');
     expect(html).toContain('b.ts:2:2');
   });

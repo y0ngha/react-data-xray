@@ -43,7 +43,7 @@ describe('커스텀 훅 경로 (#21)', () => {
   });
   it('no_debug_info: _debugHookTypes 없으면 지금 label', async () => {
     const fiber = await mount();
-    expect(stateHookLabel({ ...fiber, _debugHookTypes: null }, 2)).toBe('훅 칸 #2');
+    expect(stateHookLabel({ ...fiber, _debugHookTypes: null }, 2)).toBe('hook slot #2');
   });
   it('컴포넌트가 던져도 label 은 순번 형태로 남는다', () => {
     const fiber = {

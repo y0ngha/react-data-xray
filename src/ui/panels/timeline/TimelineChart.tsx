@@ -17,7 +17,7 @@ const BurstBand = ({ x, width, count, initial, height }: { x: number; width: num
     <g>
       <rect x={x} y={0} width={width} height={height - 14} fill={fill} opacity={initial ? 0.1 : 0.18} />
       <text x={x + 2} y={height - 16} fill={fill} fontSize={10}>
-        {initial ? '첫 로딩 몰림' : '요청 몰림'} {count}건
+        {initial ? 'Initial burst' : 'Request burst'} ×{count}
       </text>
     </g>
   );
@@ -32,7 +32,7 @@ export const TimelineChart = ({ layout, hovered, onHover }: TimelineChartProps) 
   };
   return (
     <svg width={layout.width} height={layout.height} style={{ display: 'block', background: color.panel, borderRadius: 4 }}>
-      <title>네트워크 타임라인</title>
+      <title>Network timeline</title>
       {layout.bursts.map((b) => (
         <BurstBand key={b.key} x={b.x} width={b.width} count={b.count} initial={b.initial} height={layout.height} />
       ))}
@@ -56,7 +56,7 @@ export const TimelineChart = ({ layout, hovered, onHover }: TimelineChartProps) 
       <line x1={0} x2={layout.width} y1={layout.dividerY} y2={layout.dividerY} stroke={color.border} />
       {layout.commits.map((c) => (
         <rect key={c.key} x={c.x} y={layout.commitBaseY - c.height} width={2} height={c.height} fill={color.render}>
-          <title>{`${formatTime(c.time)} · 컴포넌트 ${c.count}개 렌더`}</title>
+          <title>{`${formatTime(c.time)} · ${c.count} components rendered`}</title>
         </rect>
       ))}
       {layout.ticks.map((t) => (

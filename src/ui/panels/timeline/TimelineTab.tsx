@@ -35,11 +35,11 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, color: color.muted }}>
-        <span>네트워크 타임라인 · 최근 20초</span>
+        <span>Network timeline · last 20s</span>
         <TimelineLegend />
         <span style={{ marginLeft: 'auto' }}>
           <Button active={paused} onClick={() => setPaused((p) => !p)}>
-            {paused ? '▶ 재개' : '❚❚ 멈춤'}
+            {paused ? '▶ Resume' : '❚❚ Pause'}
           </Button>
         </span>
       </div>
@@ -48,8 +48,8 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
         {hovered && <TimelineTooltip record={hovered.record} x={hovered.x} y={hovered.y + layout.laneH + 4} maxX={width} />}
       </div>
       <Muted>
-        막대에 마우스를 올리면 요청 정보가, 클릭하면 상세(헤더, Request/Response Body)가 보입니다. 요청이 몰린 직후 렌더 눈금이 연달아
-        찍히면 요청마다 따로 렌더되고 있다는 뜻입니다.
+        Hover a bar to see request info; click for details (headers, Request/Response Body). If render ticks appear right after a burst,
+        each request triggers a separate render.
       </Muted>
     </div>
   );

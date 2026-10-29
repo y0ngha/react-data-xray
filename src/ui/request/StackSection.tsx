@@ -17,13 +17,13 @@ export const StackSection = ({ stack }: { stack: string }) => {
   const foldable = library.length > 0 && app.length > 0;
   const shown = open || !foldable ? stack : app.join('\n');
   const key = library.find((line) => STRICT_MODE_REPLAY.test(line));
-  const label = key ? `${frameName(key)} 외 ${library.length - 1}개` : `라이브러리 프레임 ${library.length}개`;
+  const label = key ? `${frameName(key)} + ${library.length - 1} more` : `${library.length} library frames`;
   return (
-    <Section title="요청을 보낸 코드" copy={stack}>
+    <Section title="caller code" copy={stack}>
       <CodeBlock text={shown} />
       {foldable && (
         <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
-          {open ? '라이브러리 프레임 접기' : `${label} 펼치기`}
+          {open ? 'collapse library frames' : `expand ${label}`}
         </button>
       )}
     </Section>

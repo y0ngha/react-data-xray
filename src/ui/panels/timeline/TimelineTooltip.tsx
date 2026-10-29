@@ -30,6 +30,6 @@ export const TimelineTooltip = ({ record, x, y, maxX }: { record: RequestRecord;
     <RequestStatusLine record={record} />
     <RequestParams record={record} />
     <ClassBadge record={record} />
-    <div style={{ color: color.accent }}>클릭하면 상세 보기</div>
+    <div style={{ color: color.accent }}>Click for details</div>
   </div>
 );

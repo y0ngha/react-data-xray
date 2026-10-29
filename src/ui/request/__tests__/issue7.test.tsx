@@ -20,8 +20,8 @@ describe('요청 상세의 마운트 기록', () => {
     recordMounts([{ fiber: a, parent: list }], [{ fiber: f(Child), parent: list, branch: list }], 10);
     const record = { id: 1, component: 'Child' } as RequestRecord;
     const html = renderToStaticMarkup(<ConsumerList record={record} />);
-    expect(html).toContain('요청을 보낸 컴포넌트');
-    expect(html).toContain('마운트 2 · 언마운트 1');
-    expect(html).toContain('부모 &lt;List&gt; 때문에 재마운트 ×1');
+    expect(html).toContain('Sending component');
+    expect(html).toContain('mount 2 · unmount 1');
+    expect(html).toContain('&lt;List&gt; caused remount ×1');
   });
 });

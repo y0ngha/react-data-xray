@@ -50,7 +50,7 @@ interface ResizeHandleProps {
 export const ResizeHandle = ({ edge, onResize, onResizeEnd }: ResizeHandleProps) => (
   <hr
     aria-orientation={edge === 'top' ? 'horizontal' : 'vertical'}
-    title="끌어서 크기 조절"
+    title="Drag to resize"
     onPointerDown={(e: ReactPointerEvent) => {
       e.preventDefault();
       trackResize(edge, onResize, onResizeEnd);
