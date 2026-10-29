@@ -193,3 +193,24 @@ describe('이슈 30: 보고서 fetchCauses', () => {
     expect(section.fetchCauses?.[0].fix).toBeUndefined();
   });
 });
+
+describe('describeFetchCause 언어', () => {
+  it('기본값(en)은 영어 라벨·근거를 돌려준다', async () => {
+    const { client, key, queryFn, lastRequest, watch } = setup();
+    watch();
+    await client.fetchQuery({ queryKey: key, queryFn });
+    const r = await lastRequest();
+    const info = describeFetchCause(r, false);
+    expect(info?.label).toBe('no cache (initial fetch)');
+    expect(info).toBeDefined();
+  });
+
+  it('ko 는 한국어 라벨을 돌려준다', async () => {
+    const { client, key, queryFn, lastRequest, watch } = setup();
+    watch();
+    await client.fetchQuery({ queryKey: key, queryFn });
+    const r = await lastRequest();
+    const info = describeFetchCause(r, false, 'ko');
+    expect(info?.label).toBe('캐시 없음(첫 조회)');
+  });
+});

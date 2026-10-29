@@ -41,7 +41,7 @@ export const buildReactQuerySection = (
   return {
     found: clients.length > 0,
     findings: auditQueryCache((r) => classes.get(r.id) ?? 'ok', records, clients).map((f) =>
-      Object.assign({}, f, CACHE_FINDING_TEXT[f.kind]),
+      Object.assign({}, f, CACHE_FINDING_TEXT[f.kind].en),
     ),
     fetchCauses: fetchCausesOf(records, classes),
   };

@@ -8,6 +8,7 @@ import { BUTTON_SIZE, FloatingButton } from './FloatingButton.js';
 import { useDraggable } from './hooks/useDraggable.js';
 import { useElementPicker } from './hooks/useElementPicker.js';
 import { useHotkey, type Hotkey } from './hooks/useHotkey.js';
+import { LangProvider, useLangSetting } from './i18n.js';
 import { useIgnoredEndpoints } from './hooks/useIgnoredEndpoints.js';
 import { useStoredState } from './hooks/useStoredState.js';
 import { BOXES_KEY, focusItem, parseBool, parseTab, TAB_KEY } from './viewState.js';
@@ -50,6 +51,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   const { result, scope: activeScope, pick, clear: clearScope } = useAnalysisScope();
   const [selected, setSelected] = useState<{ record: RequestRecord; focus?: Focus } | null>(null);
   const [hovered, setHovered] = useState<RequestRecord | null>(null);
+  const [lang, setLang] = useLangSetting();
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
@@ -127,6 +129,8 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
           wasteCount={scopedAnalysis.wasteCount}
           dock={panelSettings.dock}
           onDock={changeDock}
+          lang={lang}
+          onLang={setLang}
           onClose={hide}
         />
       }
@@ -147,27 +151,29 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   );
 
   return portal(
-    <RequestActionsProvider value={actions}>
-      <div {...ownUiProps}>
-        {boxesVisible && <SourceOverlay boxes={boxes} records={scopedAnalysis.records} classes={scopedAnalysis.classes} />}
-        {hovered && <ConsumerHighlight record={hovered} />}
-        {pickRect && <PickHighlight rect={pickRect} />}
-        {open && settings.dock !== 'window' && panel}
-        {open && settings.dock === 'window' && popup && createPortal(panel, popup.document.body)}
-        <FloatingButton
-          position={position}
-          issues={signal.issues}
-          alert={signal.alert}
-          breakdown={{ waste: signal.wasteEndpoints, storming: signal.stormingNames }}
-          onSelect={(next, key) => {
-            show();
-            setSelected(null);
-            setTab(next);
-            if (next === 'requests' || next === 'renders') focusItem(next, key);
-          }}
-          handlers={handlers}
-        />
-      </div>
-    </RequestActionsProvider>,
+    <LangProvider value={lang}>
+      <RequestActionsProvider value={actions}>
+        <div {...ownUiProps}>
+          {boxesVisible && <SourceOverlay boxes={boxes} records={scopedAnalysis.records} classes={scopedAnalysis.classes} />}
+          {hovered && <ConsumerHighlight record={hovered} />}
+          {pickRect && <PickHighlight rect={pickRect} />}
+          {open && settings.dock !== 'window' && panel}
+          {open && settings.dock === 'window' && popup && createPortal(panel, popup.document.body)}
+          <FloatingButton
+            position={position}
+            issues={signal.issues}
+            alert={signal.alert}
+            breakdown={{ waste: signal.wasteEndpoints, storming: signal.stormingNames }}
+            onSelect={(next, key) => {
+              show();
+              setSelected(null);
+              setTab(next);
+              if (next === 'requests' || next === 'renders') focusItem(next, key);
+            }}
+            handlers={handlers}
+          />
+        </div>
+      </RequestActionsProvider>
+    </LangProvider>,
   );
 };

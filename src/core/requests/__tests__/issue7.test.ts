@@ -60,8 +60,8 @@ describe('중복 요청이 다시 나간 이유', () => {
     mountRoot(root);
     const cause = repeatCauseOf(rec({}));
     expect(cause?.kind).toBe('deps');
-    expect(cause?.detail).toContain('#1');
-    expect(cause?.detail).toContain('1 → 2');
+    expect(cause?.detail.en).toContain('#1');
+    expect(cause?.detail.en).toContain('1 → 2');
   });
 
   it('remount_parent: 의존성은 같고 부모가 key 를 바꿔 다시 마운트됐으면 부모 이름', () => {
@@ -71,7 +71,9 @@ describe('중복 요청이 다시 나간 이유', () => {
     recordMounts([], [{ fiber: old, parent: list, branch: list }], 0);
     recordMounts([{ fiber: old, parent: list }], [{ fiber: fresh, parent: list, branch: list }], 100);
     const cause = repeatCauseOf(rec({ component: 'Child', startedAt: 200 }));
-    expect(cause).toEqual({ kind: 'remount', detail: '<Child> remount, parent <List> branch changed' });
+    expect(cause?.kind).toBe('remount');
+    expect(cause?.detail.en).toBe('<Child> remount, parent <List> branch changed');
+    expect(cause?.detail.ko).toBe('<Child> 재마운트, 부모 <List> 의 분기 변경');
   });
 
   it('strict: StrictMode 재실행은 strict 로 남고, 중복이 아니면 원인이 없다', () => {
@@ -80,8 +82,8 @@ describe('중복 요청이 다시 나간 이유', () => {
   });
 
   it('보고서 endpoints[].repeatCauses 에 이유별 수가 들어간다', () => {
-    const cause = { kind: 'deps' as const, detail: 'dep #1 changed (1 → 2), effect 1' };
+    const cause = { kind: 'deps' as const, detail: { en: 'dep #1 changed (1 → 2), effect 1', ko: '의존성 #1 변경 (1 → 2), 1번째 effect' } };
     const section = buildRequestSection([rec({ id: 2, repeatCause: cause }), rec({ id: 3, repeatCause: cause })], new Map(), new Set());
-    expect(section.endpoints[0].repeatCauses).toEqual([{ ...cause, count: 2 }]);
+    expect(section.endpoints[0].repeatCauses).toEqual([{ kind: 'deps', detail: 'dep #1 changed (1 → 2), effect 1', count: 2 }]);
   });
 });

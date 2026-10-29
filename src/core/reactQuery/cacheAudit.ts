@@ -2,6 +2,7 @@ import { findRootFibers, walkFibers } from '../fiber/tree.js';
 import { findDerivedOrigin, isIndexPending } from '../inspect/derivedMatch.js';
 import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import { isAborted, type RequestClass } from '../requests/classify.js';
+import { pick, type Lang } from '../../shared/lang.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
 import { getRecords, lastRecordId, touchRecords } from '../requests/store.js';
@@ -811,29 +812,68 @@ export const overlapCancelOf = (record: RequestRecord): string[] | undefined => 
 /** 점검 결과 하나를 가리키는 문자열(화면 key, 합치기) */
 export const findingId = (f: CacheFinding): string => `${f.kind}|${f.keys.join(',')}|${f.requests.join(',')}`;
 
-export const CACHE_FINDING_TEXT: Record<CacheFindingKind, { title: string; fix: string }> = {
+export const CACHE_FINDING_TEXT: Record<CacheFindingKind, { en: { title: string; fix: string }; ko: { title: string; fix: string } }> = {
   'duplicate-cache': {
-    title: 'Same request cached under different keys',
-    fix: 'If the data is the same, align the queryKey. Different keys split the cache and send the same request multiple times.',
+    en: {
+      title: 'Same request cached under different keys',
+      fix: 'If the data is the same, align the queryKey. Different keys split the cache and send the same request multiple times.',
+    },
+    ko: {
+      title: '같은 요청을 서로 다른 키로 캐시합니다',
+      fix: '같은 데이터면 queryKey 를 하나로 맞추세요. 키가 다르면 캐시를 나눠 써서 같은 요청이 여러 번 나갑니다.',
+    },
   },
   'key-missing-param': {
-    title: 'Different requests fetched under the same key',
-    fix: 'Include values used by the query function (URL params, filters, etc.) in the queryKey. Without them, data from different conditions overwrites the same cache entry.',
+    en: {
+      title: 'Different requests fetched under the same key',
+      fix: 'Include values used by the query function (URL params, filters, etc.) in the queryKey. Without them, data from different conditions overwrites the same cache entry.',
+    },
+    ko: {
+      title: '같은 키로 서로 다른 요청을 가져왔습니다',
+      fix: '쿼리 함수가 쓰는 값(URL 파라미터, 필터 등)을 queryKey 에 넣으세요. 빠지면 다른 조건의 데이터가 같은 캐시를 덮어씁니다.',
+    },
   },
   'invalidate-miss': {
-    title: 'No query matched the invalidated key',
-    fix: 'None of the queries created so far on this page match this key (prefix). Check that the shape matches queryKey. If you are pre-invalidating a query on another page, this can be ignored.',
+    en: {
+      title: 'No query matched the invalidated key',
+      fix: 'None of the queries created so far on this page match this key (prefix). Check that the shape matches queryKey. If you are pre-invalidating a query on another page, this can be ignored.',
+    },
+    ko: {
+      title: '무효화한 키와 맞는 쿼리가 없었습니다',
+      fix: '이 화면에서 지금까지 만든 쿼리 중 이 키(접두사)와 맞는 것이 없습니다. queryKey 와 모양이 같은지 확인하세요. 다른 화면의 쿼리를 미리 무효화한 것이라면 무시해도 됩니다.',
+    },
   },
   'invalidate-unloaded': {
-    title: 'Invalidated a key that has not been fetched yet',
-    fix: 'A query with the same shape (first two elements) exists, but not with this exact value. This is expected for broad-scope invalidation — nothing to fix.',
+    en: {
+      title: 'Invalidated a key that has not been fetched yet',
+      fix: 'A query with the same shape (first two elements) exists, but not with this exact value. This is expected for broad-scope invalidation — nothing to fix.',
+    },
+    ko: {
+      title: '아직 불러오지 않은 키를 무효화했습니다',
+      fix: '같은 모양(앞 두 요소)의 쿼리는 있었고 이 값의 쿼리만 아직 없습니다. 상속 범위 무효화 같은 정상 동작이라 고칠 것은 없습니다.',
+    },
   },
   'double-invalidate': {
-    title: 'Same query invalidated twice',
-    fix: 'A broad invalidation overlaps a narrow one. Keep only one. The second invalidation cancels the first refetch and triggers another, sending the same request twice.',
+    en: {
+      title: 'Same query invalidated twice',
+      fix: 'A broad invalidation overlaps a narrow one. Keep only one. The second invalidation cancels the first refetch and triggers another, sending the same request twice.',
+    },
+    ko: {
+      title: '같은 쿼리를 겹쳐 무효화했습니다',
+      fix: '넓은 무효화가 좁은 무효화를 덮습니다. 한쪽만 남기세요. 뒤의 무효화가 앞의 재조회를 취소하고 다시 받아 같은 요청이 두 번 나갑니다.',
+    },
   },
   'stale-zero': {
-    title: 'staleTime is 0 — same response fetched again',
-    fix: 'For data that changes infrequently, increase staleTime (e.g. 30_000). The same request is sent every time the page changes or focus returns.',
+    en: {
+      title: 'staleTime is 0 — same response fetched again',
+      fix: 'For data that changes infrequently, increase staleTime (e.g. 30_000). The same request is sent every time the page changes or focus returns.',
+    },
+    ko: {
+      title: 'staleTime 이 0 이라 같은 응답을 다시 받습니다',
+      fix: '자주 바뀌지 않는 데이터면 staleTime 을 늘리세요(예: 30_000). 화면을 옮기거나 포커스가 돌아올 때마다 같은 요청이 나갑니다.',
+    },
   },
 };
+
+export const cacheFindingText = (kind: CacheFindingKind, lang: Lang = 'en'): { title: string; fix: string } =>
+  lang === 'ko' ? CACHE_FINDING_TEXT[kind].ko : CACHE_FINDING_TEXT[kind].en;

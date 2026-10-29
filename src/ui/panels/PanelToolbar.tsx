@@ -1,5 +1,6 @@
 import { Button } from '../components/Button.js';
 import { TabGroup } from '../components/TabGroup.js';
+import type { Lang } from '../../shared/lang.js';
 import type { Dock } from '../hooks/useDockSettings.js';
 import { color } from '../theme.js';
 import { CompareReports } from './compare/CompareReports.js';
@@ -24,6 +25,8 @@ interface PanelToolbarProps {
   wasteCount: number;
   dock: Dock;
   onDock: (dock: Dock) => void;
+  lang: Lang;
+  onLang: (lang: Lang) => void;
   onClose: () => void;
 }
 
@@ -66,6 +69,12 @@ export const PanelToolbar = (props: PanelToolbarProps) => (
     <TabReportButton />
     <CompareReports />
     <DockPicker dock={props.dock} onChange={props.onDock} />
+    <Button
+      onClick={() => props.onLang(props.lang === 'en' ? 'ko' : 'en')}
+      title={props.lang === 'en' ? '한국어로 보기' : 'Switch to English'}
+    >
+      {props.lang === 'en' ? 'EN' : 'KO'}
+    </Button>
     <Button onClick={props.onClose} title="Close">
       ✕
     </Button>

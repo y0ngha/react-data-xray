@@ -4,6 +4,7 @@ import { compare } from '../../../core/report/compare.js';
 import { getSnapshot, snapshotNames } from '../../../core/report/reportApi.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
+import { useLang } from '../../i18n.js';
 
 const REQUEST_LABELS: ReadonlySet<string> = new Set(['endpoint', 'status']);
 const RENDER_LABELS: ReadonlySet<string> = new Set(['name', 'status', 'renderedAt', 'package']);
@@ -20,12 +21,13 @@ export const CompareReports = () => {
   const names = open ? snapshotNames() : [];
   const [before, setBefore] = useState('');
   const [after, setAfter] = useState('');
+  const lang = useLang();
   // 닫혀 있는 동안 주기적으로 다시 그려져도 sessionStorage 의 보고서를 읽지 않는다.
   const result = useMemo(() => {
     const a = open ? getSnapshot(before) : undefined;
     const b = open ? getSnapshot(after) : undefined;
-    return a && b ? compare(a, b) : null;
-  }, [open, before, after]);
+    return a && b ? compare(a, b, lang) : null;
+  }, [open, before, after, lang]);
   const pick = (value: string, set: (v: string) => void, label: string) => (
     <select aria-label={label} value={value} onChange={(e) => set(e.target.value)}>
       <option value="">{label}</option>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifyRecords, isPeriodic, isWaste, needsReview } from '../classify.js';
+import { classifyRecords, classLabel, isPeriodic, isWaste, needsReview } from '../classify.js';
 import type { RequestRecord } from '../types.js';
 
 let id = 0;
@@ -106,5 +106,19 @@ describe('classifyRecords', () => {
     const classes = classifyRecords([...polls, other], new Set());
     expect(polls.slice(1).map((r) => classes.get(r.id))).toEqual(['periodic', 'periodic', 'periodic']);
     expect(classes.get(other.id)).toBe('ok');
+  });
+});
+
+describe('classLabel', () => {
+  it('기본값(en)은 영어 라벨을 돌려준다', () => {
+    expect(classLabel('duplicate')).toBe('duplicate request');
+    expect(classLabel('periodic')).toBe('polling');
+  });
+
+  it('ko 는 한국어 라벨을 돌려준다', () => {
+    expect(classLabel('duplicate', 'ko')).toBe('중복 요청');
+    expect(classLabel('same-response', 'ko')).toBe('같은 응답 재요청');
+    expect(classLabel('periodic', 'ko')).toBe('주기 요청');
+    expect(classLabel('focus-refetch', 'ko')).toBe('포커스 재요청');
   });
 });

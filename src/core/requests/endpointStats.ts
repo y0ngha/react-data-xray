@@ -1,6 +1,7 @@
 import { isFailed, isWaste, needsReview, type RequestClass } from './classify.js';
 import { endpointOf, pathOf } from './requestKey.js';
 import { groupBy } from '../../shared/collections.js';
+import { pick, type Lang } from '../../shared/lang.js';
 import type { RequestRecord } from './types.js';
 
 export interface EndpointStat {
@@ -126,12 +127,12 @@ export const getEndpointStats = (
 };
 
 /** 박스 라벨에 붙이는 짧은 지표: "×6 · 중복 2 · 같은 응답 3". 한 번만 불렸고 낭비도 없으면 빈 문자열 */
-export const statSummary = (stat: EndpointStat | undefined): string => {
+export const statSummary = (stat: EndpointStat | undefined, lang: Lang = 'en'): string => {
   if (!stat || (stat.count <= 1 && wasteCount(stat) === 0)) return '';
   return [
     `×${stat.count}`,
-    stat.duplicates > 0 && `duplicates ${stat.duplicates}`,
-    stat.sameResponses > 0 && `same response ${stat.sameResponses}`,
+    stat.duplicates > 0 && pick(lang, `duplicates ${stat.duplicates}`, `중복 ${stat.duplicates}`),
+    stat.sameResponses > 0 && pick(lang, `same response ${stat.sameResponses}`, `같은 응답 ${stat.sameResponses}`),
   ]
     .filter(Boolean)
     .join(' · ');

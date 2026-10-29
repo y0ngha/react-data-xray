@@ -8,7 +8,7 @@ import { enqueue, flushQueue, isQueuePending } from '../../scheduler/idleQueue.j
 import { getRecords } from '../../requests/store.js';
 import type { RequestRecord } from '../../requests/types.js';
 import { flushIndex } from '../../inspect/derivedMatch.js';
-import { auditQueryCache, findQueryClients } from '../cacheAudit.js';
+import { auditQueryCache, cacheFindingText, findQueryClients } from '../cacheAudit.js';
 
 const sameOrOk = (r: RequestRecord): RequestClass => (r.sameResponseAs ? 'same-response' : 'ok');
 // 사용자가 직접 묻는 조회처럼 미뤄 둔 분석을 먼저 마치고 점검한다(점검 자체는 큐를 비우지 않는다).
@@ -257,5 +257,18 @@ describe('React Query 캐시키 점검', () => {
       expect(getRecords().some((r) => r.sameResponseAs)).toBe(true);
     });
     expect(audit(sameOrOk, getRecords()).some((f) => f.kind === 'stale-zero')).toBe(true);
+  });
+});
+
+describe('cacheFindingText', () => {
+  it('기본값(en)은 영어 제목을 돌려준다', () => {
+    expect(cacheFindingText('duplicate-cache').title).toBe('Same request cached under different keys');
+    expect(cacheFindingText('stale-zero').title).toBe('staleTime is 0 — same response fetched again');
+  });
+
+  it('ko 는 한국어 제목과 처방을 돌려준다', () => {
+    expect(cacheFindingText('duplicate-cache', 'ko').title).toBe('같은 요청을 서로 다른 키로 캐시합니다');
+    expect(cacheFindingText('stale-zero', 'ko').title).toBe('staleTime 이 0 이라 같은 응답을 다시 받습니다');
+    expect(cacheFindingText('double-invalidate', 'ko').fix).toContain('넓은 무효화');
   });
 });

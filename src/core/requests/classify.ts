@@ -1,5 +1,6 @@
 import { groupBy } from '../../shared/collections.js';
 import { pinnedRefetchReason } from '../reactQuery/refetchReason.js';
+import { pick, type Lang } from '../../shared/lang.js';
 import { endpointOf, requestKeyOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
@@ -22,18 +23,20 @@ export type RequestClass =
   | 'ignored'
   | 'ok';
 
-export const CLASS_LABEL: Record<RequestClass, string> = {
-  duplicate: 'duplicate request',
-  'same-response': 'same-response refetch',
-  periodic: 'polling',
-  'strict-mode': 'possible StrictMode',
-  'focus-refetch': 'focus refetch',
-  'stale-elapsed': 'refetch after stale',
-  'after-invalidate': 'unchanged after invalidation',
-  'reconnect-refetch': 'reconnect refetch',
-  ignored: 'ignored',
-  ok: '',
+export const CLASS_LABEL: Record<RequestClass, { en: string; ko: string }> = {
+  duplicate: { en: 'duplicate request', ko: '중복 요청' },
+  'same-response': { en: 'same-response refetch', ko: '같은 응답 재요청' },
+  periodic: { en: 'polling', ko: '주기 요청' },
+  'strict-mode': { en: 'possible StrictMode', ko: 'StrictMode 가능성' },
+  'focus-refetch': { en: 'focus refetch', ko: '포커스 재요청' },
+  'stale-elapsed': { en: 'refetch after stale', ko: '캐시 만료 후 재조회' },
+  'after-invalidate': { en: 'unchanged after invalidation', ko: '무효화 후 바뀐 것 없음' },
+  'reconnect-refetch': { en: 'reconnect refetch', ko: '재연결 재요청' },
+  ignored: { en: 'ignored', ko: '무시함' },
+  ok: { en: '', ko: '' },
 };
+
+export const classLabel = (c: RequestClass, lang: Lang = 'en'): string => pick(lang, CLASS_LABEL[c].en, CLASS_LABEL[c].ko);
 
 /** 4xx·5xx 응답이거나 네트워크 오류로 끝난 요청 */
 export const isFailed = (r: RequestRecord): boolean => !!r.error || r.status >= 400;

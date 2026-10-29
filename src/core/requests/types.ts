@@ -33,7 +33,7 @@ export interface RequestRecord {
   /** React 가 StrictMode 에서 effect 를 다시 실행하는 도중에 보낸 요청(호출 스택으로 확인) */
   strictModeReplay?: boolean;
   /** 중복 요청이 다시 나간 이유(의존성 변경·재마운트·StrictMode). 알 수 없으면 없다. */
-  repeatCause?: { kind: 'deps' | 'remount' | 'strict'; detail: string };
+  repeatCause?: { kind: 'deps' | 'remount' | 'strict'; detail: { en: string; ko: string } };
   status: number;
   startedAt: number;
   durationMs: number;

@@ -1,3 +1,4 @@
+import { pick, type Lang } from '../../shared/lang.js';
 import type { RdxReport } from './buildReport.js';
 
 /** 비교에 쓰는 부분만 담은 보고서. sessionStorage 에 남기는 것도 이 크기다. */
@@ -84,13 +85,25 @@ const diffBy = <T, K extends string, N extends string>(
 const findingId = (f: ComparableReport['reactQuery']['findings'][number]): string => `${f.kind} ${f.keys.join(', ')}`;
 
 /** 저장한 두 보고서(a: 전, b: 후)의 차이. 양수는 b 에서 늘어난 것이다. */
-export const compare = (a: ComparableReport, b: ComparableReport): ReportComparison => {
+export const compare = (a: ComparableReport, b: ComparableReport, lang: Lang = 'en'): ReportComparison => {
   const warnings: string[] = [];
   if (a.renders.windowSeconds !== b.renders.windowSeconds) {
-    warnings.push(`measurement windows differ (${a.renders.windowSeconds}s / ${b.renders.windowSeconds}s)`);
+    warnings.push(
+      pick(
+        lang,
+        `measurement windows differ (${a.renders.windowSeconds}s / ${b.renders.windowSeconds}s)`,
+        `측정 구간이 다르다 (${a.renders.windowSeconds}초 / ${b.renders.windowSeconds}초)`,
+      ),
+    );
   }
   if (!a.renders.monitoring || !b.renders.monitoring)
-    warnings.push('render monitoring was off in one of the reports; render comparison may be unreliable');
+    warnings.push(
+      pick(
+        lang,
+        'render monitoring was off in one of the reports; render comparison may be unreliable',
+        '렌더 감시가 꺼진 보고서가 있어 렌더 비교는 믿기 어렵다',
+      ),
+    );
   const before = new Set(a.reactQuery.findings.map(findingId));
   const after = new Set(b.reactQuery.findings.map(findingId));
   return {

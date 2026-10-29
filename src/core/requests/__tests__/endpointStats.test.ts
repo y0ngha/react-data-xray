@@ -42,4 +42,10 @@ describe('statSummary', () => {
     expect(statSummary({ ...stat, count: 1, duplicates: 0, sameResponses: 0 })).toBe('');
     expect(statSummary(undefined)).toBe('');
   });
+
+  it('ko 를 주면 한국어 지표를 돌려준다', () => {
+    const stat = { endpoint: 'GET /a', count: 6, duplicates: 2, sameResponses: 3, review: 0, explained: 0, avgMs: 10 };
+    expect(statSummary(stat, 'ko')).toBe('×6 · 중복 2 · 같은 응답 3');
+    expect(statSummary({ ...stat, duplicates: 0, sameResponses: 0 }, 'ko')).toBe('×6');
+  });
 });

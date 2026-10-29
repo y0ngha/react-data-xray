@@ -16,6 +16,8 @@ import { ConsumerList } from './ConsumerList.js';
 import { FetchCause } from './FetchCause.js';
 import { StackSection } from './StackSection.js';
 import { RequestStatusLine } from './RequestSummary.js';
+import { useLang } from '../i18n.js';
+import { pick } from '../../shared/lang.js';
 
 // 아주 큰 응답을 그대로 그리면 패널이 멈추므로 상세 화면에서는 이만큼만 보여 준다(복사도 같은 내용).
 const MAX_DETAIL_TEXT = 200_000;
@@ -62,14 +64,19 @@ const ResponseBodySection = ({ record }: { record: RequestRecord }) => {
   );
 };
 
-const RepeatInfo = ({ record }: { record: RequestRecord }) => (
-  <div style={{ marginTop: 4 }}>
-    <ClassBadge record={record} />
-    {record.duplicateOf && <Muted>earlier request #{record.duplicateOf}</Muted>}
-    {record.sameResponseAs && <Muted>same response #{record.sameResponseAs}</Muted>}
-    {record.repeatCause && <Muted>repeat cause: {record.repeatCause.detail}</Muted>}
-  </div>
-);
+const RepeatInfo = ({ record }: { record: RequestRecord }) => {
+  const lang = useLang();
+  return (
+    <div style={{ marginTop: 4 }}>
+      <ClassBadge record={record} />
+      {record.duplicateOf && <Muted>earlier request #{record.duplicateOf}</Muted>}
+      {record.sameResponseAs && <Muted>same response #{record.sameResponseAs}</Muted>}
+      {record.repeatCause && (
+        <Muted>repeat cause: {pick(lang, record.repeatCause.detail.en, record.repeatCause.detail.ko)}</Muted>
+      )}
+    </div>
+  );
+};
 
 // 스택이 끊겨도 React Query 를 거쳤으면 어느 훅이 불렀는지 보여 주고, 아니면 모른다고 밝힌다.
 const QueryCaller = ({ record }: { record: RequestRecord }) => {

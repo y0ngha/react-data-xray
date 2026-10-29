@@ -1,5 +1,6 @@
 import { renderAdvice } from '../../../core/render/advice.js';
 import type { RenderGroup } from '../../../core/render/groups.js';
+import { useLang } from '../../i18n.js';
 import { WINDOW_MS, withHookPaths } from '../../../core/render/summary.js';
 import { RENDER_REASONS, RENDER_STORM } from '../../../core/render/types.js';
 import type { Hit } from '../../../core/inspect/types.js';
@@ -137,6 +138,7 @@ interface RenderGroupRowProps {
 /** 렌더 분석 한 줄: 횟수·시간·이유, 줄이는 방법, 네트워크 원인, 데이터 출처 */
 export const RenderGroupRow = ({ group, source, stat, showTime, windowMs = WINDOW_MS, focus }: RenderGroupRowProps) => {
   const row = useReveal(focus);
+  const lang = useLang();
   return (
     <div ref={row} tabIndex={-1} style={rowStyle}>
       <Headline group={group} showTime={showTime} windowMs={windowMs} />
@@ -147,7 +149,7 @@ export const RenderGroupRow = ({ group, source, stat, showTime, windowMs = WINDO
       <StateHooks group={group} />
       <Impact group={group} />
       <Origins group={group} />
-      {renderAdvice(group).map((text) => (
+      {renderAdvice(group, lang).map((text) => (
         <div key={text} style={{ color: color.review }}>
           · {text}
         </div>

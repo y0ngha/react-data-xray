@@ -11,6 +11,7 @@ import { getEndpointStats, statSummary, type EndpointStat } from '../../core/req
 import type { RequestClass } from '../../core/requests/classify.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
+import { useLang } from '../i18n.js';
 import { color, MATCH_COLOR, SMALL_FONT, Z_OVERLAY } from '../theme.js';
 
 // 렌더 직후 박스를 이만큼 보라색으로 강조한다(React DevTools 의 Highlight updates 처럼).
@@ -43,8 +44,8 @@ const setText = (el: HTMLElement, text: string): void => {
   if (el.textContent !== text) el.textContent = text;
 };
 
-const paintMetrics = ({ box, metrics }: BoxElements, statOf: StatOf): void => {
-  const text = statSummary(statOf(box.hit.record));
+const paintMetrics = ({ box, metrics }: BoxElements, statOf: StatOf, lang: import('../../shared/lang.js').Lang): void => {
+  const text = statSummary(statOf(box.hit.record), lang);
   setText(metrics, text ? ` req ${text}` : '');
 };
 
@@ -97,13 +98,17 @@ const paintRenders = ({ box, root, label, count }: BoxElements, now: number): vo
  * 박스 위치와 렌더 표시를 React 렌더 없이 DOM 에 직접 쓴다. 박스가 수백 개라 150ms 마다 React 로
  * 다시 그리면 메인 스레드를 다 쓴다. 스크롤은 위치만, commit 은 렌더 표시와 위치를 한 프레임에 한 번 고친다.
  */
-const useBoxPainter = (statOf: StatOf) => {
+const useBoxPainter = (statOf: StatOf, lang: import('../../shared/lang.js').Lang) => {
   const elements = useRef(new Map<number, BoxElements>());
   // 요청이 들어올 때마다 박스를 React 로 다시 그리지 않도록, 지표는 최신 집계를 읽어 painter 가 쓴다.
   const latestStatOf = useRef(statOf);
+  const latestLang = useRef(lang);
   useEffect(() => {
     latestStatOf.current = statOf;
   }, [statOf]);
+  useEffect(() => {
+    latestLang.current = lang;
+  }, [lang]);
   const register = useCallback((box: Box, el: HTMLDivElement | null) => {
     const label = el?.querySelector('button');
     const count = el?.querySelector('b');
@@ -116,7 +121,7 @@ const useBoxPainter = (statOf: StatOf) => {
     elements.current.set(box.id, els);
     paintRenders(els, Date.now());
     // ref 는 effect 보다 먼저 붙으므로, 같은 렌더에서 바뀐 집계를 읽도록 다음 프레임에 칠한다.
-    requestAnimationFrame(() => paintMetrics(els, latestStatOf.current));
+    requestAnimationFrame(() => paintMetrics(els, latestStatOf.current, latestLang.current));
   }, []);
 
   useEffect(() => {
@@ -131,7 +136,7 @@ const useBoxPainter = (statOf: StatOf) => {
       const rects = all.map((els) => unionRect(els.box.nodes));
       if (pending.position) all.forEach((els, i) => placeBox(els.root, rects[i]));
       if (pending.renders) all.forEach((els) => paintRenders(els, now));
-      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestStatOf.current));
+      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestStatOf.current, latestLang.current));
       // 렌더 수·지표 글자가 바뀌면 라벨 너비도 바뀐다.
       separateLabels(all, rects);
       Object.assign(pending, { position: false, renders: false, metrics: false });
@@ -233,7 +238,8 @@ export const SourceOverlay = ({
   // 박스 하나는 쿼리·본문까지 같은 요청 하나를 가리키므로, 지표도 같은 요청별로 센다(page=1 과 page=2 를 섞지 않게).
   const stats = useMemo(() => new Map(getEndpointStats(records, classes, requestKeyOf).map((s) => [s.endpoint, s])), [records, classes]);
   const statOf = useCallback((record: RequestRecord) => stats.get(requestKeyOf(record)), [stats]);
-  const register = useBoxPainter(statOf);
+  const lang = useLang();
+  const register = useBoxPainter(statOf, lang);
   const { open, classOf } = useRequestActions();
   return (
     <>

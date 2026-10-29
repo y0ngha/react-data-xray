@@ -123,8 +123,8 @@ const repeatCausesOf = (own: readonly RequestRecord[]) => {
   const counts = new Map<string, { kind: 'deps' | 'remount' | 'strict'; detail: string; count: number }>();
   own.forEach((r) => {
     if (!r.repeatCause) return;
-    const key = `${r.repeatCause.kind}|${r.repeatCause.detail}`;
-    counts.set(key, { ...r.repeatCause, count: (counts.get(key)?.count ?? 0) + 1 });
+    const key = `${r.repeatCause.kind}|${r.repeatCause.detail.en}`;
+    counts.set(key, { kind: r.repeatCause.kind, detail: r.repeatCause.detail.en, count: (counts.get(key)?.count ?? 0) + 1 });
   });
   return counts.size > 0
     ? Array.from(counts.values())

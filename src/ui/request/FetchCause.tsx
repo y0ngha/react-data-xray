@@ -7,20 +7,22 @@ import type { RequestRecord } from '../../core/requests/types.js';
 import { Muted } from '../components/Muted.js';
 import { Section } from '../components/Section.js';
 import { useRequestActions } from '../contexts.js';
+import { useLang } from '../i18n.js';
 
 const FLUSH_LIMIT_MS = 1000;
 
 /** React Query 요청이 왜 나갔는지(관찰자와 fetch 원인, 판단 근거, 같은 응답 낭비면 처방). 겹친 무효화로 취소된 요청이면 그 원인도. */
 export const FetchCause = ({ record }: { record: RequestRecord }) => {
+  const lang = useLang();
   const wasteful = useRequestActions().classOf(record) === 'same-response';
   // 사용자 조회: 미뤄 둔 분석을 먼저 마친 뒤(안 그러면 빈 결과가 굳는다) 원인과 취소를 함께 구한다.
   const { info, cancel } = useMemo(() => {
     flushQueue(FLUSH_LIMIT_MS);
     return {
-      info: describeFetchCause(record, wasteful),
+      info: describeFetchCause(record, wasteful, lang),
       cancel: overlapCancelOf(record),
     };
-  }, [record, wasteful]);
+  }, [record, wasteful, lang]);
   if (!info && !cancel) return null;
   return (
     <Section title="fetch cause">
