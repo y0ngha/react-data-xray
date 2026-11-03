@@ -38,7 +38,14 @@ Use it to check a screen the first time you attach RDX, to compare before and af
 
 ### 1. Install
 
-RDX is not on npm yet. Clone the repo, build it, and link it to your app. You need [pnpm](https://pnpm.io) to build.
+```bash
+npm i -D react-data-xray   # pnpm add -D react-data-xray, yarn add -D react-data-xray
+```
+
+<details>
+<summary><b>Build from source</b></summary>
+
+To try unreleased changes, clone the repo, build it, and link it to your app. You need [pnpm](https://pnpm.io) to build.
 
 ```bash
 git clone https://github.com/y0ngha/react-data-xray.git
@@ -47,6 +54,8 @@ cd react-data-xray && pnpm install && pnpm build
 # In your app folder. If both folders are side by side, the path is ../react-data-xray
 pnpm add -D file:../react-data-xray   # npm i -D file:../react-data-xray, yarn add -D file:../react-data-xray
 ```
+
+</details>
 
 ### 2. Add to your app
 

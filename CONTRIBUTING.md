@@ -25,6 +25,21 @@ pnpm sync <앱 경로>  # 빌드해서 file: 로 연결한 앱의 node_modules �
   서버 쪽 코드(미들웨어)를 고쳐 dev 서버를 다시 띄웠다면, 띄운 **뒤에** `pnpm sync` 를 한 번 더 합니다.
 - **Next.js(Turbopack)**: 청크 이름이 바뀌지 않아 이전 코드가 남습니다. sync 뒤 `.next/dev` 를 지우고 dev 서버를 다시 띄운 다음, 브라우저에서 강력 새로고침(<kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>)합니다.
 
+## 배포
+
+`main` 은 PR 로만 바뀌므로 버전도 PR 로 올리고, 머지된 `main` 에서 손으로 배포합니다. `prepublishOnly` 가 `pnpm check && pnpm build` 를 돌려, 검사가 깨지면 배포가 멈춥니다.
+
+```bash
+# 1. 브랜치에서 버전을 올리고 PR 로 머지한다
+npm version patch --no-git-tag-version   # 또는 minor/major
+
+# 2. 머지된 main 에서 태그를 달고 배포한다
+git switch main && git pull
+npm pack --dry-run     # 올라갈 파일 확인(dist, skills, README, LICENSE)
+npm publish            # 로그인이 필요하면 먼저 npm login
+git tag v$(node -p "require('./package.json').version") && git push --tags
+```
+
 ## 규칙
 
 - 고치기 전에 템플릿으로 이슈를 만들고, PR 은 템플릿으로 열어 `Closes #번호` 로 그 이슈를 닫습니다. 이유와 순서는 [AGENTS.md](./AGENTS.md#이슈-먼저)에 있습니다.
