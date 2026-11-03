@@ -2,6 +2,27 @@
   "name": "react-data-xray",
   "version": "0.1.0",
   "description": "Dev-only React devtools: click a value on screen to see which API response field it came from, and find wasted requests and renders",
+  "keywords": [
+    "react",
+    "devtools",
+    "debugging",
+    "fetch",
+    "xhr",
+    "api",
+    "network",
+    "performance",
+    "re-render",
+    "react-query"
+  ],
+  "author": "y0ngha",
+  "homepage": "https://github.com/y0ngha/react-data-xray#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/y0ngha/react-data-xray.git"
+  },
+  "bugs": {
+    "url": "https://github.com/y0ngha/react-data-xray/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,6 +45,9 @@
     "skills"
   ],
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -36,7 +60,8 @@
     "check": "pnpm typecheck && pnpm lint && pnpm lint:react && pnpm fmt:check && pnpm test:coverage && pnpm test:react19",
     "sync": "pnpm build && node scripts/sync-to-app.mjs",
     "lint:react": "react-doctor . --no-supply-chain --no-telemetry -y",
-    "test:react19": "vitest run --config vitest.react19.config.ts"
+    "test:react19": "vitest run --config vitest.react19.config.ts",
+    "prepublishOnly": "pnpm check && pnpm build"
   },
   "peerDependencies": {
     "react": ">=18",

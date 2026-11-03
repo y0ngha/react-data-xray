@@ -38,7 +38,14 @@ Network 탭과 React DevTools 를 오가며 짐작하던 질문에, 개발 중�
 
 ### 1. 설치
 
-아직 npm 에 배포하기 전이라, 저장소를 받아 빌드한 뒤 앱에 연결합니다. 빌드에는 [pnpm](https://pnpm.io) 이 필요합니다.
+```bash
+npm i -D react-data-xray   # pnpm add -D react-data-xray, yarn add -D react-data-xray
+```
+
+<details>
+<summary><b>저장소에서 빌드해 쓰기</b></summary>
+
+아직 배포하지 않은 변경을 써 보려면 저장소를 받아 빌드한 뒤 앱에 연결합니다. 빌드에는 [pnpm](https://pnpm.io) 이 필요합니다.
 
 ```bash
 git clone https://github.com/y0ngha/react-data-xray.git
@@ -47,6 +54,8 @@ cd react-data-xray && pnpm install && pnpm build
 # 앱 폴더에서. 두 폴더를 나란히 뒀다면 경로는 ../react-data-xray
 pnpm add -D file:../react-data-xray   # npm i -D file:../react-data-xray, yarn add -D file:../react-data-xray
 ```
+
+</details>
 
 ### 2. 앱에 넣기
 
