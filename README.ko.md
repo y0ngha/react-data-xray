@@ -6,6 +6,8 @@
 
 **화면의 값을 클릭하면 어느 API 응답의 어느 필드인지 보여 주고,<br/>낭비되는 요청과 렌더를 찾아 주는 React 개발 도구**
 
+[![npm](https://img.shields.io/npm/v/react-data-xray?style=flat&color=black)](https://www.npmjs.com/package/react-data-xray)
+[![downloads](https://img.shields.io/npm/dw/react-data-xray?style=flat&color=black)](https://www.npmjs.com/package/react-data-xray)
 [![React](https://img.shields.io/badge/React-%E2%89%A518-black?style=flat)](#지원-환경)
 [![license](https://img.shields.io/badge/license-MIT-black?style=flat)](./LICENSE)
 
@@ -38,8 +40,13 @@ Network 탭과 React DevTools 를 오가며 짐작하던 질문에, 개발 중�
 
 ### 1. 설치
 
+개발 의존성으로 설치합니다. RDX 는 개발 서버에서만 동작하므로 production 에 실리지 않습니다.
+
 ```bash
-npm i -D react-data-xray   # pnpm add -D react-data-xray, yarn add -D react-data-xray
+npm install -D react-data-xray
+pnpm add -D react-data-xray
+yarn add -D react-data-xray
+bun add -d react-data-xray
 ```
 
 <details>

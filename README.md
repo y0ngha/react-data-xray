@@ -6,6 +6,8 @@
 
 **Click a value on screen to see which API response field it came from,<br/>and find wasted requests and renders in your React app**
 
+[![npm](https://img.shields.io/npm/v/react-data-xray?style=flat&color=black)](https://www.npmjs.com/package/react-data-xray)
+[![downloads](https://img.shields.io/npm/dw/react-data-xray?style=flat&color=black)](https://www.npmjs.com/package/react-data-xray)
 [![React](https://img.shields.io/badge/React-%E2%89%A518-black?style=flat)](#supported-environments)
 [![license](https://img.shields.io/badge/license-MIT-black?style=flat)](./LICENSE)
 
@@ -38,8 +40,13 @@ Use it to check a screen the first time you attach RDX, to compare before and af
 
 ### 1. Install
 
+Install it as a dev dependency. RDX runs only in the dev server, so it never ships to production.
+
 ```bash
-npm i -D react-data-xray   # pnpm add -D react-data-xray, yarn add -D react-data-xray
+npm install -D react-data-xray
+pnpm add -D react-data-xray
+yarn add -D react-data-xray
+bun add -d react-data-xray
 ```
 
 <details>
