@@ -1,97 +1,67 @@
-import { findRootFibers, getComponentName } from '../fiber/tree.js';
-import { isComposite, type Fiber, type Hook } from '../fiber/types.js';
+import { commitCausesBetween, type CommitCause } from '../render/commitCauses.js';
 import { getMountStats } from '../render/mounts.js';
-import { previewValue } from '../render/renderReason.js';
 import type { RequestRecord } from './types.js';
 
 export type RepeatCause = NonNullable<RequestRecord['repeatCause']>;
 
-const MAX_HOOKS = 200;
-
-const depsOf = (state: unknown): unknown[] | undefined => {
-  const effect = state as { create?: unknown; deps?: unknown } | null;
-  return effect && typeof effect === 'object' && 'create' in effect && Array.isArray(effect.deps) ? effect.deps : undefined;
-};
-
-/** 이전 렌더(alternate)와 지금 렌더의 effect 훅을 같은 칸끼리 비교해 처음 바뀐 의존성을 찾는다. */
-const changedDep = (fiber: Fiber): { effect: number; dep: number; prev: unknown; next: unknown } | undefined => {
-  let cur = fiber.memoizedState as Hook | null;
-  let prev = fiber.alternate?.memoizedState as Hook | null | undefined;
-  for (let i = 0, effect = 0; cur && prev && i < MAX_HOOKS; i++, cur = cur.next, prev = prev.next) {
-    const now = depsOf(cur.memoizedState);
-    const before = depsOf(prev.memoizedState);
-    if (!now || !before) continue;
-    effect++;
-    const dep = now.findIndex((v, j) => !Object.is(v, before[j]));
-    if (dep >= 0) return { effect, dep, prev: before[dep], next: now[dep] };
-  }
-  return undefined;
-};
-
-// 한 step 에서 보는 fiber 수. 시간은 공용 큐가 본다.
-const FIBERS_PER_STEP = 300;
-// 요청이 나가기 이만큼 안에 다시 마운트된 것만 원인으로 본다(mounts.ts 의 REMOUNT_MS 와 같다).
+// 렌더 기록이 없을 때만 쓴다: 요청이 나가기 이만큼 안에 다시 마운트된 것을 원인으로 본다(mounts.ts 의 REMOUNT_MS 와 같다).
 const REMOUNT_WINDOW_MS = 5000;
 
-const PENDING = Symbol('pending');
-
-/**
- * 컴포넌트의 fiber 를 FIBERS_PER_STEP 개씩 훑어 바뀐 의존성을 찾는다. 부를 때마다 이어서 훑고, 다 훑고도 없으면 undefined, 더 훑을 게 있으면 PENDING.
- * shortcut: 가장 최근 렌더의 변경만 본다. 요청 뒤 한 번 더 렌더됐다면 놓칠 수 있다(유휴 큐가 곧 돌아 드물다).
- */
-const depsSearch = (component: string) => {
-  let stack: Fiber[] | undefined;
-  return (): string | undefined | typeof PENDING => {
-    stack ??= findRootFibers().reverse();
-    for (let seen = 0; seen < FIBERS_PER_STEP; seen++) {
-      const f = stack.pop();
-      if (!f) return undefined;
-      if (f.sibling) stack.push(f.sibling);
-      if (f.child) stack.push(f.child);
-      if (!isComposite(f) || !f.alternate || getComponentName(f) !== component) continue;
-      const c = changedDep(f);
-      if (c) return `dep #${c.dep + 1} changed (${previewValue(c.prev)} → ${previewValue(c.next)}), effect ${c.effect}`;
-    }
-    return PENDING;
+const remountCause = (component: string, parent: string, typeChanged: boolean): RepeatCause => {
+  const by = `parent <${parent || 'root'}>`;
+  return {
+    kind: 'remount',
+    detail: typeChanged
+      ? `<${component}> remount, ${by} defines a component during render so the type changes every render (component defined during render)`
+      : `<${component}> remount, ${by} branch changed`,
   };
 };
 
-const remountCauseOf = (record: RequestRecord, component: string): RepeatCause | undefined => {
+/** 렌더 기록이 없을 때(감시를 늦게 켬): 요청 시작 전 5초 안의 재마운트 */
+const recentRemountOf = (record: RequestRecord, component: string): RepeatCause | undefined => {
   const remount = getMountStats(component).remounts.find(
     (r) => r.lastAt <= record.startedAt && record.startedAt - r.lastAt <= REMOUNT_WINDOW_MS,
   );
-  if (!remount) return undefined;
-  const parent = `parent <${remount.parent || 'root'}>`;
-  return {
-    kind: 'remount',
-    detail:
-      remount.cause === 'type-changed'
-        ? `<${component}> remount, ${parent} defines a component during render so the type changes every render (component defined during render)`
-        : `<${component}> remount, ${parent} branch changed`,
-  };
+  return remount && remountCause(component, remount.parent, remount.cause === 'type-changed');
 };
 
-/** 중복 요청이 다시 나간 이유를 찾는 일. 부를 때마다 조금씩 하고, 끝나면 이유(없으면 undefined)를 돌려준다. */
-const repeatCauseSearch = (record: RequestRecord) => {
-  let deps: ReturnType<typeof depsSearch> | undefined;
-  return (): RepeatCause | undefined | typeof PENDING => {
-    if (!record.duplicateOf) return undefined;
-    if (record.strictModeReplay) return { kind: 'strict', detail: 'StrictMode re-ran the effect during development' };
-    const component = record.component;
-    if (!component) return undefined;
-    const found = (deps ??= depsSearch(component))();
-    if (found === PENDING) return PENDING;
-    return found ? { kind: 'deps', detail: found } : remountCauseOf(record, component);
-  };
+/**
+ * 요청을 보낸 commit 의 기록으로 이유를 정한다. 기록은 monitor 가 그 commit 의 사본으로 적어 둔 것이라, 요청 뒤에 다시 렌더돼도 바뀌지 않는다.
+ * - 요청 순번의 commit 에 이 컴포넌트가 렌더됐으면 그 commit 만 본다(effect 에서 바로 보낸 요청).
+ * - 아니면(await 뒤에 보내 그 사이 다른 commit 이 낌) 앞선 같은 요청 뒤의 이 컴포넌트 렌더를 모두 본다.
+ * 본 렌더에 재마운트와 의존성 변경이 함께 있으면 어느 쪽이 보냈는지 몰라 비워 둔다(같은 이름의 다른 인스턴스, 또는 재마운트 뒤 함수 의존성만 바뀐 렌더).
+ * shortcut: useLayoutEffect 의 요청은 commit 순번이 오르기 전이라 앞 commit 에 속한다. 그때는 아래 범위 규칙으로 본다.
+ */
+const causeOf = (component: string, seen: readonly CommitCause[]): RepeatCause | undefined => {
+  const remount = seen.find((c) => c.remount)?.remount;
+  const deps = seen.find((c) => c.deps)?.deps;
+  if (remount && deps) return undefined;
+  if (remount) return remountCause(component, remount.parent, remount.typeChanged);
+  return deps ? { kind: 'deps', detail: deps } : undefined;
 };
 
-/** record.repeatCause 를 채우는 큐 step. 끝나면 true. 앱 경로가 아니라 유휴 큐에서 부른다. */
-export const repeatCauseStep = (record: RequestRecord): (() => boolean) => {
-  const search = repeatCauseSearch(record);
-  return () => {
-    const cause = search();
-    if (cause === PENDING) return false;
-    record.repeatCause = cause;
+const repeatCauseOf = (record: RequestRecord, previousSeq: number | undefined): RepeatCause | undefined => {
+  if (!record.duplicateOf) return undefined;
+  if (record.strictModeReplay) return { kind: 'strict', detail: 'StrictMode re-ran the effect during development' };
+  const component = record.component;
+  if (!component) return undefined;
+  const at = record.commitSeq;
+  if (at === undefined) return recentRemountOf(record, component);
+  const exact = commitCausesBetween(component, at - 1, at);
+  if (exact.length > 0) return causeOf(component, exact);
+  // 이 컴포넌트의 렌더 기록이 아예 없으면(감시를 늦게 켬) 재마운트 통계로만 본다.
+  if (commitCausesBetween(component, -Infinity, at).length === 0) return recentRemountOf(record, component);
+  // 앞선 요청의 순번을 모르면(새로고침 전 기록) 범위를 정할 수 없어 비워 둔다.
+  return previousSeq === undefined ? undefined : causeOf(component, commitCausesBetween(component, previousSeq, at));
+};
+
+/**
+ * record.repeatCause 를 채우는 큐 step. 끝나면 true. 앱 경로가 아니라 유휴 큐에서 부른다(보낸 컴포넌트를 채우는 step 뒤에 걸린다).
+ * previousSeq 는 앞선 같은 요청(duplicateOf)을 만들 때의 commit 순번이다.
+ */
+export const repeatCauseStep =
+  (record: RequestRecord, previousSeq?: number): (() => boolean) =>
+  () => {
+    record.repeatCause = repeatCauseOf(record, previousSeq);
     return true;
   };
-};

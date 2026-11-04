@@ -32,6 +32,8 @@ export interface RequestRecord {
   sourceStack?: string;
   /** React 가 StrictMode 에서 effect 를 다시 실행하는 도중에 보낸 요청(호출 스택으로 확인) */
   strictModeReplay?: boolean;
+  /** 요청을 만들 때의 마지막 React commit 순번. effect 가 보낸 요청이면 그 effect 를 돌린 commit 이다(다시 나간 이유 판정용). */
+  commitSeq?: number;
   /** 중복 요청이 다시 나간 이유(의존성 변경·재마운트·StrictMode). 알 수 없으면 없다. */
   repeatCause?: { kind: 'deps' | 'remount' | 'strict'; detail: string };
   status: number;

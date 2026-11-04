@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Fiber } from '../../fiber/types.js';
+import { noteCommitCause, resetCommitCauses } from '../../render/commitCauses.js';
+import { changedEffectDep } from '../../render/effectDeps.js';
 import { recordMounts, resetMounts } from '../../render/mounts.js';
 import { buildRequestSection } from '../../report/requestSection.js';
 import type { RequestRecord } from '../types.js';
@@ -42,26 +44,37 @@ const rec = (extra: Partial<RequestRecord>): RequestRecord => ({
 });
 
 describe('중복 요청이 다시 나간 이유', () => {
-  let container: HTMLElement | undefined;
-  // 실제 React 가 컨테이너에 붙이는 키로 가짜 루트를 심는다.
-  const mountRoot = (current: Fiber) => {
-    container = document.body.appendChild(document.createElement('div'));
-    (container as unknown as Record<string, unknown>)['__reactContainer$t'] = { tag: 3, stateNode: { current } };
-  };
-  beforeEach(resetMounts);
-  afterEach(() => container?.remove());
+  beforeEach(() => {
+    resetMounts();
+    resetCommitCauses();
+  });
 
-  it('deps_change: 의존성 #1 이 1 에서 2 로 바뀌었으면 순번과 값을 담는다', () => {
-    const root = fiber(undefined);
-    root.child = fiber(Profile, [
-      [1, 'x'],
-      [2, 'x'],
-    ]);
-    mountRoot(root);
-    const cause = repeatCauseOf(rec({}));
+  it('deps_change: 요청을 보낸 commit 에서 의존성 #1 이 1 에서 2 로 바뀌었으면 순번과 값을 담는다', () => {
+    noteCommitCause('Profile', 5, {
+      deps: changedEffectDep(
+        fiber(Profile, [
+          [1, 'x'],
+          [2, 'x'],
+        ]),
+      ),
+    });
+    const cause = repeatCauseOf(rec({ commitSeq: 5 }));
     expect(cause?.kind).toBe('deps');
     expect(cause?.detail).toContain('#1');
     expect(cause?.detail).toContain('1 → 2');
+  });
+
+  it('같은 commit 에서 한 인스턴스는 다시 마운트되고 다른 인스턴스는 의존성이 바뀌었으면 비워 둔다', () => {
+    noteCommitCause('Row', 7, { remount: { parent: 'List', typeChanged: false } });
+    noteCommitCause('Row', 7, { deps: 'dep #1 changed (1 → 2), effect 1' });
+    expect(repeatCauseOf(rec({ component: 'Row', commitSeq: 7 }))).toBeUndefined();
+  });
+
+  it('다시 마운트된 commit 이면 remount, 의존성도 재마운트도 없는 commit 이면 비워 둔다', () => {
+    noteCommitCause('Card', 8, { remount: { parent: 'Grid', typeChanged: true } });
+    expect(repeatCauseOf(rec({ component: 'Card', commitSeq: 8 }))?.detail).toContain('component defined during render');
+    noteCommitCause('Card', 9, {});
+    expect(repeatCauseOf(rec({ component: 'Card', commitSeq: 9 }))).toBeUndefined();
   });
 
   it('remount_parent: 의존성은 같고 부모가 key 를 바꿔 다시 마운트됐으면 부모 이름', () => {

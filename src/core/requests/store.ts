@@ -1,5 +1,6 @@
 import { enqueue } from '../scheduler/idleQueue.js';
 import { registerOrigins } from './origins.js';
+import { currentCommitSeq } from '../render/commitCauses.js';
 import { repeatCauseStep } from './repeatCause.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import type { RequestRecord } from './types.js';
@@ -73,15 +74,17 @@ export const createRecord = (
     bodyUnreadable: requestBody === null || undefined,
     status: 0,
     startedAt: Date.now(),
+    commitSeq: currentCommitSeq(),
     durationMs: 0,
     body: undefined,
   };
   // 순서는 큐가 지키고, 판정은 startedAt 기준이라 늦어도 같다.
   enqueue(() => {
-    if (!isStale(record)) record.duplicateOf = detectDuplicate(record);
+    const duplicate = isStale(record) ? undefined : detectDuplicate(record);
+    record.duplicateOf = duplicate?.id;
     // 보낸 컴포넌트는 앞서 걸린 annotate step 이 채우므로, 그 뒤로 한 번 더 미룬다.
-    if (record.duplicateOf) {
-      const step = repeatCauseStep(record);
+    if (duplicate) {
+      const step = repeatCauseStep(record, duplicate.commitSeq);
       enqueue(() => {
         const done = step();
         if (done && record.repeatCause) notify(); // 요청 탭·상세가 다시 그리도록

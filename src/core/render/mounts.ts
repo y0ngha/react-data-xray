@@ -144,6 +144,15 @@ export const recordMounts = (unmounted: readonly MountRef[], mounted: readonly M
   });
 };
 
+/** 이 이름이 at 시각의 commit 에서 다시 마운트됐으면 그 부모. 배열을 만들지 않고 찾는다(commit 마다 마운트된 fiber 수만큼 부른다). */
+export const remountAt = (name: string, at: number): { parent: string; typeChanged: boolean } | undefined => {
+  const s = stats.get(name);
+  if (!s) return undefined;
+  for (const [parent, r] of s.remounts) if (r.lastAt === at) return { parent, typeChanged: false };
+  for (const [parent, r] of s.typeRemounts) if (r.lastAt === at) return { parent, typeChanged: true };
+  return undefined;
+};
+
 /** 위치를 주면 그 위치에서 렌더된 것만, 없으면 이름 전체를 센다. */
 export const getMountStats = (name: string, location?: string): MountStats => {
   const key = keyAt(name, location);
