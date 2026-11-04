@@ -12,6 +12,7 @@ import { MESSAGES } from '../diagnostics/messages.js';
 import { setReportPluginState } from './endpointState.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
+// 처리기가 이 Host 를 막았을 때의 안내는 MESSAGES.forbiddenHost 한곳에 둔다(Vite·webpack·Next.js 를 함께 적는다).
 const UPLOAD_MS = 5000;
 const TAB_ID_KEY = 'rdx:tabId';
 const SNAPSHOTS_KEY = 'rdx:snapshots';

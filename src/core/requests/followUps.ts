@@ -1,6 +1,6 @@
 import { groupBy } from '../../shared/collections.js';
-import { isPeriodic } from './classify.js';
-import { endpointOf, requestKeyOf } from './requestKey.js';
+import { periodicRequestIds } from './classify.js';
+import { endpointOf } from './requestKey.js';
 import { getRecords } from './store.js';
 import type { RequestRecord } from './types.js';
 
@@ -32,12 +32,13 @@ export const followUps = (
   const after = sameLoad.filter(
     (r) => r.method.toUpperCase() === 'GET' && r.startedAt >= from && r.startedAt <= from + FOLLOW_UP_WINDOW_MS,
   );
-  const startsOf = groupBy(sameLoad, requestKeyOf);
+  // 주기 반복에 든 요청만 본다. 같은 요청이 polling 중이어도 변경 뒤에 끼어든 재조회는 polling 이 아니다.
+  const periodic = periodicRequestIds(sameLoad);
   return Array.from(groupBy(after, endpointOf), ([endpoint, list]) => ({
     endpoint,
     count: list.length,
     queryKey: list.map(queryKeyOf).find((k) => k !== undefined),
     sameResponse: list.filter((r) => r.sameResponseAs).length,
-    periodic: list.some((r) => isPeriodic((startsOf.get(requestKeyOf(r)) ?? []).map((x) => x.startedAt))),
+    periodic: list.some((r) => periodic.has(r.id)),
   })).sort((a, b) => b.count - a.count);
 };

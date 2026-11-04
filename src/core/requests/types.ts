@@ -34,6 +34,13 @@ export interface RequestRecord {
   strictModeReplay?: boolean;
   /** 요청을 만들 때의 마지막 React commit 순번. effect 가 보낸 요청이면 그 effect 를 돌린 commit 이다(다시 나간 이유 판정용). */
   commitSeq?: number;
+  /**
+   * 보낸 컴포넌트가 commitSeq(또는 다음 순번, useLayoutEffect)의 commit 에서 마운트됐고 그 직후 나갔는가. 중복 요청만, 유휴 큐가 렌더 기록으로 정한다.
+   * 'unrecorded' 는 그 commit 들에 렌더 기록이 없다(감시가 꺼져 있었다). StrictMode 재실행 판정에 쓴다.
+   */
+  mountEvidence?: 'mounted' | 'not-mounted' | 'unrecorded';
+  /** 겹친 무효화(double-invalidate)가 취소한 요청. 유휴 큐가 정한다(reactQuery/overlapCancel). */
+  cancelledByOverlap?: boolean;
   /** 중복 요청이 다시 나간 이유(의존성 변경·재마운트·StrictMode). 알 수 없으면 없다. */
   repeatCause?: { kind: 'deps' | 'remount' | 'strict'; detail: string };
   status: number;
