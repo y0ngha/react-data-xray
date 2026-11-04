@@ -22,11 +22,10 @@ describe('resetAt in report', () => {
     sessionStorage.removeItem('rdx:resetAt');
   });
 
-  it('report_resetAt_howToRead: howToRead contains resetAt line at the end', () => {
-    const { howToRead } = buildReport(false, 0, false);
-    const last = howToRead[howToRead.length - 1];
-    expect(last).toContain('resetAt');
-    expect(last).toContain('reset()');
+  it('report_resetAt_howToRead: howToRead contains a resetAt line', () => {
+    // #70 이 끝에 howToReadVersion 줄을 더해 resetAt 줄은 맨 끝이 아니다.
+    const line = buildReport(false, 0, false).howToRead?.find((l) => l.startsWith('resetAt'));
+    expect(line).toContain('reset()');
   });
 });
 

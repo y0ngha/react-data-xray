@@ -6,7 +6,7 @@ import { resetCacheAudit } from '../reactQuery/cacheAudit.js';
 import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
-import { buildReport, type RdxReport } from './buildReport.js';
+import { buildReport, type RdxReport, type ReportOptions } from './buildReport.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
 const UPLOAD_MS = 5000;
@@ -97,8 +97,8 @@ export const tabReportPath = (dir = '.rdx'): string => `${dir}/${reportFileFor(g
 
 /** 브라우저 도구를 쓰는 AI·개발자가 부르는 창구 */
 export interface RdxApi {
-  /** 지금까지 모은 결과 */
-  report: () => RdxReport;
+  /** 지금까지 모은 결과. `report({ howToRead: false })` 는 howToRead 를 뺀다(howToReadVersion 은 남는다) */
+  report: (options?: ReportOptions) => RdxReport;
   /** 측정을 새로 시작한다: 요청 기록과 렌더 통계를 비운다 */
   reset: () => void;
   /** 보고서를 이름 붙여 저장한다(.rdx/<name>.json). 고치기 전후를 비교할 때 쓴다. 저장하지 못하면(플러그인 없음 등) 거부된다 */
@@ -126,10 +126,11 @@ const keepRenderMonitoring = (): void => {
 export const NO_PLUGIN_MESSAGE =
   '[react-data-xray] The dev server has no rdx plugin; could not save. Use window.__RDX__.report() to retrieve the report.';
 
-const report = (): RdxReport => {
+// 파일로 남기는 보고서(snapshot·주기 업로드)는 나중에 읽을 쪽을 모르므로 늘 howToRead 를 싣는다.
+const report = (options?: ReportOptions): RdxReport => {
   const monitoring = isRenderMonitoring();
   keepRenderMonitoring();
-  return buildReport(monitoring);
+  return buildReport(monitoring, Date.now(), true, options);
 };
 
 const HANDSHAKE_RETRY_MS = 3000;
@@ -233,12 +234,13 @@ const startUpload = async (): Promise<void> => {
   let failures = 0;
   let timer = 0;
   const upload = async () => {
-    const { generatedAt, ...content } = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
+    const full = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
+    const { generatedAt: _generatedAt, ...content } = full;
     const key = JSON.stringify(content);
     const idle = key === last;
     // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
     if (idle && Date.now() - lastSent < TAB_HEARTBEAT_MS) return;
-    const body = JSON.stringify({ generatedAt, ...content });
+    const body = JSON.stringify(full); // summary 가 맨 앞에 오도록 키 순서를 그대로 둔다
     const query = new URLSearchParams({ tab: getTabId(), path: location.pathname, title: document.title });
     if (idle) query.set('idle', '1');
     const res = await send(`${REPORT_PATH}?${query}`, {

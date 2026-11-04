@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react';
 
 import { findQueryClients } from '../../core/reactQuery/cacheAudit.js';
-import { getTopRenders } from '../../core/render/monitor.js';
-import { RENDER_STORM } from '../../core/render/types.js';
+import { countProblems, findRenderStorms } from '../../core/problems.js';
 import { findBursts, isInitialLoad } from '../../core/requests/bursts.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
@@ -14,14 +13,6 @@ const TICK_MS = 1000;
 const FIND_CLIENTS_EVERY = 5;
 // 버튼을 깜빡이게 할 "방금" 의 범위
 const RECENT_MS = 2000;
-
-/** 지금 렌더 폭주(최근 10초에 RENDER_STORM 번 이상) 중인 컴포넌트 이름 */
-const stormingNames = (now: number): Set<string> =>
-  new Set(
-    getTopRenders(500, now)
-      .filter((e) => e.recent >= RENDER_STORM)
-      .map((e) => e.name),
-  );
 
 /** 방금 끝난 요청 몰림의 끝 시각. 페이지 첫 로딩 몰림과, 이유가 확실한 반복(무시·StrictMode)은 뺀다. */
 const latestBurstEnd = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass, now: number): number => {
@@ -57,7 +48,7 @@ export const useProblemSignal = (
   useInterval(() => {
     const now = Date.now();
     if (ticks.current++ % FIND_CLIENTS_EVERY === 0) findQueryClients();
-    const storming = stormingNames(now);
+    const storming = new Set(findRenderStorms(now).keys()); // 보고서 summary 와 같은 기준(core/problems.ts)
     // useInterval 이 최신 콜백을 쓰므로 records 는 늘 지금 기록이다.
     const burstEnd = latestBurstEnd(records, classOf, now);
     setSignal((prev) => {
@@ -68,7 +59,7 @@ export const useProblemSignal = (
   }, TICK_MS);
   // 배지 내역에 보일 이름. 폭주 이름은 시간 창 기준이라 시간이 지나면 빠진다.
   return {
-    issues: wasteEndpoints + signal.storming.size,
+    issues: countProblems(wasteEndpoints, signal.storming.size),
     alert: signal.alert,
     wasteEndpoints: wasteNames,
     stormingNames: [...signal.storming].sort(),
