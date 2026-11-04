@@ -84,6 +84,24 @@ createRoot(document.getElementById('root')!).render(
 ```
 
 <details>
+<summary><b>Vite: let the plugin add the import</b></summary>
+
+With `rdx({ inject: true })` (Vite 4 or later), the dev server adds a `<script type="module">import 'react-data-xray'</script>` to `index.html` that runs before your app's entry module. It runs after Vite's own client and the React Refresh preamble; a script another plugin prepends to `<head>` may also run earlier. Then `main.tsx` only needs `<RdxDevtools />`, and requests and renders from the entry module onward are captured whatever your import order is. It is added only by the dev server (`vite`), never to a production build. Keeping the import in `main.tsx` as well is fine: both load the same module, so RDX installs once.
+
+- It works only when Vite serves your `index.html`. SSR setups, React Router v7 framework mode, backend integrations (Rails, Laravel, Django …) and `server.middlewareMode` servers render their own HTML, so keep `import 'react-data-xray'` at the top of the entry file there.
+- It is skipped under Vitest (which reads the same `vite.config`) and for Storybook's `iframe.html`.
+
+```ts
+// vite.config.ts
+import { rdx } from 'react-data-xray/vite';
+export default defineConfig({ plugins: [react(), rdx({ inject: true })] });
+```
+
+It is off by default so the plugin does not change your HTML unless you ask. The same plugin also writes `.rdx/report.json` ([Working with AI agents](./docs/ai.md)).
+
+</details>
+
+<details>
 <summary><b>Next.js App Router</b></summary>
 
 Next.js has no single entry file, so put the import in `instrumentation-client.ts` (runs in the browser before React). Drop `src/` from the path if you are not using a `src` folder.
@@ -129,7 +147,7 @@ export { GET, POST } from 'react-data-xray/next';
 <summary><b>Troubleshooting</b></summary>
 
 - **The button does not appear**: check that `<RdxDevtools />` is actually rendered and that you are on the dev server.
-- **Early requests are missing**: make sure `import 'react-data-xray'` comes before all other imports. For Next.js, `instrumentation-client.ts` must sit at the same level as the `app` folder (inside `src/` if you use one).
+- **Early requests are missing**: make sure `import 'react-data-xray'` comes before all other imports (with Vite, `rdx({ inject: true })` handles this). For Next.js, `instrumentation-client.ts` must sit at the same level as the `app` folder (inside `src/` if you use one).
 - **Clicking shows no source**: check that the value comes from a JSON response. Data rendered on the server is not traced.
 - **Shortcut conflicts with the browser**: use the panel button, or change it with `<RdxDevtools hotkey={{ key: 'x', shift: true }} />`.
 

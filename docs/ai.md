@@ -66,6 +66,6 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 
 - `snapshot(name)`: name may contain letters, digits, and `. _ -`, up to 64 characters; `report` is reserved. Rejected if the plugin is not running.
 - Security: to prevent other sites from injecting fake reports, the plugin accepts requests only from `localhost`, `*.localhost`, and IP addresses. For other hostnames use `rdx({ allowedHosts: ['my-app.local'] })`. Vite reuses `server.allowedHosts` automatically.
-- Options: `rdx({ dir: '.rdx', allowedHosts: [...] })`, `rdxReportMiddleware(root, { dir, allowedHosts })`, `export const { GET, POST } = createRdxReportRoute(root, { dir, allowedHosts })` from `react-data-xray/next`.
+- Options: `rdx({ dir: '.rdx', allowedHosts: [...], inject: false })`, `rdxReportMiddleware(root, { dir, allowedHosts })`, `export const { GET, POST } = createRdxReportRoute(root, { dir, allowedHosts })` from `react-data-xray/next`. `inject: true` (Vite 4+) adds `import 'react-data-xray'` to the `index.html` Vite serves, running before the app's entry module, so the entry file needs only `<RdxDevtools />`. It does nothing when Vite does not serve the HTML (SSR, framework modes, backend integrations); see README.
 
 </details>
