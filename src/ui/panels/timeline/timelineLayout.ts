@@ -1,4 +1,5 @@
-import { findBursts, isInitialLoad } from '../../../core/requests/bursts.js';
+import { analyzeBursts, BURST_WINDOW_MS } from '../../../core/requests/bursts.js';
+import type { RequestClass } from '../../../core/requests/classify.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import type { Commit } from '../../../core/render/types.js';
 
@@ -23,7 +24,7 @@ interface BurstLayout {
   x: number;
   width: number;
   count: number;
-  /** 페이지 진입 직후의 몰림(확인 필요)인지 */
+  /** 화면 진입(페이지 첫 로딩·화면 이동) 직후의 몰림(확인 필요)인지 */
   initial: boolean;
 }
 
@@ -61,12 +62,38 @@ const assignLanes = (records: readonly RequestRecord[]): number[] =>
     { lanes: [], ends: [] },
   ).lanes;
 
-/** 최근 20초의 요청 막대, 요청 몰림 구간, 렌더 commit 눈금을 화면 좌표로 계산한다. */
+/**
+ * 몰림 구간. 버튼과 같게 전체 기록으로 판정하고(대상으로 좁혀도 판정이 버튼과 어긋나지 않는다), 보이는 요청이
+ * 든 구간만 남긴다. 20초 창에 창 하나(500ms)만큼 앞을 더 보고, 구간은 창 안으로 잘라 보이는 요청만 센다.
+ */
+const visibleBursts = (
+  shown: readonly RequestRecord[],
+  all: readonly RequestRecord[],
+  from: number,
+  classOf: (r: RequestRecord) => RequestClass,
+) => {
+  const shownIds = new Set(shown.map((r) => r.id));
+  return analyzeBursts(
+    all.filter((r) => r.startedAt >= from - BURST_WINDOW_MS),
+    classOf,
+  ).flatMap((seg) => {
+    const inView = seg.records.filter((r) => r.startedAt >= from);
+    if (inView.length === 0 || !seg.records.some((r) => shownIds.has(r.id))) return [];
+    return [{ from: Math.max(seg.from, from), to: seg.to, count: inView.length, entry: seg.entry }];
+  });
+};
+
+/**
+ * 최근 20초의 요청 막대, 요청 몰림 구간, 렌더 commit 눈금을 화면 좌표로 계산한다.
+ * records 는 그릴 요청(대상으로 좁혔으면 그 안), all 은 몰림 판정에 쓸 전체 기록이다.
+ */
 export const layoutTimeline = (
   records: readonly RequestRecord[],
   commits: readonly Commit[],
   now: number,
   width: number,
+  classOf: (r: RequestRecord) => RequestClass,
+  all: readonly RequestRecord[] = records,
 ): TimelineLayout => {
   const from = now - TIMELINE_MS;
   const x = (t: number) => ((t - from) / TIMELINE_MS) * width;
@@ -87,12 +114,12 @@ export const layoutTimeline = (
       y: lanes[i] * (LANE_H + LANE_GAP) + LANE_GAP,
       width: Math.max(MIN_BAR_W, x(record.startedAt + record.durationMs) - x(record.startedAt)),
     })),
-    bursts: findBursts(visible.map((r) => r.startedAt)).map((b) => ({
+    bursts: visibleBursts(records, all, from, classOf).map((b) => ({
       key: b.from,
       x: x(b.from) - 2,
       width: Math.max(4, x(b.to) - x(b.from) + 4),
       count: b.count,
-      initial: isInitialLoad(b.from),
+      initial: b.entry,
     })),
     commits: recentCommits.map((c) => ({
       key: c.id,
