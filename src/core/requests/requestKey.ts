@@ -50,8 +50,9 @@ export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url' | 'actio
 export const maskEndpoint = (endpoint: string): string =>
   endpoint.replace(/^(\S+ )(\S+)/, (_, method: string, path: string) => method + maskIds(path));
 
-// 요청 시작 시각과 이만큼 안쪽이면 그 시각으로 만든 값으로 본다. 값은 요청을 만들기 직전에 같은 시계로 찍으므로 넉넉하다.
-const CACHE_BUSTER_WINDOW_MS = 10_000;
+// 요청 시작 시각과 이만큼 안쪽이면 그 시각으로 만든 값으로 본다. cache-buster 는 보내기 직전의 Date.now() 라 좁게 잡는다.
+// 폴링의 `since=<직전 조회 시각>` 처럼 주기만큼 앞선 시각은 진짜 조건이므로 키에 남는다.
+const CACHE_BUSTER_WINDOW_MS = 2000;
 const EPOCH_MS = /^\d{13}$/;
 const EPOCH_S = /^\d{10}(?:\.\d+)?$/;
 
@@ -60,29 +61,40 @@ const isNowStamp = (value: string, startedAt: number): boolean => {
   return Math.abs(ms - startedAt) <= CACHE_BUSTER_WINDOW_MS;
 };
 
+type UrlInput = Pick<RequestRecord, 'url'> & Partial<Pick<RequestRecord, 'startedAt'>>;
 type KeyInput = Pick<RequestRecord, 'method' | 'url' | 'requestBody' | 'action'> & Partial<Pick<RequestRecord, 'startedAt'>>;
+
+/** URL 을 한 번 읽어 cache-buster 인 (이름, 값) 짝과 나머지로 가른다. 요청 시각을 모르면 아무것도 빼지 않는다. */
+const splitCacheBusters = ({ url, startedAt }: UrlInput): { url: URL; kept: Array<[string, string]>; busters: string[] } | undefined => {
+  const parsed = parseUrl(url);
+  if (!parsed) return undefined;
+  const kept: Array<[string, string]> = [];
+  const busters = new Set<string>();
+  for (const [name, value] of parsed.searchParams) {
+    if (startedAt !== undefined && isNowStamp(value, startedAt)) busters.add(name);
+    else kept.push([name, value]);
+  }
+  return { url: parsed, kept, busters: [...busters] };
+};
 
 /**
  * 캐시를 피하려고 요청마다 현재 시각을 붙인 쿼리 파라미터(`?_t=1730700000000`, jQuery 의 `?_=…`) 이름.
  * 이름이 아니라 값이 요청 시작 시각의 epoch(ms·초)인지로 가린다. 같은 이름의 진짜 파라미터를 빼지 않기 위해서다.
  */
-export const cacheBusterParams = (record: Pick<RequestRecord, 'url'> & Partial<Pick<RequestRecord, 'startedAt'>>): string[] => {
-  const { startedAt } = record;
-  const params = startedAt === undefined ? undefined : parseUrl(record.url)?.searchParams;
-  if (!params || startedAt === undefined) return [];
-  return Array.from(params)
-    .filter(([, value]) => isNowStamp(value, startedAt))
-    .map(([name]) => name);
-};
+export const cacheBusterParams = (record: UrlInput): string[] => splitCacheBusters(record)?.busters ?? [];
 
 /**
  * 쿼리스트링과 payload 까지 포함한 요청 단위. 중복·같은 응답 판정은 같은 요청끼리만 한다.
- * 파라미터 순서만 다른 URL 은 같은 요청으로 본다. 현재 시각을 붙인 cache-buster 파라미터는 뺀다(매 요청이 다른 요청이 된다).
+ * 파라미터 순서만 다른 URL 은 같은 요청으로 본다. 값이 현재 시각인 cache-buster 짝은 뺀다(매 요청이 다른 요청이 된다).
+ * 같은 이름이라도 값이 시각이 아닌 짝은 남긴다.
  */
 export const requestKeyOf = (record: KeyInput): string => {
-  const u = parseUrl(record.url);
-  for (const name of cacheBusterParams(record)) u?.searchParams.delete(name);
-  u?.searchParams.sort();
+  const split = splitCacheBusters(record);
+  if (split) {
+    const params = new URLSearchParams(split.kept);
+    params.sort();
+    split.url.search = params.toString();
+  }
   // 같은 요청인지는 이름을 알기 전후로 바뀌면 안 되므로 id 그대로 쓴다.
-  return `${record.method} ${u?.href ?? record.url}${record.action ? ` ${record.action}` : ''} ${record.requestBody ?? ''}`;
+  return `${record.method} ${split?.url.href ?? record.url}${record.action ? ` ${record.action}` : ''} ${record.requestBody ?? ''}`;
 };

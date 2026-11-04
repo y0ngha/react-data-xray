@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ComparableReport } from '../../report/compare.js';
+import { compare } from '../../report/compare.js';
 import { parseIgnored } from '../../../shared/ignoredEndpoints.js';
 import { classifyRecords } from '../classify.js';
 import { firstOperationName, graphqlOperationOf } from '../graphqlOperation.js';
@@ -30,6 +32,8 @@ describe('GraphQL 연산별 엔드포인트 (#77)', () => {
     expect(firstOperationName('{ search { query foo } } query Real { x }')).toBe('Real');
     expect(firstOperationName('query Q { a(text: "mutation Fake {") }')).toBe('Q');
     expect(firstOperationName('"""query Doc { }"""\nsubscription OnMsg { m }')).toBe('OnMsg');
+    expect(firstOperationName('query Q')).toBeUndefined();
+    expect(firstOperationName('{ a }')).toBeUndefined();
   });
 
   it('검색 API 의 query 문자열은 GraphQL 로 보지 않는다', () => {
@@ -65,10 +69,41 @@ describe('GraphQL 연산별 엔드포인트 (#77)', () => {
     expect(endpointOf({ method: 'GET', url: '/graphql?extensions=%7Bbad' })).toBe('GET /graphql');
   });
 
-  it('큰 본문은 통째로 파싱하지 않고 operationName 만 찾는다', () => {
+  it('큰 본문은 통째로 파싱하지 않아도 작은 본문과 같은 엔드포인트가 된다', () => {
     const data = 'x'.repeat(70_000);
-    expect(endpointOf(post(`{"operationName":"Upload","variables":{"data":"${data}"}}`))).toBe('POST /graphql (Upload)');
+    const same = (body: object, url = '/graphql') => {
+      const small = endpointOf(post(JSON.stringify(body), url));
+      const big = endpointOf(post(JSON.stringify(Array.isArray(body) ? body : { ...body, variables: { data } }), url));
+      expect(big).toBe(small);
+      return big;
+    };
+    expect(same({ operationName: 'Upload', query: 'mutation Upload { up }' })).toBe('POST /graphql (Upload)');
+    expect(same({ query: '\n  query Feed($n: Int) { feed { id } }' }, '/api/gql')).toBe('POST /api/gql (Feed)');
+    const batch = [
+      { operationName: 'GetUser', query: 'query GetUser { me { id } }' },
+      { operationName: 'GetPosts', query: 'query GetPosts { posts { id } }', variables: { data } },
+      { operationName: 'GetUser', query: 'query GetUser { me { id } }' },
+    ];
+    expect(same(batch)).toBe('POST /graphql (GetUser, GetPosts)');
+    const extensions = { persistedQuery: { version: 1, sha256Hash: 'ecf4edb46db40b5132295c0291d62fb6' } };
+    expect(same({ extensions }, '/api/q')).toBe('POST /api/q (persisted ecf4edb4)');
+    expect(same({ operationName: 'Track', event: 'click' }, '/api/track')).toBe('POST /api/track');
     expect(endpointOf(post(`{"variables":{"data":"${data}"}}`))).toBe('POST /graphql');
+  });
+
+  it('GraphQL 문서·persisted query·graphql 경로가 아니면 operationName 만으로 나누지 않는다', () => {
+    expect(endpointOf(post('{"operationName":"click","target":"buy"}', '/api/track'))).toBe('POST /api/track');
+    expect(endpointOf({ method: 'GET', url: '/api/track?operationName=click' })).toBe('GET /api/track');
+    expect(endpointOf(post('{"operationName":"GetUser"}', '/api/GraphQL'))).toBe('POST /api/GraphQL (GetUser)');
+    expect(endpointOf(post('{"operationName":"GetUser","query":"query GetUser { me }"}', '/api/q'))).toBe('POST /api/q (GetUser)');
+  });
+
+  it('multipart 업로드(FormData 의 operations 필드)에서도 연산 이름을 찾는다', () => {
+    const operations = JSON.stringify({ operationName: 'UploadFile', query: 'mutation UploadFile($f: Upload!) { upload(file: $f) }' });
+    const body = `operations=${operations}&map={"0":["variables.f"]}&0=[file a.png 12B]`;
+    expect(endpointOf(post(body, '/api/q'))).toBe('POST /api/q (UploadFile)');
+    expect(endpointOf(post(`operations=${operations}`, '/api/q'))).toBe('POST /api/q (UploadFile)');
+    expect(endpointOf(post('name=a&file=[file a.png 12B]', '/api/upload'))).toBe('POST /api/upload');
   });
 
   it('같은 기록은 한 번만 계산한다', () => {
@@ -105,5 +140,20 @@ describe('GraphQL 연산별 엔드포인트 (#77)', () => {
     const classes = classifyRecords(records, ignored);
     expect(classes.get(2)).toBe('ignored');
     expect(classes.get(4)).not.toBe('ignored');
+  });
+
+  it('compare: 한쪽은 POST /graphql 한 줄, 다른 쪽은 연산별이면 이름 규칙이 바뀌었다고 알린다', () => {
+    const report = (...endpoints: string[]): ComparableReport => ({
+      requests: { endpoints: endpoints.map((endpoint) => ({ endpoint, count: 1, duplicates: 0, sameResponses: 0 })) },
+      renders: { monitoring: true, windowSeconds: 10, components: [] },
+      reactQuery: { findings: [] },
+    });
+    const old = report('POST /graphql', 'GET /api/x');
+    const split = report('POST /graphql (GetUser)', 'POST /graphql (GetPosts)', 'GET /api/x');
+    const warning = expect.stringContaining('endpoint naming changed for POST /graphql');
+    expect(compare(old, split).warnings).toEqual([warning]);
+    expect(compare(split, old).warnings).toEqual([warning]);
+    expect(compare(split, split).warnings).toEqual([]);
+    expect(compare(report('POST /graphql', 'POST /graphql (GetUser)'), split).warnings).toEqual([]);
   });
 });
