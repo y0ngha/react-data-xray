@@ -1,5 +1,6 @@
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
+import { dataEmptyReason } from '../../../core/diagnostics/diagnostics.js';
 import type { Hit, InspectResult } from '../../../core/inspect/types.js';
 import { Muted } from '../../components/Muted.js';
 import { color } from '../../theme.js';
@@ -39,7 +40,7 @@ export const InspectTab = ({ result, stats }: { result: InspectResult | null; st
           <HitList hits={result.guesses} stats={stats} />
         </div>
       )}
-      {withHits.length === 0 && result.guesses.length === 0 && <Muted>No linked API response found.</Muted>}
+      {withHits.length === 0 && result.guesses.length === 0 && <Muted>No linked API response found. {dataEmptyReason()}</Muted>}
     </div>
   );
 };

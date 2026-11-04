@@ -2,6 +2,7 @@ import { effectiveConfig, type EffectiveConfig } from '../config.js';
 import { knownQueryContextOf, queryContextOf } from '../capture/queryContext.js';
 import { queueIndex } from '../inspect/derivedMatch.js';
 import { flushQueue } from '../scheduler/idleQueue.js';
+import { buildDiagnostics, type RdxDiagnostics } from '../diagnostics/diagnostics.js';
 import { classifyRecords } from '../requests/classify.js';
 import { getRecords } from '../requests/store.js';
 import { readIgnoredEndpoints } from '../../shared/ignoredEndpoints.js';
@@ -27,6 +28,8 @@ export interface RdxReport {
   requests: RequestSection;
   reactQuery: ReactQuerySection;
   renders: RenderSection;
+  /** rdx 가 제대로 붙었는지(window.__RDX__.doctor() 와 같다). 결과를 읽기 전에 problems 를 먼저 본다 */
+  diagnostics: RdxDiagnostics;
 }
 
 // 섹션별 줄을 읽는 순서로 잇는다.
@@ -48,6 +51,7 @@ const HOW_TO_READ = [
   ...REQUEST_HOW_TO_READ_EXTRA,
   ...RENDER_HOW_TO_READ_EXTRA,
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
+  'Check diagnostics.problems first: if rdx was loaded after react-dom (renderHook.commitsSeen is 0) or requests went out before it loaded (capture.requestsBeforeInstall), the rest of the report is incomplete. Each problem says how to fix it.',
   'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
   'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
 ];
@@ -72,5 +76,6 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true)
     requests: buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf),
     reactQuery: buildReactQuerySection(records, classes),
     renders: buildRenderSection(monitoring, now),
+    diagnostics: buildDiagnostics(),
   };
 };

@@ -8,14 +8,12 @@ import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
 import { buildReport, type RdxReport } from './buildReport.js';
+import { buildDiagnostics, type RdxDiagnostics } from '../diagnostics/diagnostics.js';
+import { MESSAGES } from '../diagnostics/messages.js';
+import { setReportPluginState } from './endpointState.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
-/** 처리기가 이 Host 를 막았을 때의 안내. dev 서버마다 붙이는 방법이 달라 셋 다 적는다. */
-const blockedHostMessage = (): string => {
-  const hosts = `{ allowedHosts: ['${location.hostname}'] }`;
-  return `[react-data-xray] The dev server blocked a report from ${location.host}. Allow it with rdx(${hosts}) (Vite), rdxReportMiddleware(root, ${hosts}) (webpack), or createRdxReportRoute(process.cwd(), ${hosts}) (Next.js).`;
-};
-
+// 처리기가 이 Host 를 막았을 때의 안내는 MESSAGES.forbiddenHost 한곳에 둔다(Vite·webpack·Next.js 를 함께 적는다).
 const UPLOAD_MS = 5000;
 const TAB_ID_KEY = 'rdx:tabId';
 const SNAPSHOTS_KEY = 'rdx:snapshots';
@@ -112,6 +110,8 @@ export interface RdxApi {
   snapshot: (name: string) => Promise<RdxReport>;
   /** 이 탭에서 저장한 두 보고서(전, 후)의 증감을 돌려주고 .rdx/compare-<전>-<후>.json 에도 쓴다(쓰지 못해도 거부되지 않는다) */
   compare: (before: string, after: string) => Promise<ReportComparison>;
+  /** rdx 가 제대로 붙었는지 자가 점검: 렌더 훅·가로채기·기록·보고서 플러그인·소스맵 상태와, 찾은 문제(problems) */
+  doctor: () => RdxDiagnostics;
 }
 
 declare global {
@@ -170,7 +170,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
   const target = send && endpointFor(send);
   const state = target ? await target.state : 'missing';
   if (state === 'forbidden-host') {
-    throw new Error(blockedHostMessage());
+    throw new Error(`[react-data-xray] ${MESSAGES.forbiddenHost(location.host, location.hostname)}`);
   }
   if (!send || !target || state === 'missing') {
     throw new Error(NO_PLUGIN_MESSAGE);
@@ -220,7 +220,7 @@ const checkEndpoint = async (send: typeof fetch, path: string): Promise<Endpoint
   const res = (await ask()) ?? (await new Promise((resolve) => window.setTimeout(resolve, HANDSHAKE_RETRY_MS)).then(ask));
   const mark = res?.headers.get(REPORT_HEADER);
   if (mark === 'forbidden-host') {
-    console.warn(blockedHostMessage());
+    console.warn(`[react-data-xray] ${MESSAGES.forbiddenHost(location.host, location.hostname)}`);
   }
   return mark === '1' ? 'ready' : mark === 'forbidden-host' ? 'forbidden-host' : 'missing';
 };
@@ -228,9 +228,28 @@ const checkEndpoint = async (send: typeof fetch, path: string): Promise<Endpoint
 /** 지금 reportPath 를 확인한 결과. 경로가 바뀌었으면(configure) 다시 묻는다. 확인하지 않은 경로로는 보내지 않는다. */
 const endpointFor = (send: typeof fetch): { path: string; state: Promise<Endpoint> } => {
   const path = config().reportPath;
-  if (checked?.path !== path) checked = { path, state: checkEndpoint(send, path) };
+  if (checked?.path !== path) {
+    // 자가 점검(doctor)이 보는 상태도 함께 바꾼다. 늦게 끝난 앞 경로의 결과가 덮어쓰지 않게 지금 경로일 때만 적는다.
+    setReportPluginState('checking');
+    const target = { path, state: checkEndpoint(send, path) };
+    checked = target;
+    void target.state.then((state) => checked === target && setReportPluginState(state));
+  }
   return checked;
 };
+
+/**
+ * 주기 업로드가 "바뀌었나" 를 볼 때 쓰는 값. 받은 commit 수는 패널 자신의 commit 에도 늘어, 그대로 비교하면
+ * 앱이 멈춰 있어도 5초마다 전체를 보낸다. 0 인지(연결 여부)만 남긴다. 보내는 본문에는 그대로 둔다.
+ */
+export const changeKeyOf = (content: Omit<RdxReport, 'generatedAt'>): string =>
+  JSON.stringify({
+    ...content,
+    diagnostics: {
+      ...content.diagnostics,
+      renderHook: { ...content.diagnostics.renderHook, commitsSeen: content.diagnostics.renderHook.commitsSeen > 0 },
+    },
+  });
 
 /**
  * 5초마다 보고서가 바뀌었으면 dev 서버로 보내 `.rdx/report.json` 에 쓰게 한다.
@@ -256,7 +275,7 @@ const startUpload = async (): Promise<void> => {
     const target = endpointFor(send);
     if ((await target.state) !== 'ready') return;
     const { generatedAt, ...content } = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
-    const key = JSON.stringify(content);
+    const key = changeKeyOf(content);
     const idle = key === last;
     // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
     if (idle && Date.now() - lastSent < TAB_HEARTBEAT_MS) return;
@@ -289,7 +308,7 @@ const startUpload = async (): Promise<void> => {
 /** `window.__RDX__` 를 걸고, dev 서버 플러그인이 있으면 보고서를 파일로 보낸다. */
 export const installReportApi = (): void => {
   if (typeof window === 'undefined' || window.__RDX__) return;
-  window.__RDX__ = { report, reset, snapshot, compare: compareSnapshots };
+  window.__RDX__ = { report, reset, snapshot, compare: compareSnapshots, doctor: () => buildDiagnostics() };
   watchTabIdConflict();
   void startUpload();
   // 확인한 뒤에 reportPath 를 바꾸면(늦은 configure) 그 경로로 다시 확인해 업로드를 시작한다.
