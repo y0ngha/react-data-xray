@@ -268,6 +268,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   });
 };
 
+// import 만으로 설치되므로 이 파일은 package.json 의 sideEffects 에 있다(#61).
 if (process.env.NODE_ENV !== 'production') listenToCommits(onCommit, onUnmount);
 
 /** 렌더가 있었던 commit 마다 부른다. */
