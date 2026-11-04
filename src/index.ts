@@ -8,6 +8,7 @@ import { SafeRdxDevtools as Devtools } from './ui/SafeRdxDevtools.js';
 
 export type { RdxDevtoolsProps } from './ui/RdxDevtools.js';
 
+// 모듈 최상위에서 설치하는 파일은 package.json 의 sideEffects 에 둔다. 빠지면 단독 import 를 번들러가 지운다(#61).
 // 조건을 변수에 담지 않고 직접 쓴다. 그래야 webpack 도 production 에서 dev 분기를 상수로 접어 패널 코드를 지운다.
 if (process.env.NODE_ENV !== 'production') {
   // 새로고침 전 요청 기록을 앱 요청보다 먼저 되살린다(같은 탭 안에서만).
