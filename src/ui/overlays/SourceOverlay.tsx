@@ -5,11 +5,10 @@ import type { Box } from '../../core/inspect/types.js';
 import { getRenderInfo, subscribeCommits } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
 import type { RequestRecord } from '../../core/requests/types.js';
-import { isWaste } from '../../core/requests/classify.js';
-import { pathOf, requestKeyOf } from '../../core/requests/requestKey.js';
-import { getEndpointStats, statSummary, type EndpointStat } from '../../core/requests/endpointStats.js';
+import { pathOf } from '../../core/requests/requestKey.js';
+import { buildBoxIndex, type BoxIndex } from '../../core/requests/boxIndex.js';
+import { statSummary } from '../../core/requests/endpointStats.js';
 import type { RequestClass } from '../../core/requests/classify.js';
-import { groupBy } from '../../shared/collections.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
 import { color, MATCH_COLOR, SMALL_FONT, Z_OVERLAY } from '../theme.js';
@@ -28,12 +27,8 @@ interface BoxElements {
   metrics: HTMLElement;
 }
 
-/** 박스 하나가 칠할 것: 라벨 지표(같은 요청의 기록 전체)와 색(출처 이후의 같은 요청이 낭비인지) */
-interface BoxInfo {
-  stat: EndpointStat | undefined;
-  waste: boolean;
-}
-type InfoOf = (record: RequestRecord) => BoxInfo;
+/** 박스 색: 출처 이후의 같은 요청에 낭비가 있으면 빨강, 아니면 매칭 색. React 첫 모양과 painter 가 같이 쓴다. */
+const boxColorOf = (box: Box, index: BoxIndex): string => (index.isWastefulSince(box.hit.record) ? color.warn : MATCH_COLOR[box.hit.match]);
 
 const placeBox = (root: HTMLDivElement, rect: DOMRect | null): void => {
   root.style.display = rect ? '' : 'none';
@@ -58,11 +53,10 @@ const paintOutline = (root: HTMLDivElement): void => {
 };
 
 /** 라벨 지표와 박스 색을 같은 집계로 한꺼번에 칠해, 둘이 잠깐이라도 어긋나지 않게 한다. */
-const paintMetrics = ({ box, root, label, metrics }: BoxElements, infoOf: InfoOf): void => {
-  const { stat, waste } = infoOf(box.hit.record);
-  const text = statSummary(stat);
+const paintMetrics = ({ box, root, label, metrics }: BoxElements, index: BoxIndex): void => {
+  const text = statSummary(index.statOf(box.hit.record));
   setText(metrics, text ? ` req ${text}` : '');
-  const boxColor = waste ? color.warn : MATCH_COLOR[box.hit.match];
+  const boxColor = boxColorOf(box, index);
   if (root.dataset.color === boxColor) return;
   root.dataset.color = boxColor;
   label.style.background = boxColor;
@@ -116,16 +110,13 @@ const paintRenders = ({ box, root, label, count }: BoxElements, now: number): vo
  * 박스 위치·렌더 표시·지표·낭비 색을 React 렌더 없이 DOM 에 직접 쓴다. 박스가 수백 개라 150ms 마다 React 로
  * 다시 그리면 메인 스레드를 다 쓴다. 스크롤은 위치만, commit 은 렌더 표시와 위치를 한 프레임에 한 번 고친다.
  */
-const useBoxPainter = (infoOf: InfoOf) => {
+const useBoxPainter = (index: BoxIndex) => {
   const elements = useRef(new Map<number, BoxElements>());
-  // 요청이 들어올 때마다 박스를 React 로 다시 그리지 않도록, 지표와 색은 최신 집계를 읽어 painter 가 쓴다.
-  const latestInfoOf = useRef(infoOf);
-  // 집계가 바뀌면 다음 프레임에 지표와 색을 다시 칠한다(1초 주기를 기다리지 않는다).
-  const repaintMetricsNow = useRef<() => void>(() => {});
+  // 요청이 들어올 때마다 박스를 React 로 다시 그리지 않도록, 지표와 색은 최신 집계를 읽어 painter 가 1초마다 함께 쓴다.
+  const latestIndex = useRef(index);
   useEffect(() => {
-    latestInfoOf.current = infoOf;
-    repaintMetricsNow.current();
-  }, [infoOf]);
+    latestIndex.current = index;
+  }, [index]);
   const register = useCallback((box: Box, el: HTMLDivElement | null) => {
     const label = el?.querySelector('button');
     const count = el?.querySelector('b');
@@ -138,7 +129,7 @@ const useBoxPainter = (infoOf: InfoOf) => {
     elements.current.set(box.id, els);
     paintRenders(els, Date.now());
     // ref 는 effect 보다 먼저 붙으므로, 같은 렌더에서 바뀐 집계를 읽도록 다음 프레임에 칠한다.
-    requestAnimationFrame(() => paintMetrics(els, latestInfoOf.current));
+    requestAnimationFrame(() => paintMetrics(els, latestIndex.current));
   }, []);
 
   useEffect(() => {
@@ -153,7 +144,7 @@ const useBoxPainter = (infoOf: InfoOf) => {
       const rects = all.map((els) => unionRect(els.box.nodes));
       if (pending.position) all.forEach((els, i) => placeBox(els.root, rects[i]));
       if (pending.renders) all.forEach((els) => paintRenders(els, now));
-      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestInfoOf.current));
+      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestIndex.current));
       // 렌더 수·지표 글자가 바뀌면 라벨 너비도 바뀐다.
       separateLabels(all, rects);
       Object.assign(pending, { position: false, renders: false, metrics: false });
@@ -165,7 +156,6 @@ const useBoxPainter = (infoOf: InfoOf) => {
     const repaintPosition = schedule('position');
     const repaintRenders = schedule('renders');
     const repaintMetrics = schedule('metrics');
-    repaintMetricsNow.current = repaintMetrics;
     const onCommit = () => {
       repaintRenders();
       // 깜빡임을 끄는 다시 그리기
@@ -188,7 +178,6 @@ const useBoxPainter = (infoOf: InfoOf) => {
       window.clearTimeout(flashEnd);
       window.clearInterval(timer);
       unsubscribe();
-      repaintMetricsNow.current = () => {};
       window.removeEventListener('scroll', repaintPosition, true);
       window.removeEventListener('resize', repaintPosition);
     };
@@ -199,13 +188,14 @@ const useBoxPainter = (infoOf: InfoOf) => {
 
 interface SourceBoxProps {
   box: Box;
+  /** 처음 모양의 색. 낭비 박스가 한 프레임이라도 매칭 색으로 보이지 않게 painter 와 같은 색인으로 정한다. */
+  boxColor: string;
   onOpen: (record: RequestRecord) => void;
   register: (box: Box, el: HTMLDivElement | null) => void;
 }
 
-/** 박스 하나. 처음 모양만 매칭 색으로 React 가 그리고, 위치·렌더 표시·지표·낭비 색은 useBoxPainter 가 고친다. */
-const SourceBox = memo(function SourceBox({ box, onOpen, register }: SourceBoxProps) {
-  const boxColor = MATCH_COLOR[box.hit.match];
+/** 박스 하나. 처음 모양만 React 로 그리고, 위치·렌더 표시·지표·색은 useBoxPainter 가 고친다. */
+const SourceBox = memo(function SourceBox({ box, boxColor, onOpen, register }: SourceBoxProps) {
   const ref = useCallback((el: HTMLDivElement | null) => register(box, el), [box, register]);
   return (
     <FixedRect
@@ -242,36 +232,6 @@ const SourceBox = memo(function SourceBox({ box, onOpen, register }: SourceBoxPr
   );
 });
 
-/**
- * 박스 라벨 지표와 색을 찾는 색인. 요청 키(URL 파싱)는 기록마다 여기서 한 번만 계산하고, 박스마다는 Map 조회와 짧은 훑기만 한다.
- * - 지표: 박스 하나는 쿼리·본문까지 같은 요청 하나를 가리키므로 같은 요청별로 센다(page=1 과 page=2 를 섞지 않게). 그 요청의 기록 전체다.
- * - 색: 출처와 같은 요청 중, 같은 페이지(load)에서 출처 이후(출처 포함)에 나간 기록에 낭비가 있으면 빨강이다(#64).
- *   structural sharing 은 응답이 같으면 첫 객체를 두므로 출처는 늘 첫 요청(ok)이고, 그 뒤 같은 응답 재요청이 낭비로 잡힌다.
- *   새로고침 전 페이지의 기록이나, 응답이 바뀌어 출처가 새 요청이 된 경우 그 앞의 중복은 이 데이터와 무관하므로 보지 않는다.
- * 테스트에서 직접 부른다.
- */
-export const boxInfoIndex = (records: readonly RequestRecord[], classes: ReadonlyMap<number, RequestClass>): InfoOf => {
-  const keyById = new Map(records.map((r) => [r.id, requestKeyOf(r)]));
-  const keyOf = (r: RequestRecord): string => keyById.get(r.id) ?? requestKeyOf(r);
-  const stats = new Map(getEndpointStats(records, classes, keyOf).map((s) => [s.endpoint, s]));
-  const byKey = groupBy(records, keyOf);
-  byKey.forEach((list) => list.sort((a, b) => a.startedAt - b.startedAt));
-  return (source) => {
-    const key = keyOf(source);
-    const list = byKey.get(key) ?? [];
-    let waste = false;
-    // 늦게 나간 것부터 출처 시각까지만 훑는다.
-    for (let i = list.length - 1; i >= 0 && list[i].startedAt >= source.startedAt; i--) {
-      const r = list[i];
-      if (r.load === source.load && isWaste(classes.get(r.id))) {
-        waste = true;
-        break;
-      }
-    }
-    return { stat: stats.get(key), waste };
-  };
-};
-
 /** 화면 박스: 분석 대상 안에서 데이터 출처가 있는 컴포넌트마다 박스, URL 과 그 API 의 지표, 렌더 횟수를 그리고 렌더될 때마다 깜빡인다. */
 export const SourceOverlay = ({
   boxes,
@@ -282,13 +242,13 @@ export const SourceOverlay = ({
   records: readonly RequestRecord[];
   classes: ReadonlyMap<number, RequestClass>;
 }) => {
-  const infoOf = useMemo(() => boxInfoIndex(records, classes), [records, classes]);
-  const register = useBoxPainter(infoOf);
+  const index = useMemo(() => buildBoxIndex(records, classes), [records, classes]);
+  const register = useBoxPainter(index);
   const { open } = useRequestActions();
   return (
     <>
       {boxes.map((box) => (
-        <SourceBox key={box.id} box={box} onOpen={open} register={register} />
+        <SourceBox key={box.id} box={box} boxColor={boxColorOf(box, index)} onOpen={open} register={register} />
       ))}
     </>
   );

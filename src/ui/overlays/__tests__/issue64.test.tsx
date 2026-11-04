@@ -56,6 +56,13 @@ afterEach(() => vi.restoreAllMocks());
 const boxColors = (path: RegExp) =>
   screen.getAllByRole('button', { name: path }).map((b) => b.closest<HTMLElement>('[data-color]')?.dataset.color);
 
+/** jsdom 이 정규화한 CSS 값(#f87171 → rgb(...))과 비교하려고 같은 값을 한 번 써 보고 읽는다. */
+const cssColor = (value: string, prop: 'background' | 'outline' = 'background'): string => {
+  const el = document.createElement('div');
+  el.style[prop] = value;
+  return el.style[prop];
+};
+
 describe('박스 색 (#64)', () => {
   it('출처가 첫 요청(ok)이어도 같은 요청에 같은 응답 재요청이 있으면 박스가 빨강이다', async () => {
     render(<List url="/api/i64" />);
@@ -135,7 +142,23 @@ describe('박스 색 (#64)', () => {
     expect(colors.every((c) => c === MATCH_COLOR.exact)).toBe(true);
   });
 
-  it('분류가 나중에 바뀌면 박스를 다시 그리지 않아도 라벨과 색이 함께 바뀐다', async () => {
+  it('처음 그릴 때부터 낭비 색이다(painter 가 칠하기 전 한 프레임도 매칭 색으로 보이지 않는다)', async () => {
+    render(<List url="/api/i64m" />);
+    await act(flush);
+    await fetch('/api/i64m').then((r) => r.json());
+    const own = ordered('/api/i64m');
+    // painter 의 프레임이 오지 않게 한다.
+    vi.mocked(window.requestAnimationFrame).mockImplementation(() => 1);
+    renderWithActions(<Boxes classes={new Map<number, RequestClass>([[own[1].id, 'same-response']])} />);
+    await act(flush);
+    const roots = screen.getAllByRole('button', { name: /\/api\/i64m/ }).map((b) => b.closest<HTMLElement>('[data-color]'));
+    expect(roots.length).toBeGreaterThan(0);
+    expect(
+      roots.every((el) => el?.dataset.color === color.warn && el.style.outline === cssColor(`1px solid ${color.warn}`, 'outline')),
+    ).toBe(true);
+  });
+
+  it('분류가 나중에 바뀌면 색은 바로, 라벨은 painter 주기에 같은 색인으로 바뀐다', async () => {
     render(<List url="/api/i64u" />);
     await act(flush);
     await fetch('/api/i64u').then((r) => r.json());
@@ -150,10 +173,12 @@ describe('박스 색 (#64)', () => {
       </RequestActionsProvider>,
     );
     await act(flush);
+    expect(boxColors(/\/api\/i64u/).every((c) => c === color.warn)).toBe(true);
+    // painter 의 1초 주기
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1100)));
     const labels = screen.getAllByRole('button', { name: /\/api\/i64u\s*req ×2 · same response 1/ });
     expect(labels.length).toBeGreaterThan(0);
-    expect(labels.every((b) => b.closest<HTMLElement>('[data-color]')?.dataset.color === color.warn)).toBe(true);
-    // 라벨 바탕도 같은 색이다(jsdom 은 rgb 로 바꿔 둔다).
-    expect(labels.every((b) => b.style.background === 'rgb(248, 113, 113)')).toBe(true);
+    // 라벨 바탕도 같은 색이다.
+    expect(labels.every((b) => b.style.background === cssColor(color.warn))).toBe(true);
   });
 });
