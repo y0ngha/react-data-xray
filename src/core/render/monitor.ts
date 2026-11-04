@@ -14,6 +14,7 @@ import { getMountStats, recordMounts, resetMounts, type MountRef } from './mount
 import { drain, groupRendersSteps, type RenderGroup } from './groups.js';
 import { causeOf } from './networkCause.js';
 import { reasonOf } from './renderReason.js';
+import { noteCommit, noteRender, resetRenderTimes } from './renderTimes.js';
 import { summarize, WINDOW_MS } from './summary.js';
 import type { Commit, NetworkCause, RenderEntry, RenderEvent, RenderOrigin, RenderReason, RenderSummary } from './types.js';
 
@@ -103,6 +104,7 @@ const recordRender = (p: Pending, now: number, inherited: Inherited): RenderEven
     origin: startsRender ? undefined : inherited.origin,
   };
   entry.fiber = fiber;
+  noteRender(fiber, p.alt, now);
   entry.events.push(event);
   if (entry.events.length > MAX_EVENTS_PER_COMPONENT) entry.events.shift();
   active.add(entry);
@@ -256,6 +258,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       active.add(entry);
     });
     commits.push({ id: ++commitSeq, time: now, count: pending.length, ms: totalMs, startedBy });
+    noteCommit(now);
     if (commits.length > MAX_COMMITS) commits.shift();
     commitListeners.forEach((listener) => listener());
     return true;
@@ -278,6 +281,7 @@ export const setRenderMonitoring = (on: boolean): void => {
   active.clear();
   commits.length = 0;
   resetMounts();
+  resetRenderTimes();
   unmounted = [];
 };
 
@@ -294,6 +298,7 @@ export const resetRenderStats = (): void => {
   active.clear();
   commits.length = 0;
   resetMounts();
+  resetRenderTimes();
   unmounted = [];
 };
 
