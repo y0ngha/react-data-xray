@@ -24,11 +24,11 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
   useRenderMonitoring();
   const [paused, setPaused] = useState(false);
   const [hovered, setHovered] = useState<BarLayout | null>(null);
-  const { hover } = useRequestActions();
+  const { hover, classOf } = useRequestActions();
   const boxRef = useRef<HTMLDivElement>(null);
   const width = Math.max(MIN_WIDTH, useElementWidth(boxRef, DEFAULT_WIDTH));
   const now = useNow(TICK_MS, paused);
-  const layout = layoutTimeline(records, getCommits(), now, width);
+  const layout = layoutTimeline(records, getCommits(), now, width, classOf);
   const onHover = (bar: BarLayout | null) => {
     setHovered(bar);
     hover(bar?.record ?? null);

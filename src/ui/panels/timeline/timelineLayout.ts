@@ -1,4 +1,5 @@
-import { findBursts, screenEntryTest } from '../../../core/requests/bursts.js';
+import { classifyBursts } from '../../../core/requests/bursts.js';
+import type { RequestClass } from '../../../core/requests/classify.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import type { Commit } from '../../../core/render/types.js';
 
@@ -23,7 +24,7 @@ interface BurstLayout {
   x: number;
   width: number;
   count: number;
-  /** 화면 진입(페이지 첫 로딩·라우트 이동) 직후의 몰림(확인 필요)인지 */
+  /** 화면 진입(페이지 첫 로딩·화면 이동) 직후의 몰림(확인 필요)인지 */
   initial: boolean;
 }
 
@@ -61,12 +62,16 @@ const assignLanes = (records: readonly RequestRecord[]): number[] =>
     { lanes: [], ends: [] },
   ).lanes;
 
-/** 최근 20초의 요청 막대, 요청 몰림 구간, 렌더 commit 눈금을 화면 좌표로 계산한다. */
+/**
+ * 최근 20초의 요청 막대, 요청 몰림 구간, 렌더 commit 눈금을 화면 좌표로 계산한다.
+ * 몰림은 버튼과 같은 판정(`classifyBursts`)으로 찾고, 창에 걸친 몰림이 잘리지 않게 기록 전체에서 찾는다.
+ */
 export const layoutTimeline = (
   records: readonly RequestRecord[],
   commits: readonly Commit[],
   now: number,
   width: number,
+  classOf: (r: RequestRecord) => RequestClass,
 ): TimelineLayout => {
   const from = now - TIMELINE_MS;
   const x = (t: number) => ((t - from) / TIMELINE_MS) * width;
@@ -75,8 +80,6 @@ export const layoutTimeline = (
   const reqH = Math.max(1, ...lanes.map((l) => l + 1)) * (LANE_H + LANE_GAP);
   const recentCommits = commits.filter((c) => c.time >= from);
   const maxCount = Math.max(1, ...recentCommits.map((c) => c.count));
-  // 20초 창 밖의 앞 요청까지 봐야 창 안에서 라우트가 바뀐 지점을 안다.
-  const isEntry = screenEntryTest(records);
   return {
     width,
     height: reqH + COMMIT_H + AXIS_H,
@@ -89,13 +92,15 @@ export const layoutTimeline = (
       y: lanes[i] * (LANE_H + LANE_GAP) + LANE_GAP,
       width: Math.max(MIN_BAR_W, x(record.startedAt + record.durationMs) - x(record.startedAt)),
     })),
-    bursts: findBursts(visible.map((r) => r.startedAt)).map((b) => ({
-      key: b.from,
-      x: x(b.from) - 2,
-      width: Math.max(4, x(b.to) - x(b.from) + 4),
-      count: b.count,
-      initial: isEntry(b.from),
-    })),
+    bursts: classifyBursts(records, classOf)
+      .filter((b) => b.to >= from)
+      .map((b) => ({
+        key: b.from,
+        x: x(b.from) - 2,
+        width: Math.max(4, x(b.to) - x(b.from) + 4),
+        count: b.count,
+        initial: b.entry,
+      })),
     commits: recentCommits.map((c) => ({
       key: c.id,
       x: x(c.time),

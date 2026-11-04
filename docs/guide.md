@@ -58,7 +58,7 @@ Finds the nearest component that holds response data and shows the request, sent
   </tr>
 </table>
 
-Repeats that have a reason are shown separately rather than counted as waste: regular polling, automatic refetch when the window regains focus, bursts during initial load, and React running effects twice in development (StrictMode). Without this, persistent red markers would hide real problems.
+Repeats that have a reason are shown separately rather than counted as waste: regular polling, automatic refetch when the window regains focus, bursts right after the page loads or the app moves to another screen (SPA route change), and React running effects twice in development (StrictMode). Without this, persistent red markers would hide real problems.
 
 Next.js Server Actions all go to the page URL, but rdx splits them by function name (`POST /NVDA (getBarsAction)`).
 

@@ -63,17 +63,35 @@ it('페이지 첫 로딩 3초 안의 몰림에는 알리지 않는다', () => {
   expect(result.current.alert).toBe(false);
 });
 
-it('라우트를 옮긴 직후 새 화면의 몰림에는 알리지 않는다 (#82)', () => {
-  fakeAt(performance.timeOrigin + 60_000);
-  // route 는 가로채기가 보낸 시점의 pathname 으로 채운다. 여기서는 직접 단다.
-  const home = createRecord('fetch', 'GET', '/api/home');
-  home.route = '/home';
-  finishRecord(home, 200);
-  vi.advanceTimersByTime(5000);
-  for (const r of burst('d')) r.route = '/orders';
+// #82: 데이터 라우터는 새 화면의 요청을 받은 뒤에 주소를 바꾼다. 몰림이 끝나고, 버튼이 한 번 돌고, 그 뒤에 이동한다.
+// 앞 테스트의 이동 기록과 겹치지 않게 테스트마다 다른 시각에서 시작한다.
+const alertsAroundLoader = (navigate: boolean, start: number): boolean[] => {
+  fakeAt(performance.timeOrigin + start);
   const { result } = renderHook(() => useProblemSignal(getRecords(), ok, 0));
-  act(() => {
-    vi.advanceTimersByTime(1000);
-  });
-  expect(result.current.alert).toBe(false);
+  const alerts: boolean[] = [];
+  const tick = (ms: number) => {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  };
+  tick(100);
+  burst(navigate ? 'loader' : 'waste'); // 몰림이 끝나 기록에 들어온다.
+  tick(900); // 버튼이 돈다. 아직 이동 전이다.
+  alerts.push(result.current.alert);
+  tick(50);
+  if (navigate) window.history.pushState(null, '', '/orders');
+  for (let i = 0; i < 3; i++) {
+    tick(i === 0 ? 950 : 1000);
+    alerts.push(result.current.alert);
+  }
+  window.history.replaceState(null, '', '/');
+  return alerts;
+};
+
+it('주소를 바꾸기 전에 받은 새 화면의 몰림에는 깜빡이지 않는다 (#82)', () => {
+  expect(alertsAroundLoader(true, 60_000)).toEqual([false, false, false, false]);
+});
+
+it('이동이 따르지 않은 몰림은 끝나고 1초 뒤에 한 번 알린다', () => {
+  expect(alertsAroundLoader(false, 120_000)).toEqual([false, true, false, false]);
 });

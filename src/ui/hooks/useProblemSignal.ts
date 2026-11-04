@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { findQueryClients } from '../../core/reactQuery/cacheAudit.js';
 import { getTopRenders } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
-import { findBursts, screenEntryTest } from '../../core/requests/bursts.js';
+import { classifyBursts } from '../../core/requests/bursts.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { useInterval } from './useInterval.js';
@@ -14,6 +14,8 @@ const TICK_MS = 1000;
 const FIND_CLIENTS_EVERY = 5;
 // 버튼을 깜빡이게 할 "방금" 의 범위
 const RECENT_MS = 2000;
+// 몰림이 끝나고 이만큼 지난 뒤에 판정한다(몰림 뒤에 오는 화면 이동을 기다린다, 화면 진입의 1초 앞 창과 같다).
+const SETTLE_MS = 1000;
 
 /** 지금 렌더 폭주(최근 10초에 RENDER_STORM 번 이상) 중인 컴포넌트 이름 */
 const stormingNames = (now: number): Set<string> =>
@@ -23,21 +25,18 @@ const stormingNames = (now: number): Set<string> =>
       .map((e) => e.name),
   );
 
-/** 방금 끝난 요청 몰림의 끝 시각. 화면 진입(페이지 첫 로딩·라우트 이동) 몰림과, 이유가 확실한 반복(무시·StrictMode)은 뺀다. */
-const latestBurstEnd = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass, now: number): number => {
-  const starts = records
-    .filter((r) => now - r.startedAt <= RECENT_MS)
-    .filter((r) => classOf(r) !== 'ignored' && classOf(r) !== 'strict-mode')
-    .map((r) => r.startedAt);
-  // 타임라인과 같은 판정으로, 몰림 단위로 화면 진입인지 본다.
-  const isEntry = screenEntryTest(records);
-  return Math.max(
+/**
+ * 방금 끝난 요청 몰림의 끝 시각. 화면 진입(페이지 첫 로딩·화면 이동) 몰림과, 이유가 확실한 반복(무시·StrictMode)은 뺀다.
+ * 몰림이 끝나고 1초가 지난 뒤에 판정한다. 주소를 바꾸기 전에 데이터를 받는 라우터는 몰림 뒤에 이동하므로,
+ * 바로 판정하면 진입 몰림에 버튼이 깜빡인다. 그래서 낭비 몰림 알림은 최대 1초 늦다.
+ */
+const latestBurstEnd = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass, now: number): number =>
+  Math.max(
     0,
-    ...findBursts(starts)
-      .filter((b) => !isEntry(b.from))
+    ...classifyBursts(records, classOf)
+      .filter((b) => !b.entry && now - b.to >= SETTLE_MS && now - b.to <= SETTLE_MS + RECENT_MS)
       .map((b) => b.to),
   );
-};
 
 interface Signal {
   storming: ReadonlySet<string>;
