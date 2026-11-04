@@ -161,19 +161,22 @@ describe('이슈 30: 겹친 무효화로 취소된 요청', () => {
       staleTime: 60_000,
     }).subscribe(() => {});
     await sleep(20);
+    const at = Date.now();
     await Promise.all([client.invalidateQueries({ queryKey: [...key, 1] }), client.invalidateQueries({ queryKey: key })]);
-    // 두 번째 무효화 시각에 진행 중이다가 abort 로 끝난 요청
+    // 앞 무효화가 시작한 재조회가 보내, 두 번째 무효화 시각에 진행 중이다가 abort 로 끝난 요청
     const cancelled = {
       id: 99999,
       error: 'The operation was aborted',
-      startedAt: Date.now() - 20,
-      durationMs: 40,
+      startedAt: at,
+      durationMs: Date.now() - at + 20,
     } as RequestRecord;
     expect(overlapCancelOf(cancelled)).toHaveLength(2);
     expect(overlapCancelOf({ ...cancelled, error: undefined })).toBeUndefined();
     // abort 가 아닌 오류, 무효화 전에 이미 끝난 요청은 취소가 아니다
     expect(overlapCancelOf({ ...cancelled, error: 'Failed to fetch' })).toBeUndefined();
-    expect(overlapCancelOf({ ...cancelled, durationMs: 5 })).toBeUndefined();
+    expect(overlapCancelOf({ ...cancelled, startedAt: at - 50, durationMs: 5 })).toBeUndefined();
+    // 같은 시각에 진행 중이었어도 겹친 쿼리의 fetch 가 보낸 요청이 아니면(한참 앞에 시작한 다른 요청) 취소가 아니다
+    expect(overlapCancelOf({ ...cancelled, startedAt: at - 5_000, durationMs: 6_000 })).toBeUndefined();
   });
 });
 

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TabReportButton } from '../TabReportButton.js';
 import { SnapshotButton } from '../compare/SnapshotButton.js';
 import { PanelToolbar } from '../PanelToolbar.js';
+import { buildDiagnostics } from '../../../core/diagnostics/diagnostics.js';
 import type { RdxReport } from '../../../core/report/buildReport.js';
 import { NO_PLUGIN_MESSAGE } from '../../../core/report/reportApi.js';
 
@@ -128,6 +129,7 @@ describe('성공 알림 4s 후 사라짐, 실패는 유지 (#49)', () => {
       snapshot: vi.fn<(name: string) => Promise<RdxReport>>(async () => {
         throw new Error(NO_PLUGIN_MESSAGE);
       }),
+      doctor: buildDiagnostics,
       compare: vi.fn<() => Promise<import('../../../core/report/compare.js').ReportComparison>>(async () => ({
         requests: [],
         renders: [],

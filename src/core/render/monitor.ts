@@ -7,7 +7,7 @@ import {
   rememberRootContainer,
   resolveJsxLocation,
 } from '../fiber/tree.js';
-import { isComposite, MEMO_COMPONENT, PERFORMED_WORK, SIMPLE_MEMO_COMPONENT, type Fiber } from '../fiber/types.js';
+import { isComposite, MEMO_COMPONENT, PERFORMED_WORK, SIMPLE_MEMO_COMPONENT, STRICT_LEGACY_MODE, type Fiber } from '../fiber/types.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { listenToCommits } from './devtoolsHook.js';
 import { getMountStats, recordMounts, remountAt, resetMounts, type MountRef } from './mounts.js';
@@ -86,6 +86,13 @@ const entryOf = (fiber: Fiber, alt: Fiber | null, memoized: boolean, compiled: b
   return entry;
 };
 
+// 기록한 앱 컴포넌트 렌더 중 StrictMode 아래였던 수(자가 점검용, #76). 패널 자신은 기록하지 않으므로 앱 fiber 만 센다.
+let appRendersSeen = 0;
+let strictRendersSeen = 0;
+
+/** 앱이 StrictMode 안에서 그려지는지. 기록한 렌더가 없으면(감시가 꺼져 있었음) null */
+export const strictModeSeen = (): boolean | null => (strictRendersSeen > 0 ? true : appRendersSeen > 0 ? false : null);
+
 // 스스로 렌더를 시작하는 이유. 나머지(props·같은 내용·새 콜백·부모)는 조상이 시작한 렌더를 따라온 것이다.
 const STARTS_RENDER = new Set<RenderReason>(['mount', 'state', 'context']);
 
@@ -93,6 +100,8 @@ const STARTS_RENDER = new Set<RenderReason>(['mount', 'state', 'context']);
 const recordRender = (p: Pending, now: number, seq: number, inherited: Inherited): RenderEvent => {
   const { fiber, snap } = p;
   const entry = entryOf(fiber, p.alt, p.memoized, p.compiled);
+  appRendersSeen++;
+  if (((fiber.mode ?? 0) & STRICT_LEGACY_MODE) !== 0) strictRendersSeen++;
   const result = reasonOf(snap);
   const startsRender = STARTS_RENDER.has(result.reason);
   const event: RenderEvent = {
@@ -106,7 +115,11 @@ const recordRender = (p: Pending, now: number, seq: number, inherited: Inherited
   };
   entry.fiber = fiber;
   // 중복 요청이 다시 나간 이유(requests/repeatCause)를 이 commit 의 사본으로 정해 둔다. 뒤 렌더가 fiber 를 덮어도 그대로다.
-  noteCommitCause(entry.name, seq, p.alt ? { deps: changedEffectDep(snap) } : { remount: remountAt(entry.name, now) });
+  noteCommitCause(
+    entry.name,
+    seq,
+    p.alt ? { time: now, deps: changedEffectDep(snap) } : { time: now, mounted: true, remount: remountAt(entry.name, now) },
+  );
   entry.events.push(event);
   if (entry.events.length > MAX_EVENTS_PER_COMPONENT) entry.events.shift();
   active.add(entry);

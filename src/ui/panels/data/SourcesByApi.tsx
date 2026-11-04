@@ -1,3 +1,4 @@
+import { dataEmptyReason } from '../../../core/diagnostics/diagnostics.js';
 import type { Box } from '../../../core/inspect/types.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
@@ -35,7 +36,7 @@ export const SourcesByApi = ({ boxes, title }: { boxes: readonly Box[]; title: s
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ color: color.heading }}>{title}</div>
-      {uses.length === 0 && <Muted>No component found that receives response data as props.</Muted>}
+      {uses.length === 0 && <Muted>No component found that receives response data as props. {dataEmptyReason()}</Muted>}
       {uses.map((use) => (
         <div key={use.endpoint} style={rowStyle}>
           <RequestLink record={use.latest}>

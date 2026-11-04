@@ -38,6 +38,10 @@
     "./middleware": {
       "types": "./dist/server/middleware.d.ts",
       "default": "./dist/server/middleware.js"
+    },
+    "./next": {
+      "types": "./dist/server/next.d.ts",
+      "default": "./dist/server/next.js"
     }
   },
   "files": [
@@ -87,6 +91,7 @@
     "react-dom": "^18.3.1",
     "rolldown": "^1.2.15",
     "typescript": "^7.0.2",
+    "vite": "8.3.5",
     "vitest": "^5.0.5"
   }
 }

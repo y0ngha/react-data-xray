@@ -10,6 +10,7 @@ Use this when you want to hand off "this screen is slow" or "too many requests" 
 window.__RDX__.reset();                   // start a fresh measurement
 // … interact with the page …
 const report = await window.__RDX__.report();
+window.__RDX__.doctor();                  // is rdx attached? same as report.diagnostics
 await window.__RDX__.snapshot('before');  // saves to .rdx/before.json (plugin required, see below)
                                           // or Measure › Save in the panel toolbar (same effect)
 ```
@@ -35,7 +36,12 @@ export default {
 };
 ```
 
-There is currently no way to attach the plugin to a Next.js dev server; use `window.__RDX__` instead.
+```ts
+// Next.js App Router: app/%5F_rdx/report/route.ts (src/app/... if you use a src folder)
+export { GET, POST } from 'react-data-xray/next';
+```
+
+Next.js treats folders starting with `_` as private and leaves them out of routing, so the first `_` of `__rdx` is written as `%5F` (`%5F_rdx`); the route still answers at `/__rdx/report`. It only answers under `next dev` and returns 404 in `next build`/`next start`. Apps with a `basePath` are not supported yet (the browser sends to `/__rdx/report`).
 
 Add one line to your AI instruction file (`CLAUDE.md`, etc.): `Before fixing a performance or request problem, read .rdx/report.json.`
 
@@ -58,10 +64,11 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 | `renders.truncated` · `droppedInstances` | Whether rendered instances exceeded 5000 and the count excluded (those with fewest renders). When true, `components[]` counts may be lower than actual |
 | `renders.components[]` | `renders` · `avoidable`, per-reason counts, `stateChanges` (changed hooks and periodicity), `startedRenders` (child renders started by this component and which props changed), `causedBy`, `renderedAt`, `networkCauses`, `changedProps`, `advice` |
 | `resetAt` | ms epoch of the last `reset()` call in this tab; `null` if never reset. When comparing two snapshots, check that both have a `resetAt` — if only one does, the comparison may mix post-reset and pre-reset data |
+| `diagnostics` | Same as `window.__RDX__.doctor()`: `renderHook` (`commitsSeen`, `reactVersion`, `strictMode`: `null` until a render was recorded), `capture` (`requestsBeforeInstall`), `requests` (`recorded`, `restored`, `jsonResponses`), `reportPlugin` (`ready` · `missing` · `forbidden-host` · `checking`), `sourceMaps.failures`, `sameResponseMemory`, and `problems` with how to fix each. Read `problems` first: if rdx loaded after react-dom, render data is empty and early requests are missing |
 | `howToRead` · `howToReadVersion` | How to interpret the fields above, and its version. `report({ howToRead: false })` leaves `howToRead` out (files written by the plugin always include it) |
 
 - `snapshot(name)`: name may contain letters, digits, and `. _ -`, up to 64 characters; `report` is reserved. Rejected if the plugin is not running.
 - Security: to prevent other sites from injecting fake reports, the plugin accepts requests only from `localhost`, `*.localhost`, and IP addresses. For other hostnames use `rdx({ allowedHosts: ['my-app.local'] })`. Vite reuses `server.allowedHosts` automatically.
-- Options: `rdx({ dir: '.rdx', allowedHosts: [...] })`, `rdxReportMiddleware(root, { dir, allowedHosts })`.
+- Options: `rdx({ dir: '.rdx', allowedHosts: [...], inject: false })`, `rdxReportMiddleware(root, { dir, allowedHosts })`, `export const { GET, POST } = createRdxReportRoute(root, { dir, allowedHosts })` from `react-data-xray/next`. `inject: true` (Vite 4+) adds `import 'react-data-xray'` to the `index.html` Vite serves, running before the app's entry module, so the entry file needs only `<RdxDevtools />`. It does nothing when Vite does not serve the HTML (SSR, framework modes, backend integrations); see README.
 
 </details>

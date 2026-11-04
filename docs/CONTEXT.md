@@ -75,19 +75,20 @@ React Query의 `QueryObserver`는 모양(`getCurrentResult`, `options.queryKey`)
 | 분류 | 조건 | 표시 |
 |---|---|---|
 | 중복 요청, 같은 응답 재요청 | 위 판정에 걸리고 아래 어디에도 해당하지 않음 | 빨강(낭비) |
-| 주기 요청 | 같은 요청이 3번 이상, 1초 이상의 일정한 간격(중앙값 ±25%)으로 반복 | 노랑(확인 필요) |
+| 주기 요청 | 같은 요청이 3번 이상, 1초 이상의 일정한 간격(중앙값 ±25%)으로 반복. 한 주기보다 훨씬 이른 요청(끼어든 재조회)은 건너뛰고, 훨씬 늦은 간격(탭 숨김으로 멈춤)에서는 구간을 새로 잇는다. 이어진 구간의 요청이 기록의 70% 이상일 때 구간의 요청만 주기 요청이다. 구간 밖 요청끼리 또 일정하게 3번 이상 이어지면(박자가 바뀜) 주기로 보지 않는다 | 노랑(확인 필요) |
 | 포커스 재요청 | 창 포커스·탭 전환 직후 1초 안에 같은 응답을 다시 받음(React Query `refetchOnWindowFocus`, SWR `revalidateOnFocus`) | 노랑(확인 필요) |
 | 화면 진입 몰림 | 몰림의 500ms 창 가운데 페이지 진입 후 3초 안에 시작한 창, 또는 화면 이동이 [창 시작 − 3초, 창의 마지막 응답 + 1초] 안에 있는 창. 화면 이동은 `pushState`·`replaceState`·`popstate`·`hashchange` 뒤 pathname(해시 라우터면 `#/…`·`#!/…` 경로까지)이 바뀐 것입니다. 쿼리만 바뀐 것, 페이지 안 앵커(`#section`)는 이동이 아닙니다. | 노랑(확인 필요) |
 | staleTime 경과 재조회 | React Query 가 staleTime 이 지나 다시 받았고 응답이 같음(`stale-elapsed`) | 노랑(확인 필요) |
 | 무효화 뒤 재조회 | 무효화해서 다시 받았지만 바뀐 것이 없음(`after-invalidate`) | 노랑(확인 필요) |
-| StrictMode | 중복이지만 앞선 요청이 취소(abort)됐거나, 호출 스택에 React의 StrictMode 재실행 함수(`commitDoubleInvokeEffectsInDEV` 등)가 있음 | 회색(정상) |
+| StrictMode | 중복이고 호출 스택에 React의 StrictMode 재실행 함수(`commitDoubleInvokeEffectsInDEV` 등)가 있음. 또는 앞선 요청이 취소(abort)됐고, 두 요청이 200ms 안에 같은 commit 순번에서 나갔고, 겹친 무효화가 그 요청을 취소한 것이 아니고, 보낸 컴포넌트가 그 commit(useLayoutEffect 면 다음 commit)에서 마운트됐고 그 commit 뒤 2초 안에 나감. 그 commit 에 렌더 기록이 없으면(감시를 켜기 전 첫 마운트) 마운트 조건은 보지 않음 | 회색(정상) |
 | 재연결 재요청 | 네트워크 재연결(`online`) 직후 1초 안에 같은 응답을 다시 받음 | 회색(정상) |
 | 무시 | 사용자가 요청 탭에서 무시로 지정한 엔드포인트(설정 기억) | 회색(정상) |
 
 **진짜 낭비를 숨기지 않기 위한 원칙.** 의도된 동작일 가능성이 높더라도 설정을 점검할 가치가 있는 것(바뀌지 않는 데이터를 자주 polling, 포커스마다 같은 응답, 진입 시 요청 수십 건)은 회색으로 숨기지 않고 노랑으로 남깁니다. 회색은 이유가 확실한 경우만 씁니다.
 - StrictMode는 "같은 위치에서 동시에 2건" 같은 추정을 쓰지 않습니다. 같은 위젯 두 개가 동시에 같은 요청을 보내는 진짜 낭비와 구별할 수 없기 때문입니다.
 - 포커스·재연결 규칙은 같은 응답 재요청에만 적용합니다. 포커스 직후 여러 곳에서 겹쳐 보낸 중복은 낭비로 남깁니다.
-- 간격이 불규칙한 반복(정리되지 않은 interval 등)은 주기 요청으로 보지 않습니다.
+- 간격이 불규칙한 반복(정리되지 않은 interval 등)은 주기 요청으로 보지 않습니다. 10초 주기가 5초로 바뀌는 것처럼 박자가 바뀐 반복도 interval 이 겹쳐 돈 신호라 주기로 보지 않습니다. 반대로 간격 하나가 어긋났다고 그 요청의 기록 전체를 빨강으로 바꾸지는 않습니다(끊김 하나는 허용 오차를 넓혀도 못 잡습니다).
+- 취소(abort)만으로는 StrictMode 로 보지 않습니다. React Query 는 마지막 관찰자가 빠질 때, 겹친 무효화는 앞 재조회를, 다시 받기 핸들러와 AbortController 를 쓰는 검색 입력은 앞 요청을 취소합니다. StrictMode 는 마운트할 때만 effect 를 두 번 돌리므로, 취소는 마운트한 commit 직후의 요청일 때만 근거로 씁니다(마운트 뒤 2초가 지나 핸들러가 보낸 요청은 아닙니다). 보낸 컴포넌트를 모르면 근거가 아닙니다. 다만 앱의 첫 마운트는 RDX 버튼이 렌더 감시를 켜기 전이라 그 commit 의 렌더 기록이 없습니다. 이때만 간격·순번·취소로 판단합니다(이 판단은 유휴 큐에서 정해 기록에 담습니다).
 - 화면 이동은 일어난 그때 기록합니다(`capture/navigation.ts`). 감싼 `pushState`·`replaceState` 는 원래 메서드를 같은 `this`·인자로 먼저 부르고 그 반환값을 돌려준 뒤, 바뀐 `location` 을 읽어 기록합니다. 기록이 실패해도 앱에는 알리지 않습니다. Navigation API 의 `navigate` 는 이동이 확정되기 전(취소·다운로드 포함)에 오므로 쓰지 않습니다. 요청 기록의 `route` 로 이동을 짐작하지 않는 것은, 이동 뒤 첫 요청이 늦게 나가면(정적 화면) 그 뒤의 낭비 몰림까지 진입이 되고, 해시 라우터는 pathname 이 바뀌지 않기 때문입니다.
 - 창의 마지막 응답 1초 뒤까지 이동을 기다리는 것은 데이터 라우터(React Router loader, Next.js App Router 의 RSC 요청)가 새 화면의 응답을 받은 뒤에 주소를 바꾸기 때문입니다. 요청 시작이 아니라 응답 끝에서 재므로 백엔드가 느려도 진입으로 봅니다. 그 대가로 낭비 몰림 직후 1초 안에 화면을 옮기면 그 몰림도 노랑이 되지만, 숨기지 않고 타임라인에 남습니다. 같은 이유로 버튼은 창의 응답이 모두 끝나고 1초가 지난 뒤에 판정하므로 낭비 몰림 깜빡임은 최대 1초 늦습니다. 창이 시작하고 1초가 지났는데 몰림이 1초 넘게 이어지면 응답을 기다리지 않고 알립니다(끝나지 않는 반복).
 - 진입인지는 몰림 전체가 아니라 500ms 창마다 봅니다(`analyzeBursts`). 겹치는 창을 합친 몰림 전체로 판정하면, 화면 이동 직후 시작한 끝나지 않는 반복이 끝까지 진입으로 남고, 끝 시각이 계속 늘어 버튼이 판정할 때를 얻지 못합니다. 합친 몰림은 그리기용이며 진입·낭비가 바뀌는 창에서 잘라 구간으로 나눕니다. 이동에 걸친 몰림은 걸친 창이 모두 진입이라 한 진입 구간이 됩니다. 이미 알린 창에서 이어지는 창은 같은 몰림으로 보고 다시 깜빡이지 않습니다.
@@ -112,6 +113,7 @@ React Query의 `QueryObserver`는 모양(`getCurrentResult`, `options.queryKey`)
 React DevTools와 같은 `__REACT_DEVTOOLS_GLOBAL_HOOK__`의 commit 이벤트로 컴포넌트별 렌더 횟수와 commit 시각을 셉니다.
 
 - react-dom은 로드될 때 이 훅에 등록하므로 rdx의 렌더 감시 모듈을 **react-dom보다 먼저** 평가합니다. React DevTools 확장이 없으면 최소한의 훅을 직접 만듭니다.
+- 순서가 틀리면 오류 없이 렌더 탭이 비고 앞선 요청이 빠지므로, 훅은 렌더 감시가 꺼져 있어도 받은 commit 을 셉니다. 진입 모듈을 평가하고(패널 없이 보고서만 쓰는 설정도) 또는 `<RdxDevtools>` 가 마운트되고 2초 뒤 유휴 큐에서, 앱이 그려졌는데 commit 이 0 건이거나 설치 전에 시작한 fetch·XHR(resource timing)이 있으면 콘솔에 한 번 고치는 방법(엔트리 맨 위, Next.js 는 `instrumentation-client.ts`)과 함께 알립니다(#75). 2초를 기다리는 것은 rdx 보다 먼저 나간 요청이 끝나야 resource 항목이 생기기 때문입니다. 앱이 아직 그려지지 않았으면 몇 번 더 보고, 문제마다 한 번만 경고합니다. 주기 업로드는 commit 수가 바뀐 것만으로는 다시 보내지 않습니다(패널 자신의 commit 에도 늘어서).
 - 부모가 bailout하면 자식 fiber는 지난 commit의 객체와 플래그가 그대로 남습니다. 같은 fiber 객체면 렌더하지 않은 것으로 봅니다.
 - 렌더 감시는 RDX 버튼이 붙어 있는 동안 켭니다. 패널을 닫아도 버튼이 렌더 폭주를 알려야 하기 때문입니다. commit 훅의 비용은 프로젝트 목록 화면에서 8초에 58ms 정도였습니다.
 - rdx 패널 자신의 렌더는 셈에서 뺍니다. 다만 패널의 메인 스레드 시간은 앱과 공유하므로, 렌더 탭은 요약을 유휴 큐에서 캐시해 계산하고 보이지 않을 때(패널 접힘, 다른 탭, 요청 상세가 덮을 때) 멈춥니다. 패널을 열어 둔 채 잰 체감 시간에는 rdx 몫이 섞일 수 있습니다.
@@ -170,11 +172,12 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 
 ### 4.9 AI 에게 결과 넘기기와 탭 단위 유지
 
-- **보고서.** `window.__RDX__.report()` 와, dev 서버 플러그인(`react-data-xray/vite`, `react-data-xray/middleware`)이 5초마다 쓰는 `.rdx/report.json`. 응답 본문과 헤더는 넣지 않습니다. `reset()` 으로 측정을 새로 시작하고 `snapshot(이름)` 으로 `.rdx/<이름>.json` 을 따로 남깁니다. 보고서에는 마지막 reset 시각(`resetAt`)이 남습니다. 보고서 맨 앞의 `summary` 는 이미 만든 섹션으로 고칠 것의 순위만 매기고(새 분석 없음), severity 는 RDX 버튼 배지와 같은 기준(`core/problems.ts`)을 써서 둘이 다른 말을 하지 않게 합니다. `howToRead` 는 `howToReadVersion` 으로 판을 남기고 `report({ howToRead: false })` 로 뺄 수 있습니다. 파일로 남기는 보고서에는 늘 싣습니다.
+- **보고서.** `window.__RDX__.report()` 와, dev 서버 플러그인(`react-data-xray/vite`, `react-data-xray/middleware`, Next.js route `react-data-xray/next`)이 5초마다 쓰는 `.rdx/report.json`. 응답 본문과 헤더는 넣지 않습니다. `reset()` 으로 측정을 새로 시작하고 `snapshot(이름)` 으로 `.rdx/<이름>.json` 을 따로 남깁니다. 보고서에는 마지막 reset 시각(`resetAt`)이 남습니다. 보고서 맨 앞의 `summary` 는 이미 만든 섹션으로 고칠 것의 순위만 매기고(새 분석 없음), severity 는 RDX 버튼 배지와 같은 기준(`core/problems.ts`)을 써서 둘이 다른 말을 하지 않게 합니다. `howToRead` 는 `howToReadVersion` 으로 판을 남기고 `report({ howToRead: false })` 로 뺄 수 있습니다. 파일로 남기는 보고서에는 늘 싣습니다.
 - **탭별 보고서.** 탭마다 보고서를 따로 저장하고 열린 탭 목록을 둡니다. 여러 탭을 열어 둔 채 재도 결과가 서로 덮이지 않게 하기 위해서입니다.
 - **전후 비교.** `compare(전, 후)` 와 패널의 Compare 는 이 탭에서 저장한 두 보고서의 증감을 보여 주고 `.rdx/compare-<전>-<후>.json` 에도 남깁니다. 스냅샷은 최근 6개까지 탭에 둡니다. 측정 구간이 다르거나, 한쪽만 reset 뒤에 쟀거나, 한쪽에서 렌더 감시가 꺼져 있었으면 증감을 믿기 어려우므로 경고합니다. 플러그인이 없는 dev 서버에서는 파일 없이 탭에만 남깁니다.
 - **보내기 전 확인.** 플러그인이 없는 dev 서버는 `/__rdx/report` 를 원격 백엔드로 프록시할 수 있습니다(whatap-front 가 그렇습니다). 그래서 본문 없는 GET 으로 미들웨어 표시 헤더를 확인한 뒤에만 보냅니다. 미들웨어는 Host 를 로컬 이름·IP·`allowedHosts` 로 제한하고(DNS 리바인딩), Origin 을 포트까지 비교하며, 임시 파일에 쓴 뒤 이름을 바꿉니다.
 - **원본 위치.** 호출 스택의 http 프레임을 모듈의 `sourceMappingURL` 로 원본 위치(`src/api/client.ts:42`)로 바꿉니다. 세 모델 감사에서 "줄 번호가 원본과 다르다"가 공통 지적이었습니다.
+- **자가 점검.** `window.__RDX__.doctor()`, 패널 도구 막대의 Status, 보고서의 `diagnostics` 가 같은 값입니다: commit 수·React 버전·StrictMode, 가로채기 설치와 설치 전 요청 수, 기록한 요청과 출처를 등록한 JSON 응답 수, 보고서 플러그인 상태, 소스맵 실패 수, 같은 응답 판정 메모리, 찾은 문제와 고치는 방법. 이미 있는 카운터와 import 순서 판정 결과만 읽고 큐를 비우지 않습니다(resource timing·DOM 을 다시 훑지 않고, StrictMode 는 기록한 앱 렌더의 fiber 모드 비트로 봅니다). 도구 막대 버튼의 문제 수는 렌더마다 싼 값만 셉니다. 빈 상태 문구(연결된 응답 없음, 렌더 없음)도 이 값으로 이유를 붙입니다. 문구는 `core/diagnostics/messages.ts` 한곳에 두어 언어 선택(#45) 때 바꿉니다(#76).
 - **AI 스킬.** `skills/rdx-perf/SKILL.md`: 측정 → 결과 읽기 → 원인 확인 → 처방 → 다시 측정의 순서와 지킬 것.
 - **탭 단위 유지.** 패널 열림·박스·관점과 요청 기록을 sessionStorage 에 둡니다. 요청 기록은 페이지를 떠날 때 저장하고(응답 객체 제외, 원문 10KB·전체 500KB, 비밀번호·토큰 가림), 되살린 뒤 저장소를 비웁니다. 주기 판정은 페이지 로드별로 해서 새로고침 사이 간격이 주기를 깨지 않게 합니다.
 
@@ -209,6 +212,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 | 관점: 렌더 | 최근 10초(reset 했으면 그 뒤 최대 2분) 렌더를 컴포넌트 이름별로 묶어 횟수, 자기 렌더 시간, 이유별 횟수와 고치는 방법, 렌더를 시작한 조상, 그리는 JSX 위치, 네트워크 원인(같은 응답으로 일어난 렌더 포함), 쓰는 API 의 낭비 지표. 대상이 있으면 그 안만 |
 | 요청 상세 | rdx 가 보여 주는 모든 요청을 클릭하면 열립니다. Query, Request/Response Headers, Body(정렬, 복사), 요청을 보낸 코드(소스맵으로 원본 위치), 이 요청의 데이터를 쓰는 컴포넌트 |
 | 측정: `Measure` | 평소에는 접어 두고, 누르면 둘째 줄에 Clear records → Save → Compare → Copy report path 를 측정 순서대로 펼칩니다. 접혀 있어도 마지막 reset 시각은 `Measure` 옆에 보입니다. 저장·복사 성공 문구는 4초 뒤 사라지고 실패 문구는 남습니다. |
+| `Status` | rdx 가 제대로 붙었는지(`window.__RDX__.doctor()` 와 같은 값)를 셋째 줄에 펼칩니다. 접혀 있어도 찾은 문제가 있으면 버튼에 수를 답니다(4.9). |
 | 창: 표시 방식 | Chrome DevTools 도킹처럼 작게 보기, 하단 도킹, 오른쪽 도킹, 별도 창 중에서 고르고 기억합니다. 도킹을 직접 고른 적이 없으면 앱 모달이 열릴 때 패널을 모달과 겹치지 않는 자리로 옮기고, 이 자동 이동은 사용자 선택으로 저장하지 않습니다. |
 | 탭 단위 유지 | 새로고침이나 앱 코드 수정으로 페이지가 다시 열려도 같은 탭이면 패널 열림·박스·관점과 요청 기록이 이어집니다(4.9). |
 
@@ -228,7 +232,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 - 렌더의 네트워크 원인은 응답 객체를 그대로 쓸 때만 찾습니다. 응답을 가공해 새 객체로 만들면(map, select 등) 네트워크와 무관으로 보일 수 있습니다.
 - 요청 헤더는 비교하지 않습니다. 헤더만 다른 요청은 같은 요청으로 봅니다.
 - 주기 요청은 같은 요청이 3번 쌓여야 알아봅니다. 그 전까지(첫 두 번)는 낭비로 보일 수 있습니다.
-- StrictMode 재실행 확인은 effect 안에서 바로(await 전에) 요청을 보낼 때만 됩니다. await 뒤에 보내면 호출 스택에 React 함수가 남지 않아 중복으로 잡힙니다.
+- StrictMode 재실행 확인은 effect 안에서 바로(await 전에) 요청을 보낼 때만 호출 스택으로 됩니다. await 뒤에 보내면 앞 요청을 cleanup 에서 취소할 때만, 그리고 두 요청이 마운트한 commit 의 순번에 남을 때(재실행은 같은 passive effect 비우기 안에서 일어나 대개 그렇습니다)만 알아봅니다. 렌더 기록이 있는 commit 이면 보낸 컴포넌트를 스택의 첫 앱 프레임 파일 이름(`Profile.tsx`)으로만 알 수 있어, 컴포넌트 파일이 아니면 중복으로 잡힙니다. 반대로 렌더 기록이 없는 commit(감시를 켜기 전)에서 마운트 직후 핸들러가 200ms 안에 같은 요청을 취소하고 다시 보내면 StrictMode 로 보입니다.
 - React Query의 structural sharing 때문에 다시 받아 온 데이터라도 바뀌지 않은 객체는 처음 요청이 출처로 표시됩니다.
 - 응답 경로가 `$`(응답 전체)인 매칭은 "이 API 어딘가"라는 뜻입니다. 요소를 누르면 누른 글자로 필드까지 좁히지만, 같은 값이 여러 곳에 있으면 좁히지 않습니다.
 - ESM 전용 패키지라 CJS 모드 Jest(babel-jest 기본 설정)는 불러오지 못합니다. `exports` 에 `default` 조건을 둬 해석은 되지만, `import.meta.url` 이 있어 `transformIgnorePatterns` 로 변환해도 CJS 로 실행되지 않습니다. README 에 `moduleNameMapper` 로 빈 모듈을 쓰는 방법을 적었습니다. CJS 빌드를 함께 내지 않는 것은 두 벌이 함께 로드되면 가로채기가 두 번 설치되기 때문입니다. `import.meta.url` 을 호출 스택에서 구한 값으로 바꾸면 변환은 되지만, 스택 형식이 엔진·번들러마다 달라(Firefox·Safari 는 첫 줄이 프레임, Node CJS 는 URL 이 아닌 경로, webpack eval 은 `webpack-internal://`, 앱이 `Error.stackTraceLimit = 0` 으로 두면 프레임 없음) rdx 자신의 프레임을 빼는 규칙이 틀어질 수 있어 두었습니다.
@@ -248,6 +252,7 @@ src/
   core/inspect/            정확·파생·글자 매칭, 요소 검사, 전체 표시 박스, 요청을 쓰는 컴포넌트 찾기
   core/render/             DevTools 훅, 렌더 이유, 네트워크 원인, 렌더를 시작한 조상, 렌더 감시, 마운트 이력, 요약·그룹·조언
   core/reactQuery/         React Query 캐시키 점검(QueryCache 구독, 무효화 감시), 재조회·fetch 원인
+  core/diagnostics/        자가 점검(doctor·import 순서 경고·빈 상태 이유)과 그 문구
   core/report/             AI 용 보고서 만들기, window.__RDX__(report·reset·snapshot·compare), 보고서 비교, dev 서버로 보내기
   server/                  dev 서버 쪽: 보고서 미들웨어, Vite 플러그인
   shared/                  저장소(local·session), 무시 목록, 보고서 경로 등 브라우저·서버가 함께 쓰는 것
@@ -264,6 +269,8 @@ skills/rdx-perf/           AI 스킬(측정·결과 읽기·처방)
 품질 도구: oxlint(정적 검사), oxfmt(포맷), react-doctor(React 진단), vitest 커버리지(80% 이상). `pnpm check` 가 모두 돌립니다.
 
 `package.json` 의 `sideEffects` 는 `false` 가 아니라 모듈 최상위에서 설치하는 파일(`dist/index.js`, `dist/core/render/monitor.js`)의 목록입니다. `false` 면 Next.js `instrumentation-client.ts` 처럼 이름 없이 `import 'react-data-xray'` 만 둔 곳을 번들러가 지워, 요청 가로채기·렌더 감시가 조용히 꺼집니다(#61). production 은 설치 코드가 `NODE_ENV` 분기 안에 있어 목록과 상관없이 비워집니다. `pnpm check:side-effects`(CI)가 dist 의 최상위 문장을 읽어 목록과 맞는지, 단독 import 를 rolldown 으로 묶어 dev 에 남고 production 이 비는지 봅니다.
+
+Vite 플러그인의 `inject: true` 는 dev 서버가 내보내는 `index.html` 에 `<script type="module">import 'react-data-xray'</script>` 를 넣어 진입 import 를 대신합니다(#79). `head-prepend` 지만 Vite 의 client·React Refresh 프리앰블보다는 뒤이고 앱의 진입 모듈보다는 앞입니다. 켠 경우에만 훅을 달아 끈 사용자는 Vite 3 이하에서도 전과 같고, Vitest 와 Storybook `iframe.html` 에는 넣지 않으며, Vite 가 HTML 을 내보내지 않는 SSR·백엔드 연동에서는 효과가 없습니다. 모노레포 등에서 rdx 가 두 벌 평가되면 `globalThis[Symbol.for('react-data-xray.installed')]` 표식을 본 두 번째 사본이 설치를 건너뛰고 한 번 경고합니다(모듈 상태가 따로라 각 설치 함수의 가드로는 막지 못합니다). `transformIndexHtml` 을 `order: 'pre'` 로 두는 것은 Vite 가 인라인 모듈 스크립트를 html-proxy 모듈로 바꾸고 맨 이름 import 를 사전 번들 경로로 해석하는 단계보다 먼저 넣어야 하기 때문입니다. 진입 파일의 `import { RdxDevtools } from 'react-data-xray'` 와 같은 URL 이 되어 모듈은 한 번만 평가됩니다(`optimizeDeps.exclude` 로 둔 경우도 같습니다). 기본값을 끈 것은 사용자가 모르는 사이 앱의 HTML 을 바꾸지 않기 위해서이고, 플러그인은 `apply: 'serve'` 라 production 빌드에는 붙지 않습니다.
 
 ## 8. 개발 기록
 

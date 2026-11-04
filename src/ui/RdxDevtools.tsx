@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { scheduleLoadOrderCheck } from '../core/diagnostics/loadOrder.js';
 import type { RequestRecord } from '../core/requests/types.js';
 import { RequestActionsProvider, type Focus, type RequestActions } from './contexts.js';
 import { BUTTON_SIZE, FloatingButton } from './FloatingButton.js';
@@ -49,6 +50,9 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   const { result, scope: activeScope, pick, clear: clearScope } = useAnalysisScope();
   const [selected, setSelected] = useState<{ record: RequestRecord; focus?: Focus } | null>(null);
   const [hovered, setHovered] = useState<RequestRecord | null>(null);
+
+  // 자기 commit 이 훅을 지난 뒤 import 순서를 판정한다(진입 모듈이 건 판정이 아직이면 그것과 합친다).
+  useEffect(() => scheduleLoadOrderCheck({ panel: true }), []);
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
