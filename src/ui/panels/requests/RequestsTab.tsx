@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 
+import { isConfigIgnored } from '../../../core/config.js';
 import { getEndpointStats, type EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
@@ -106,7 +107,8 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
           <EndpointRow
             key={stat.endpoint}
             stat={stat}
-            ignored={ignored.has(stat.endpoint)}
+            ignored={ignored.has(stat.endpoint) || isConfigIgnored(stat.endpoint)}
+            ignoredByConfig={isConfigIgnored(stat.endpoint)}
             route={route}
             focus={focus?.key === stat.endpoint ? focus : undefined}
             onSelect={showEndpoint}

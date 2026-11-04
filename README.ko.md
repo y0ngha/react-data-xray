@@ -130,6 +130,32 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 </details>
 
+<details>
+<summary><b>판정 기준과 무시 목록을 코드로 정하기: <code>configure()</code></b></summary>
+
+import 바로 뒤, 앱이 요청을 보내기 전에 `configure()` 를 부르면 팀이 같은 기준을 씁니다. 모든 값은 생략할 수 있고, 아래 값이 기본값입니다(`ignore`·`keyHeaders` 는 기본이 비어 있음). production 빌드에서는 아무것도 하지 않습니다.
+
+```ts
+import 'react-data-xray';
+import { configure } from 'react-data-xray';
+
+configure({
+  ignore: ['GET /api/health', /\/metrics/], // 요청 탭에 보이는 엔드포인트 이름, 또는 정규식
+  keyHeaders: ['x-tenant'], // 이 헤더만 다른 요청은 다른 요청으로 본다
+  dedupeWindowMs: 2000, // 같은 요청이 이 시간 안에 다시 나가면 중복
+  burst: { windowMs: 500, count: 5 }, // windowMs 안에 count 건 이상 시작하면 몰림
+  maxRecords: 200, // 기억할 요청 수
+  reportPath: '/__rdx/report', // 브라우저가 보고서를 보낼 경로(Next.js basePath 아래면 '/docs/__rdx/report' 처럼)
+});
+```
+
+- `ignore` 는 패널에서 고른 무시와 합쳐집니다. 그 줄에는 "Ignored (config)" 가 보이고 패널에서 풀 수 없습니다.
+- 부를 때마다 앞 설정을 통째로 바꿉니다. 맞지 않는 값은 경고하고 기본값을 씁니다.
+- `reportPath` 는 브라우저가 보내는 경로만 바꿉니다. dev 서버 쪽 경로는 같은 주소로 직접 붙입니다.
+- 적용된 설정은 보고서(`config`)에 남고, 설정이 다른 두 보고서를 비교하면 경고합니다.
+
+</details>
+
 ### 3. 써 보기
 
 1. 오른쪽 아래 **RDX** 버튼으로 패널을 엽니다.
@@ -229,11 +255,11 @@ Claude Code 를 쓴다면 패키지의 스킬 [`rdx-perf`](./skills/rdx-perf/SKI
   };
   ```
 
-  빈 모듈은 앱이 `react-data-xray` 에서 가져오는 이름을 모두 내보내야 합니다(지금은 `RdxDevtools` 하나). 확장자를 `.cjs` 로 두면 `"type": "module"` 앱에서도 CommonJS 로 읽힙니다.
+  빈 모듈은 앱이 `react-data-xray` 에서 가져오는 이름을 모두 내보내야 합니다(지금은 `RdxDevtools` 와 `configure`). 확장자를 `.cjs` 로 두면 `"type": "module"` 앱에서도 CommonJS 로 읽힙니다.
 
   ```js
   // test/rdx-mock.cjs
-  module.exports = { RdxDevtools: () => null };
+  module.exports = { RdxDevtools: () => null, configure: () => {} };
   ```
 
 ## 기여

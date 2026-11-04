@@ -10,6 +10,8 @@ import { color, plainButtonStyle, rowStyle } from '../../theme.js';
 interface EndpointRowProps {
   stat: EndpointStat;
   ignored: boolean;
+  /** 코드(configure 의 ignore)로 무시한 엔드포인트. 패널에서 풀 수 없다 */
+  ignoredByConfig?: boolean;
   /** 주면 이 경로에서 보낸 건수만 보인다 */
   route?: string;
   /** 배지 내역에서 이 줄로 오라는 요청 */
@@ -55,7 +57,7 @@ const segments = (stat: EndpointStat): Segment[] => {
 };
 
 /** 엔드포인트 한 줄: 호출 수와 낭비 지표. 이름을 누르면 그 엔드포인트의 요청 목록으로 간다. */
-export const EndpointRow = ({ stat, ignored, route, focus, onSelect, onToggleIgnore }: EndpointRowProps) => {
+export const EndpointRow = ({ stat, ignored, ignoredByConfig = false, route, focus, onSelect, onToggleIgnore }: EndpointRowProps) => {
   const row = useReveal(focus);
   return (
     <div ref={row} tabIndex={-1} style={rowStyle}>
@@ -69,13 +71,19 @@ export const EndpointRow = ({ stat, ignored, route, focus, onSelect, onToggleIgn
           {/* ellipsis 는 텍스트를 직접 담는 요소에 걸어야 한다 */}
           <u style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stat.endpoint}</u>
         </button>
-        <Button
-          subtle
-          onClick={() => onToggleIgnore(stat.endpoint)}
-          title="Do not count duplicates and same responses as waste for this endpoint (when intentional)"
-        >
-          {ignored ? 'Unignore' : 'Ignore'}
-        </Button>
+        {ignoredByConfig ? (
+          <span title="Ignored by configure({ ignore }) in code; change it there" style={{ color: color.muted, whiteSpace: 'nowrap' }}>
+            Ignored (config)
+          </span>
+        ) : (
+          <Button
+            subtle
+            onClick={() => onToggleIgnore(stat.endpoint)}
+            title="Do not count duplicates and same responses as waste for this endpoint (when intentional)"
+          >
+            {ignored ? 'Unignore' : 'Ignore'}
+          </Button>
+        )}
       </div>
       <Muted>
         {/* 조각 사이의 공백은 nowrap 밖에 두어 조각 사이에서만 줄이 바뀐다 */}

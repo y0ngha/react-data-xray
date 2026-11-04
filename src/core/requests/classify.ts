@@ -1,6 +1,7 @@
 import { groupBy } from '../../shared/collections.js';
 import { pinnedRefetchReason } from '../reactQuery/refetchReason.js';
 import { isAborted } from './aborted.js';
+import { isIgnoredEndpoint } from '../config.js';
 import { endpointOf, requestKeyOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
@@ -151,7 +152,8 @@ const classifyOne = (r: RequestRecord, { byId, periodicIds, ignoredEndpoints }: 
   const crossLoad = !!sameAs && (sameAs.load ?? 0) !== (r.load ?? 0);
   const flagged = !!(r.duplicateOf || (r.sameResponseAs && !crossLoad));
   if (!flagged) return 'ok';
-  if (ignoredEndpoints.has(endpointOf(r))) return 'ignored';
+  // 패널에서 고른 무시와 코드(configure)의 무시를 합쳐 본다.
+  if (isIgnoredEndpoint(endpointOf(r), ignoredEndpoints)) return 'ignored';
   if (periodicIds.has(r.id)) return 'periodic';
   // StrictMode 는 dev 에서 effect 를 두 번 실행한다. 호출 스택에 React 의 재실행 함수가 있거나, 재실행의 정리(cleanup)가
   // 앞 요청을 취소했을 때만 확실하다고 본다(await 뒤에 보낸 요청은 스택에 남지 않아 취소가 유일한 근거다). 같은 위젯 두 개의 동시 요청은 낭비로 남는다.

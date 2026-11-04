@@ -36,7 +36,7 @@ Start each scenario from a clean state. Use the browser tool directly if availab
 
 The `howToRead` field in the report is authoritative. This document does not duplicate it (fields grow with each rdx version), so read it before reading the results. Only the order of inspection is prescribed here.
 
-1. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
+1. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional (in the panel, or in code via `config.ignore`) — skip it.
 2. `reactQuery.findings`: follow each item's `fix`.
 3. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
 

@@ -50,13 +50,14 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 
 | Field | Contents |
 |---|---|
-| `requests.total` · `dropped` | Number of requests recorded; number dropped when the 200-record limit was exceeded. If `dropped` is non-zero, split the scenario into shorter runs |
-| `requests.endpoints[]` | Per-endpoint `count` · `duplicates` · `sameResponses` · `review` (polling, focus refetch) · `ignored`, example waste URLs, `callers` (code that sent the request) |
+| `requests.total` · `dropped` | Number of requests recorded; number dropped when the record limit (`config.maxRecords`, default 200) was exceeded. If `dropped` is non-zero, split the scenario into shorter runs |
+| `requests.endpoints[]` | Per-endpoint `count` · `duplicates` · `sameResponses` · `review` (polling, focus refetch) · `ignored` (in the panel or by `config.ignore`), example waste URLs, `callers` (code that sent the request) |
 | `reactQuery.findings[]` | Cache key audit findings with `fix` |
 | `renders.windowSeconds` | The window covered by render data. After `reset()`: everything since then (up to 2 min). Otherwise: the last 10s |
 | `renders.truncated` · `droppedInstances` | Whether rendered instances exceeded 5000 and the count excluded (those with fewest renders). When true, `components[]` counts may be lower than actual |
 | `renders.components[]` | `renders` · `avoidable`, per-reason counts, `stateChanges` (changed hooks and periodicity), `startedRenders` (child renders started by this component and which props changed), `causedBy`, `renderedAt`, `networkCauses`, `changedProps`, `advice` |
 | `resetAt` | ms epoch of the last `reset()` call in this tab; `null` if never reset. When comparing two snapshots, check that both have a `resetAt` — if only one does, the comparison may mix post-reset and pre-reset data |
+| `config` | Detection settings in effect, set in code with `configure()` (see README) or the defaults: `ignore` (endpoint names and `/RegExp/` strings), `keyHeaders`, `dedupeWindowMs` (2000), `burst` (`{ windowMs: 500, count: 5 }`), `maxRecords` (200), `reportPath` (`/__rdx/report`). `compare` warns when two reports were measured with different `config` — their counts are not directly comparable |
 | `howToRead` | How to interpret the fields above |
 
 - `snapshot(name)`: name may contain letters, digits, and `. _ -`, up to 64 characters; `report` is reserved. Rejected if the plugin is not running.

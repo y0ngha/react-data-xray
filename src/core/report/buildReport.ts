@@ -1,3 +1,4 @@
+import { effectiveConfig, type EffectiveConfig } from '../config.js';
 import { knownQueryContextOf, queryContextOf } from '../capture/queryContext.js';
 import { queueIndex } from '../inspect/derivedMatch.js';
 import { flushQueue } from '../scheduler/idleQueue.js';
@@ -21,6 +22,8 @@ export interface RdxReport {
   resetAt: number | null;
   page: string;
   howToRead: string[];
+  /** configure() 로 정한(또는 기본) 판정 기준. compare 가 기준이 다른 두 보고서를 경고한다 */
+  config: EffectiveConfig;
   requests: RequestSection;
   reactQuery: ReactQuerySection;
   renders: RenderSection;
@@ -45,6 +48,7 @@ const HOW_TO_READ = [
   ...REQUEST_HOW_TO_READ_EXTRA,
   ...RENDER_HOW_TO_READ_EXTRA,
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
+  'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoint names and /RegExp/ strings not counted as waste), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), maxRecords, reportPath. Reports measured with different config are not directly comparable.',
   'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
 ];
 
@@ -64,6 +68,7 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true)
     resetAt: getResetAt(),
     page: typeof location === 'undefined' ? '' : location.pathname,
     howToRead: HOW_TO_READ,
+    config: effectiveConfig(),
     requests: buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf),
     reactQuery: buildReactQuerySection(records, classes),
     renders: buildRenderSection(monitoring, now),

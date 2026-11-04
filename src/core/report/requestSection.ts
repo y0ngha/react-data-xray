@@ -1,3 +1,4 @@
+import { isIgnoredEndpoint } from '../config.js';
 import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
@@ -151,7 +152,7 @@ export const buildRequestSection = (
       const own = byEndpoint.get(s.endpoint) ?? [];
       return {
         endpoint: s.endpoint,
-        ignored: ignored.has(s.endpoint),
+        ignored: isIgnoredEndpoint(s.endpoint, ignored),
         count: s.count,
         restoredCount: own.filter((r) => r.restored).length,
         avgMs: s.avgMs,
@@ -173,6 +174,7 @@ export const buildRequestSection = (
 
 // 새 howToRead 줄은 여기에 더한다.
 export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
+  'The 2s duplicate window and the 200-record limit above are defaults; the values in effect are config.dedupeWindowMs and config.maxRecords. ignored: true also covers endpoints in config.ignore (set in code with configure(), not removable in the panel).',
   'failedDuplicates is the count of duplicates and sameResponses that were failed responses (4xx, 5xx, or network error). These may be retries or a local environment issue (backend down) rather than code waste — check the status code first.',
   'refetchReasons is a breakdown by cause of React Query refetches that received the same response. stale-elapsed (refetched after staleTime expired) and after-invalidate (invalidated but response unchanged) are repeats to review but are not counted as waste. stale-zero (staleTime is 0, so fetched every time) stays in sameResponses as waste — increase staleTime. Same-response matches against pre-reload records are not counted as waste.',
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',

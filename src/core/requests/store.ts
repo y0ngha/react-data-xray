@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { registerOrigins } from './origins.js';
 import { markOverlapCancelled } from '../reactQuery/overlapCancel.js';
@@ -8,7 +9,6 @@ import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './rep
 import { createResponseHasher, digestOf, HASH_CHUNK } from './responseHash.js';
 import type { RequestRecord } from './types.js';
 
-const MAX_RECORDS = 200;
 const MAX_RESPONSE_TEXT = 100_000;
 
 const records: RequestRecord[] = [];
@@ -113,7 +113,8 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
       return true;
     });
   records.push(record);
-  if (records.length > MAX_RECORDS) {
+  // 상한은 configure 의 maxRecords(기본 200)다. 도중에 줄였으면 넘친 만큼 버린다.
+  while (records.length > config().maxRecords) {
     records.shift();
     dropped++;
   }
@@ -161,7 +162,7 @@ export const mergeRecords = (others: readonly RequestRecord[]): void => {
   const known = new Set(records.map((r) => r.id));
   const added = others.filter((r) => !known.has(r.id));
   if (added.length === 0) return;
-  const merged = [...records, ...added].sort((a, b) => a.id - b.id).slice(-MAX_RECORDS);
+  const merged = [...records, ...added].sort((a, b) => a.id - b.id).slice(-config().maxRecords);
   records.splice(0, records.length, ...merged);
   nextId = Math.max(nextId, ...added.map((r) => r.id + 1));
   notify();

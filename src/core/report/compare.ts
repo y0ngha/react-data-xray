@@ -1,10 +1,13 @@
 import { formatTime } from '../../shared/format.js';
+import type { EffectiveConfig } from '../config.js';
 import type { RdxReport } from './buildReport.js';
 
 /** 비교에 쓰는 부분만 담은 보고서. sessionStorage 에 남기는 것도 이 크기다. */
 export interface ComparableReport {
   /** 마지막 reset 시각(ms). null 이거나 없으면 reset 하지 않고 잰 것이다(이 필드 전에 저장한 스냅샷에는 없다). */
   resetAt?: number | null;
+  /** 잰 때의 판정 기준(이 필드 전에 저장한 스냅샷에는 없다) */
+  config?: EffectiveConfig;
   requests: { endpoints: Array<{ endpoint: string; count: number; duplicates: number; sameResponses: number }> };
   renders: {
     monitoring: boolean;
@@ -17,6 +20,7 @@ export interface ComparableReport {
 /** 보고서에서 compare 가 읽는 값만 남긴다. */
 export const toComparable = (r: RdxReport): ComparableReport => ({
   resetAt: r.resetAt,
+  config: r.config,
   requests: {
     endpoints: r.requests.endpoints.map(({ endpoint, count, duplicates, sameResponses }) => ({
       endpoint,
@@ -105,6 +109,16 @@ const splitEndpoints = (a: ComparableReport, b: ComparableReport): string[] => {
   return [...new Set([...splitIn(x, y), ...splitIn(y, x)])];
 };
 
+/** 두 설정에서 값이 다른 항목("dedupeWindowMs 2000 / 1000"). 한쪽이라도 설정을 남기지 않은 옛 보고서면 비교하지 않는다. */
+const configDifferences = (a: EffectiveConfig | undefined, b: EffectiveConfig | undefined): string[] => {
+  if (!a || !b) return [];
+  // 버전마다 항목이 늘 수 있어 양쪽 키를 합쳐 본다.
+  return ([...new Set([...Object.keys(a), ...Object.keys(b)])] as Array<keyof EffectiveConfig>)
+    .map((key) => [key, JSON.stringify(a[key]), JSON.stringify(b[key])] as const)
+    .filter(([, x, y]) => x !== y)
+    .map(([key, x, y]) => `${key} ${x} / ${y}`);
+};
+
 const findingId = (f: ComparableReport['reactQuery']['findings'][number]): string => `${f.kind} ${f.keys.join(', ')}`;
 
 /** 저장한 두 보고서(a: 전, b: 후)의 차이. 양수는 b 에서 늘어난 것이다. */
@@ -123,6 +137,7 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
     const afterStr = rb !== null ? formatTime(rb) : 'none';
     warnings.push(`only one report was measured after a reset (before: ${beforeStr}, after: ${afterStr})`);
   }
+  configDifferences(a.config, b.config).forEach((d) => warnings.push(`detection config differs: ${d}`));
   splitEndpoints(a, b).forEach((e) =>
     warnings.push(`endpoint naming changed for ${e} (one report splits it into "${e} (…)" rows; likely different rdx versions)`),
   );

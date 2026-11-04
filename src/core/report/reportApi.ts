@@ -1,4 +1,5 @@
-import { isReportName, REPORT_HEADER, REPORT_PATH, reportFileFor, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
+import { isReportName, REPORT_HEADER, reportFileFor, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
+import { config } from '../config.js';
 import { getNativeFetch } from '../capture/nativeFetch.js';
 import { whenSourcesResolved } from '../capture/requestContext.js';
 import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../render/monitor.js';
@@ -170,7 +171,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
   // 호출 위치가 원본 위치와 변환 전 위치로 갈리지 않게, 진행 중인 소스맵 변환을 기다린다.
   await whenSourcesResolved();
   const result = report();
-  const res = await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
+  const res = await send(`${config().reportPath}?name=${encodeURIComponent(name)}`, {
     method: 'POST',
     credentials: 'omit',
     headers: { 'content-type': 'application/json' },
@@ -192,7 +193,7 @@ const compareSnapshots = async (before: string, after: string): Promise<ReportCo
   const name = `compare-${before}-${after}`;
   const send = getNativeFetch();
   if (send && isReportName(name) && (await endpoint) === 'ready') {
-    await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
+    await send(`${config().reportPath}?name=${encodeURIComponent(name)}`, {
       method: 'POST',
       credentials: 'omit',
       headers: { 'content-type': 'application/json' },
@@ -207,7 +208,7 @@ const compareSnapshots = async (before: string, after: string): Promise<ReportCo
  * 의존성 최적화 리로드 중처럼 응답이 아예 없으면 한 번 더 묻는다. 응답이 왔는데 표시가 없으면 미들웨어가 없는 것이다(프록시·SPA 폴백).
  */
 const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
-  const ask = () => send(REPORT_PATH, { method: 'GET', credentials: 'omit' }).catch(() => null);
+  const ask = () => send(config().reportPath, { method: 'GET', credentials: 'omit' }).catch(() => null);
   const res = (await ask()) ?? (await new Promise((resolve) => window.setTimeout(resolve, HANDSHAKE_RETRY_MS)).then(ask));
   const mark = res?.headers.get(REPORT_HEADER);
   if (mark === 'forbidden-host') {
@@ -225,7 +226,8 @@ const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
 const startUpload = async (): Promise<void> => {
   const send = getNativeFetch();
   if (!send) return;
-  endpoint = checkEndpoint(send);
+  // 확인은 한 마이크로태스크 뒤에 보낸다. `import 'react-data-xray'` 바로 뒤의 configure({ reportPath }) 가 먼저 돌아야 그 경로로 묻는다.
+  endpoint = Promise.resolve().then(() => checkEndpoint(send));
   if ((await endpoint) !== 'ready') return;
   keepRenderMonitoring();
   let last = '';
@@ -241,7 +243,7 @@ const startUpload = async (): Promise<void> => {
     const body = JSON.stringify({ generatedAt, ...content });
     const query = new URLSearchParams({ tab: getTabId(), path: location.pathname, title: document.title });
     if (idle) query.set('idle', '1');
-    const res = await send(`${REPORT_PATH}?${query}`, {
+    const res = await send(`${config().reportPath}?${query}`, {
       method: 'POST',
       credentials: 'omit',
       headers: { 'content-type': 'application/json' },

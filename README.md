@@ -130,6 +130,32 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
 </details>
 
+<details>
+<summary><b>Set thresholds and ignores in code: <code>configure()</code></b></summary>
+
+Call `configure()` right after the import, before your app sends any request, so the whole team shares the same settings. Every option is optional; the values below are the defaults (except `ignore` and `keyHeaders`, which are empty by default). In a production build it does nothing.
+
+```ts
+import 'react-data-xray';
+import { configure } from 'react-data-xray';
+
+configure({
+  ignore: ['GET /api/health', /\/metrics/], // endpoint names as shown in the Requests tab, or RegExps
+  keyHeaders: ['x-tenant'], // requests that differ only in these headers are different requests
+  dedupeWindowMs: 2000, // the same request again within this time is a duplicate
+  burst: { windowMs: 500, count: 5 }, // this many requests starting within windowMs is a burst
+  maxRecords: 200, // requests to remember
+  reportPath: '/__rdx/report', // where the browser sends reports (e.g. '/docs/__rdx/report' under a Next.js basePath)
+});
+```
+
+- `ignore` is merged with the endpoints you ignore in the panel; those rows show "Ignored (config)" and cannot be unignored there.
+- Each call replaces the previous settings. Invalid values print a warning and fall back to the default.
+- `reportPath` only changes where the browser sends reports; mount the dev server route at the same path yourself.
+- The settings in effect are written to the report (`config`), and comparing two reports measured with different settings warns.
+
+</details>
+
 ### 3. Try it
 
 1. Open the panel with the **RDX** button in the bottom-right corner.
@@ -229,11 +255,11 @@ If you use Claude Code, copy the [`rdx-perf`](./skills/rdx-perf/SKILL.md) skill 
   };
   ```
 
-  The mock must export every name your app imports from `react-data-xray` (today only `RdxDevtools`). The `.cjs` extension keeps it CommonJS even in a `"type": "module"` app.
+  The mock must export every name your app imports from `react-data-xray` (today `RdxDevtools` and `configure`). The `.cjs` extension keeps it CommonJS even in a `"type": "module"` app.
 
   ```js
   // test/rdx-mock.cjs
-  module.exports = { RdxDevtools: () => null };
+  module.exports = { RdxDevtools: () => null, configure: () => {} };
   ```
 
 ## Contributing
