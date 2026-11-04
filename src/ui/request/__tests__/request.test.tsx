@@ -97,6 +97,15 @@ describe('RequestDetail', () => {
     expect(screen.getByText(/failed \(TypeError: x\)/)).toBeTruthy();
   });
 
+  it('같은 요청 판정에서 뺀 cache-buster 파라미터를 밝힌다 (#83)', () => {
+    const record = makeRecord();
+    const { unmount } = renderWithActions(<RequestDetail record={record} onBack={() => undefined} />);
+    expect(screen.queryByText(/cache-buster/)).toBeNull();
+    unmount();
+    renderWithActions(<RequestDetail record={{ ...record, url: `/api/item?_t=${record.startedAt}` }} onBack={() => undefined} />);
+    expect(screen.getByText(/cache-buster\): _t/)).toBeTruthy();
+  });
+
   it('복사 버튼은 펼침을 바꾸지 않고 클립보드에 쓴다', () => {
     const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });

@@ -31,7 +31,7 @@ GET /api/projects  req ×6 · duplicates 2 · same response 3   renders: 12 · a
 
 - `req ×6`: this request was sent 6 times. `duplicates 2` is the count of repeat requests within 2s; `same response 3` is the count where the response was identical to the previous one.
 - `renders: 12 · avoidable: 9`: components using this response rendered 12 times in the last 10s; 9 were avoidable — renders where props, state, and context were unchanged but the component re-rendered with its parent, or received a new object or function with the same content.
-- Border color: green = exact response data used as-is, blue = derived (transformed but values match), red = the request providing that data is wasteful. Flashes purple on each render.
+- Border color: green = exact response data used as-is, blue = derived (transformed but values match), red = that data's request (same method, URL, and payload) was sent wastefully on this page at or after the request that provided the data — for example, refetches that returned the same response. The `req` metrics count the request's whole history, including records restored from before a reload. Flashes purple on each render.
 
 ## Pick element: which response field is this text from?
 
