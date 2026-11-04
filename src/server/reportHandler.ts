@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
@@ -13,7 +13,19 @@ import {
   TAB_STALE_MS,
   TABS_INDEX,
 } from '../shared/reportPath.js';
-import { createCommand, finishCommand, getCommand, liveTabs, seeTab, storeFor, takeCommands } from './commandQueue.js';
+import {
+  createCommand,
+  finishCommand,
+  getCommand,
+  isCliActive,
+  liveTabs,
+  markCliActive,
+  seeTab,
+  storeFor,
+  takeCommands,
+  type Store,
+  type TabNotice,
+} from './commandQueue.js';
 
 interface TabEntry {
   id: string;
@@ -74,6 +86,10 @@ export interface ReportRequest {
   contentType: string | undefined;
   /** 본문. MAX_REPORT_BYTES 까지만 읽는다 */
   body: ReadableStream<Uint8Array> | null;
+  /** TAB_HEADER 값. 탭의 받아 가기에만 붙는다 */
+  tabHeader?: string;
+  /** TOKEN_HEADER 값. CLI·MCP 의 명령 요청에만 붙는다 */
+  token?: string;
 }
 
 export interface ReportReply {
@@ -82,6 +98,8 @@ export interface ReportReply {
   mark?: '1' | 'forbidden-host';
   /** JSON 본문(명령 경로, 탭에 넘길 명령). 없으면 본문 없이 답한다 */
   body?: string;
+  /** 탭에 CLI_ACTIVE_HEADER 를 붙여 5초마다 받아 가게 한다 */
+  cliActive?: boolean;
 }
 
 /** 본문이 크거나 JSON 이 아니다 */
@@ -187,46 +205,57 @@ const updateTabIndex = (folder: string, entry: TabEntry, report: object): Promis
     if (!(await hasEntry(indexFile, entry))) await mergeIndex(folder, indexFile, entry);
   });
 
-/** 탭이 보낸 path·title(탭 목록에 보이는 값) */
-const tabInfo = (tab: string, query: URLSearchParams) => ({
-  id: tab,
-  path: (query.get('path') ?? '').slice(0, 300),
-  title: (query.get('title') ?? '').slice(0, 200),
-});
+/** 탭이 보낸 값(탭 목록에 보이는 값). 페이지가 정한 값이라 길이만 자르고, 보여 주는 쪽(CLI)이 다듬는다 */
+const tabNotice = (tab: string, query: URLSearchParams): TabNotice => {
+  const ago = Number(query.get('focusedAgo') ?? Number.NaN);
+  return {
+    id: tab,
+    path: (query.get('path') ?? '').slice(0, 300),
+    title: (query.get('title') ?? '').slice(0, 200),
+    // 보내지 않은 이전 브라우저 코드는 보이는 것으로 본다
+    visible: query.get('visible') !== '0',
+    ...(Number.isFinite(ago) && ago >= 0 && { focusedAgo: ago }),
+  };
+};
 
 /** 이 탭에 맡긴 명령이 있으면 본문으로 넘긴다. 없으면 본문 없이 답한다(대부분의 주기) */
-const replyWithCommands = (store: ReturnType<typeof storeFor>, tab: string): ReportReply => {
-  const commands = takeCommands(store, tab, Date.now());
-  return commands.length > 0 ? json(200, { commands }) : { status: 204, mark: '1' };
+const replyWithCommands = (store: Store, tab: string): ReportReply => {
+  const now = Date.now();
+  const commands = takeCommands(store, tab, now);
+  const cliActive = isCliActive(store, now);
+  return commands.length > 0 ? { ...json(200, { commands }), cliActive } : { status: 204, mark: '1', cliActive };
 };
 
 /**
- * CLI 가 `rdx` 명령의 dev 서버 주소를 따로 받지 않아도 되게, 브라우저가 쓰는 출처를 적어 둔다.
+ * 명령 경로의 토큰과 브라우저가 쓰는 출처를 SERVER_FILE 에 적는다. CLI 는 이 파일에서 토큰을 읽고, `--url` 이 없으면 주소도 읽는다.
  * 같은 출처의 POST 에는 Origin 이 붙는다(isTrusted 가 Host 와 같은지 이미 봤다). 바뀔 때만 쓴다.
  */
-const rememberOrigin = async (folder: string, store: ReturnType<typeof storeFor>, origin: string | undefined): Promise<void> => {
-  if (!origin || store.origin === origin) return;
-  store.origin = origin;
-  await writeJson(join(folder, SERVER_FILE), { url: origin, updatedAt: Date.now() }).catch(() => undefined);
+const writeServerFile = async (folder: string, store: Store, origin: string | undefined): Promise<void> => {
+  if (origin) store.origin = origin;
+  const content = JSON.stringify({ token: store.token, url: store.origin });
+  if (store.written === content) return;
+  store.written = content;
+  await mkdir(folder, { recursive: true });
+  // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다. 이미 있으면 그대로 둔다.
+  await writeFile(join(folder, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined);
+  await writeJson(join(folder, SERVER_FILE), { token: store.token, url: store.origin, updatedAt: Date.now() });
 };
 
 const writeReport = async (folder: string, req: ReportRequest, query: URLSearchParams): Promise<ReportReply> => {
   const name = query.get('name');
   const tab = query.get('tab');
   const report: unknown = JSON.parse(await readBody(req.body));
-  await mkdir(folder, { recursive: true });
-  // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다. 이미 있으면 그대로 둔다.
-  await writeFile(join(folder, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined);
   const store = storeFor(folder);
-  await rememberOrigin(folder, store, req.origin);
+  // .rdx 와 .gitignore 도 여기서 만든다.
+  await writeServerFile(folder, store, req.origin);
   if (tab !== null && typeof report === 'object' && report !== null) {
-    const idle = query.get('idle') === '1';
-    const info = tabInfo(tab, query);
-    const entry: TabEntry = { ...info, updatedAt: Date.now(), file: reportFileFor(tab) };
+    const notice = tabNotice(tab, query);
+    const entry: TabEntry = { id: tab, path: notice.path, title: notice.title, updatedAt: Date.now(), file: reportFileFor(tab) };
     await updateTabIndex(folder, entry, report);
-    seeTab(store, info, !idle, Date.now());
+    // JSON 본문의 POST 는 다른 사이트가 preflight 없이 보낼 수 없어, TAB_HEADER 없이도 탭 알림으로 받는다.
+    seeTab(store, notice, Date.now());
     // 열려 있다는 알림만이면 "가장 최근에 바뀐 탭"을 바꾸지 않는다.
-    if (!idle) await writeJson(join(folder, `${DEFAULT_REPORT_NAME}.json`), report);
+    if (query.get('idle') !== '1') await writeJson(join(folder, `${DEFAULT_REPORT_NAME}.json`), report);
     return replyWithCommands(store, tab);
   }
   await writeJson(join(folder, `${name ?? DEFAULT_REPORT_NAME}.json`), report);
@@ -241,16 +270,27 @@ const writeCommandResult = async (folder: string, req: ReportRequest, query: URL
   return finishCommand(storeFor(folder), id, tab, result, Date.now()) ? { status: 204, mark: '1' } : { status: 404, mark: '1' };
 };
 
+const sameToken = (given: string | undefined, token: string): boolean => {
+  if (given === undefined) return false;
+  const [a, b] = [Buffer.from(given), Buffer.from(token)];
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+
 /**
- * CLI·MCP 가 쓰는 명령 경로(#69).
+ * CLI·MCP 가 쓰는 명령 경로(#69). 모든 요청에 SERVER_FILE 의 토큰(TOKEN_HEADER)이 있어야 한다. 그 파일을 읽을 수 있는
+ * 같은 PC 의 도구만 쓰게 해, `vite --host` 로 연 LAN 의 다른 기기나 리바인딩한 사이트가 탭을 조작하지 못하게 한다.
  * - `GET /__rdx/command`: 연결된 탭 목록
- * - `POST /__rdx/command` `{ op: 'reset' | 'snapshot', name?, tab? }`: 탭에 명령을 맡긴다(202, 명령 id)
+ * - `POST /__rdx/command` `{ op: 'reset' | 'snapshot', name?, tab?, timeoutMs? }`: 탭에 명령을 맡긴다(202, 명령 id)
  * - `GET /__rdx/command/<id>`: 명령이 끝났는지
- * 탭은 5초 주기의 업로드·받아 가기 응답으로 명령을 받아 window.__RDX__ 의 reset·snapshot 을 부른다.
+ * 탭은 업로드·받아 가기 응답으로 명령을 받아 window.__RDX__ 의 reset·snapshot 을 부른다.
  */
 const handleCommand = async (folder: string, req: ReportRequest, path: string): Promise<ReportReply> => {
   const store = storeFor(folder);
+  // 토큰 파일이 아직 없으면(브라우저가 아직 오지 않았으면) 지금 써서 CLI 가 다시 읽고 보내게 한다.
+  await writeServerFile(folder, store, undefined);
+  if (!sameToken(req.token, store.token)) return json(403, { error: 'token', message: `missing or wrong ${SERVER_FILE} token` });
   const now = Date.now();
+  markCliActive(store, now);
   const id = path.slice(COMMAND_PATH.length + 1);
   if (req.method === 'GET') {
     if (path === COMMAND_PATH) return json(200, { tabs: liveTabs(store, now) });
@@ -260,7 +300,8 @@ const handleCommand = async (folder: string, req: ReportRequest, path: string): 
   if (path !== COMMAND_PATH) return { status: 405, mark: '1' };
   if (!req.contentType?.startsWith('application/json')) return { status: 403, mark: '1' };
   const created = createCommand(store, JSON.parse(await readBody(req.body)), now);
-  if (!created.ok) return json(created.status, { error: created.error, ...(created.tabs && { tabs: created.tabs }) });
+  if (!created.ok)
+    return json(created.status, { error: created.error, reason: created.reason, ...(created.tabs && { tabs: created.tabs }) });
   return json(202, { command: created.command, others: created.others });
 };
 
@@ -279,10 +320,12 @@ export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts =
       return handleCommand(folder, req, url.pathname).catch(failure);
     const tab = query.get('tab');
     if (req.method === 'GET') {
-      // 탭이 5초마다 맡은 명령을 받아 간다(보고서가 그대로라 올리지 않는 주기). 열려 있다는 알림도 된다.
-      if (tab !== null && isTabId(tab) && tab !== TABS_INDEX) {
-        seeTab(storeFor(folder), tabInfo(tab, query), false, Date.now());
-        return replyWithCommands(storeFor(folder), tab);
+      // 탭이 맡은 명령을 받아 간다(보고서가 그대로라 올리지 않는 주기). 열려 있다는 알림도 된다.
+      // TAB_HEADER 가 없는 GET(다른 사이트의 <img> 등)은 아무것도 바꾸지 않는 핸드셰이크로 답한다.
+      if (req.tabHeader === '1' && tab !== null && isTabId(tab) && tab !== TABS_INDEX) {
+        const store = storeFor(folder);
+        seeTab(store, tabNotice(tab, query), Date.now());
+        return replyWithCommands(store, tab);
       }
       // 브라우저가 보고서를 보내기 전에 이 처리기가 있는지 묻는다(없으면 프록시가 원격으로 넘길 수 있다).
       return { status: 204, mark: '1' };

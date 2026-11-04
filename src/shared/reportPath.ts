@@ -31,6 +31,7 @@ export const COMMAND_PATH = '/__rdx/command';
 /** 탭에 맡길 수 있는 명령. 측정 기록만 바꾸는 것으로 한정한다(임의 코드 실행 없음) */
 export const COMMAND_OPS = ['reset', 'snapshot'] as const;
 export type CommandOp = (typeof COMMAND_OPS)[number];
+export const isCommandOp = (op: unknown): op is CommandOp => (COMMAND_OPS as readonly unknown[]).includes(op);
 /** dev 서버가 탭에 넘기는 명령 */
 export interface RdxCommand {
   id: string;
@@ -43,5 +44,21 @@ export interface RdxCommandResult {
   ok: boolean;
   error?: string;
 }
-/** dev 서버가 마지막으로 본 브라우저 출처를 적는 파일(.rdx 기준). . 으로 시작해 snapshot 이름과 겹치지 않는다 */
+/**
+ * dev 서버가 명령 경로의 토큰과 마지막으로 본 브라우저 출처를 적는 파일(.rdx 기준). . 으로 시작해 snapshot 이름과 겹치지 않는다.
+ * 같은 PC 에서 이 파일을 읽을 수 있는 쪽(CLI·MCP)만 명령을 보낼 수 있다.
+ */
 export const SERVER_FILE = '.server.json';
+/** 명령 경로(`/__rdx/command`)의 모든 요청에 붙이는 토큰 헤더. 값은 SERVER_FILE 의 token */
+export const TOKEN_HEADER = 'x-rdx-token';
+/**
+ * 탭이 받아 가기·알림 요청에 붙이는 헤더. 다른 사이트는 이 헤더를 붙이면 CORS preflight 가 필요해 보낼 수 없다.
+ * 없는 GET 은 부수 효과 없는 핸드셰이크로 답한다(다른 사이트의 `<img>` 로 가짜 탭을 등록하지 못하게).
+ */
+export const TAB_HEADER = 'x-rdx-tab';
+/** dev 서버가 받아 가기 응답에 붙여, 최근에 CLI·MCP 가 명령 경로를 썼다고 알리는 헤더. 그동안만 탭이 5초마다 받아 간다 */
+export const CLI_ACTIVE_HEADER = 'x-rdx-cli';
+/** CLI·MCP 가 명령 경로를 쓴 뒤 이만큼은 탭이 5초마다 받아 간다 */
+export const CLI_ACTIVE_MS = 10 * 60 * 1000;
+/** CLI·MCP 가 쓰지 않을 때 탭이 받아 가는 주기(열려 있다는 알림도 된다) */
+export const QUIET_POLL_MS = 60 * 1000;

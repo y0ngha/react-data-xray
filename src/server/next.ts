@@ -1,4 +1,4 @@
-import { REPORT_HEADER } from '../shared/reportPath.js';
+import { CLI_ACTIVE_HEADER, REPORT_HEADER, TAB_HEADER, TOKEN_HEADER } from '../shared/reportPath.js';
 import { createReportHandler, type RdxReportOptions } from './reportHandler.js';
 
 export type { RdxReportOptions };
@@ -10,10 +10,14 @@ export interface RdxReportRoute {
   POST: RouteHandler;
 }
 
-const respond = (status: number, mark?: string, body?: string): Response =>
+const respond = (status: number, mark?: string, body?: string, cliActive?: boolean): Response =>
   new Response(body ?? null, {
     status,
-    headers: { ...(mark && { [REPORT_HEADER]: mark }), ...(body !== undefined && { 'content-type': 'application/json' }) },
+    headers: {
+      ...(mark && { [REPORT_HEADER]: mark }),
+      ...(body !== undefined && { 'content-type': 'application/json' }),
+      ...(cliActive && { [CLI_ACTIVE_HEADER]: '1' }),
+    },
   });
 
 /**
@@ -30,15 +34,17 @@ export const createRdxReportRoute = (root = process.cwd(), options: RdxReportOpt
   const route: RouteHandler = async (request) => {
     // next build 가 만든 서버(next start)와 테스트에서는 받지 않는다. 경로가 있다는 표시도 주지 않는다.
     if (process.env.NODE_ENV !== 'development') return respond(404);
-    const { status, mark, body } = await handle({
+    const { status, mark, body, cliActive } = await handle({
       method: request.method,
       url: request.url,
       host: request.headers.get('host') ?? undefined,
       origin: request.headers.get('origin') ?? undefined,
       contentType: request.headers.get('content-type') ?? undefined,
       body: request.body,
+      tabHeader: request.headers.get(TAB_HEADER) ?? undefined,
+      token: request.headers.get(TOKEN_HEADER) ?? undefined,
     });
-    return respond(status, mark, body);
+    return respond(status, mark, body, cliActive);
   };
   return { GET: route, POST: route };
 };

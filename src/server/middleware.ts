@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 
-import { COMMAND_PATH, REPORT_HEADER, REPORT_PATH } from '../shared/reportPath.js';
+import { CLI_ACTIVE_HEADER, COMMAND_PATH, REPORT_HEADER, REPORT_PATH, TAB_HEADER, TOKEN_HEADER } from '../shared/reportPath.js';
 import { createReportHandler, type RdxReportOptions } from './reportHandler.js';
 
 export type { RdxReportOptions };
@@ -27,10 +27,13 @@ export const rdxReportMiddleware = (root = process.cwd(), options: RdxReportOpti
       host: hostOf(req),
       origin: req.headers.origin,
       contentType: req.headers['content-type'],
+      tabHeader: req.headers[TAB_HEADER] as string | undefined,
+      token: req.headers[TOKEN_HEADER] as string | undefined,
       // GET 에는 본문이 없다. 본문을 읽을 때만 Web 스트림으로 바꾼다.
       body: req.method === 'POST' ? (Readable.toWeb(req) as ReadableStream<Uint8Array>) : null,
-    }).then(({ status, mark, body }) => {
+    }).then(({ status, mark, body, cliActive }) => {
       if (mark) res.setHeader(REPORT_HEADER, mark);
+      if (cliActive) res.setHeader(CLI_ACTIVE_HEADER, '1');
       if (body !== undefined) res.setHeader('content-type', 'application/json');
       res.statusCode = status;
       res.end(body);

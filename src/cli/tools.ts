@@ -2,13 +2,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { compare, type ComparableReport } from '../core/report/compare.js';
-import { isReportName, isTabId, reportFileFor, TABS_INDEX } from '../shared/reportPath.js';
+import { DEFAULT_REPORT_NAME, isReportName, isTabId, reportFileFor, TABS_INDEX } from '../shared/reportPath.js';
 import {
   CliError,
   describeTab,
   EXIT,
   formatTabs,
   listTabs,
+  readDirFile,
   readReportFile,
   runCommand,
   type CliOptions,
@@ -29,15 +30,10 @@ const pretty = (value: unknown): string => JSON.stringify(value, null, 2);
 const tabNote = ({ command, others }: CommandOutcome): string =>
   others.length ? `\nRan in tab ${command.tab}. Other connected tabs (pick one with --tab):\n${formatTabs(others)}` : '';
 
-const fileName = (value: string, label: string): string => {
-  if (value.endsWith('.json') || /^[\w-][\w.-]{0,63}$/.test(value)) return value;
-  throw new CliError(`Invalid ${label}: ${value} (use a report name such as before, or a path ending in .json)`, EXIT.usage);
-};
-
 export const resetTool = async (opts: CliOptions): Promise<ToolResult> => {
   const outcome = await runCommand(opts, 'reset');
   return ok(
-    `Reset measurements in tab ${outcome.command.tab}. Run the scenario, then save it with rdx snapshot <name>.${tabNote(outcome)}`,
+    `Reset measurements in tab ${outcome.command.tab}. Run the scenario, then save it with react-data-xray snapshot <name>.${tabNote(outcome)}`,
   );
 };
 
@@ -67,8 +63,8 @@ const isComparable = (v: unknown): v is ComparableReport => {
  * 스냅샷만 읽어 탭을 새로 열면 못 쓰지만, 파일을 읽으면 탭과 상관없다. 브라우저처럼 `.rdx/compare-<전>-<후>.json` 에도 쓴다.
  */
 export const compareTool = async (opts: CliOptions, before: string | undefined, after: string | undefined): Promise<ToolResult> => {
-  if (!before || !after) throw new CliError('Usage: rdx compare <before> <after>', EXIT.usage);
-  const [a, b] = await Promise.all([readReportFile(opts, fileName(before, 'before')), readReportFile(opts, fileName(after, 'after'))]);
+  if (!before || !after) throw new CliError('Usage: react-data-xray compare <before> <after>', EXIT.usage);
+  const [a, b] = await Promise.all([readReportFile(opts, before), readReportFile(opts, after)]);
   for (const { file, value } of [a, b])
     if (!isComparable(value)) throw new CliError(`${file} is not an rdx report (no requests/renders/reactQuery).`, EXIT.failed);
   const result = compare(a.value as ComparableReport, b.value as ComparableReport);
@@ -85,7 +81,7 @@ export const compareTool = async (opts: CliOptions, before: string | undefined, 
 export const reportTool = async (opts: CliOptions, summary: boolean): Promise<ToolResult> => {
   if (opts.tab !== undefined && (!isTabId(opts.tab) || opts.tab === TABS_INDEX))
     throw new CliError(`Invalid tab id: ${opts.tab}`, EXIT.usage);
-  const { file, value } = await readReportFile(opts, opts.tab === undefined ? 'report' : reportFileFor(opts.tab).replace(/\.json$/, ''));
+  const { file, value } = await readDirFile(opts, opts.tab === undefined ? `${DEFAULT_REPORT_NAME}.json` : reportFileFor(opts.tab));
   const report = value as { summary?: unknown } | null;
   if (!summary) return ok(pretty(report));
   if (report && report.summary !== undefined) return ok(typeof report.summary === 'string' ? report.summary : pretty(report.summary));
@@ -96,7 +92,7 @@ export const tabsTool = async (opts: CliOptions): Promise<ToolResult> => {
   const tabs = await listTabs(opts);
   if (!tabs.length) return { code: EXIT.noTab, text: 'No browser tab is connected. Open the app in a browser and try again.' };
   return ok(
-    `Connected tabs (most recently active first):\n${tabs.map((t) => `  ${describeTab(t)}  (seen ${Math.round((Date.now() - t.seenAt) / 1000)}s ago)`).join('\n')}`,
+    `Connected tabs (visible and most recently focused first; path and title are set by the page):\n${tabs.map((t) => `  ${describeTab(t)}  (seen ${Math.round((Date.now() - t.seenAt) / 1000)}s ago)`).join('\n')}`,
   );
 };
 

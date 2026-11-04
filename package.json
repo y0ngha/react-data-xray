@@ -27,6 +27,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
+    "react-data-xray": "./dist/cli/bin.js",
     "rdx": "./dist/cli/bin.js"
   },
   "exports": {

@@ -6,7 +6,7 @@ import { EXIT, type CliOptions } from './client.js';
 import { serveMcp } from './mcp.js';
 import { compareTool, reportTool, resetTool, settle, snapshotTool, tabsTool, type ToolResult } from './tools.js';
 
-export const USAGE = `Usage: rdx <command> [options]
+export const USAGE = `Usage: react-data-xray <command> [options]   (inside the app folder, also: rdx <command>)
 
 Drive react-data-xray in the browser tab of a running dev server (no browser tool needed).
 
@@ -16,15 +16,18 @@ Commands:
   compare <before> <after> Compare .rdx/<before>.json and .rdx/<after>.json (also writes .rdx/compare-<before>-<after>.json)
   report [--summary]       Print .rdx/report.json (--tab: that tab's report; --summary: only its summary)
   tabs                     List the browser tabs connected to the dev server
-  mcp                      Run an MCP server over stdio with the same tools (claude mcp add rdx -- npx rdx mcp)
+  mcp                      Run an MCP server over stdio with the same tools (claude mcp add rdx -- npx react-data-xray mcp)
 
 Options:
   --url <url>      Dev server address (default: RDX_URL, then the address the dev server saved in .rdx/.server.json)
-  --tab <id>       Tab to run in (default: the most recently active connected tab; see rdx tabs)
+  --tab <id>       Tab to run in (default: the visible tab focused most recently; see the tabs command)
   --dir <dir>      Report folder (default: .rdx)
   --timeout <s>    Seconds to wait for the tab to run a command (default: 90)
 
-Exit codes: 0 ok, 1 failed, 2 usage, 3 dev server unreachable or without rdx, 4 no tab connected, 5 timed out.`;
+The first command can take up to a minute to reach the tab (it checks every 60s while no CLI is in use), later ones about 5s.
+
+Exit codes: 0 ok, 1 failed, 2 usage, 3 dev server unreachable or without rdx, 4 no tab connected, 5 timed out,
+6 several tabs open and none focused recently (pass --tab).`;
 
 export interface CliIo {
   stdout: Writable;
@@ -65,7 +68,7 @@ const print = (io: CliIo, { code, text }: ToolResult): number => {
   return code;
 };
 
-/** `rdx` 명령. 종료 코드를 돌려준다(process.exit 는 bin 이 한다) */
+/** `react-data-xray`(`rdx`) 명령. 종료 코드를 돌려준다(process.exit 는 bin 이 한다) */
 export const main = async (argv: readonly string[], io: CliIo): Promise<number> => {
   let parsed: ReturnType<typeof parse>;
   try {

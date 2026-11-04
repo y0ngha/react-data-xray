@@ -1,4 +1,4 @@
-import { isReportName, REPORT_HEADER, REPORT_PATH, reportFileFor, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
+import { isReportName, REPORT_HEADER, REPORT_PATH, reportFileFor, TAB_HEADER, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
 import { getNativeFetch } from '../capture/nativeFetch.js';
 import { whenSourcesResolved } from '../capture/requestContext.js';
 import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../render/monitor.js';
@@ -7,7 +7,7 @@ import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
 import { buildReport, type RdxReport } from './buildReport.js';
-import { receiveCommands } from './commands.js';
+import { notePolled, receiveCommands, shouldPoll, tabState } from './commands.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
 /** 처리기가 이 Host 를 막았을 때의 안내. dev 서버마다 붙이는 방법이 달라 셋 다 적는다. */
@@ -240,19 +240,20 @@ const startUpload = async (): Promise<void> => {
     const key = JSON.stringify(content);
     const idle = key === last;
     const tab = getTabId();
-    const query = new URLSearchParams({ tab, path: location.pathname, title: document.title });
     // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
-    // 올리지 않는 주기에도 CLI·MCP 가 맡긴 명령을 본문 없는 GET 으로 받아 간다(#69).
+    // 올리지 않는 주기에도 CLI·MCP 가 맡긴 명령을 본문 없는 GET 으로 받아 간다(#69). CLI 를 쓰지 않을 때는 1분마다.
     const quiet = idle && Date.now() - lastSent < TAB_HEARTBEAT_MS;
+    if (quiet && !shouldPoll(Date.now())) return;
+    const query = new URLSearchParams({ tab, path: location.pathname, title: document.title, ...tabState() });
     if (idle) query.set('idle', '1');
     const res = await send(
       `${REPORT_PATH}?${query}`,
       quiet
-        ? { method: 'GET', credentials: 'omit' }
+        ? { method: 'GET', credentials: 'omit', headers: { [TAB_HEADER]: '1' } }
         : {
             method: 'POST',
             credentials: 'omit',
-            headers: { 'content-type': 'application/json' },
+            headers: { 'content-type': 'application/json', [TAB_HEADER]: '1' },
             body: JSON.stringify({ generatedAt, ...content }),
           },
     ).catch(() => null);
@@ -262,6 +263,7 @@ const startUpload = async (): Promise<void> => {
         lastSent = Date.now();
       }
       failures = 0;
+      notePolled(res, Date.now());
       await receiveCommands(send, res, tab, { reset, snapshot });
       return;
     }
