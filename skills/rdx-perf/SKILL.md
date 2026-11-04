@@ -15,7 +15,7 @@ AI-generated pages often ship without verifying actual render and request costs.
    - Vite: `rdx()` in `plugins` (`import { rdx } from 'react-data-xray/vite'`)
    - webpack: `rdxReportMiddleware()` in `devServer.setupMiddlewares` (`react-data-xray/middleware`)
    - Next.js App Router: `app/%5F_rdx/report/route.ts` (or `src/app/...`) containing `export { GET, POST } from 'react-data-xray/next'`
-4. If either is missing, explain how to add it and stop. Do not modify the user's build config without permission.
+4. If any of these is missing, explain how to add it and stop. Do not modify the user's build config without permission.
 5. Two ways to read the report:
    - File: the plugin writes `.rdx/report.json` every 5s (relative to the directory where the dev command runs).
    - Browser tool: `window.__RDX__.report()`

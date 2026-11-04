@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRdxReportRoute, GET, POST } from '../next.js';
 
@@ -13,7 +13,11 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'rdx-next-'));
 });
 beforeEach(() => vi.stubEnv('NODE_ENV', 'development'));
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
+afterAll(() => rm(root, { recursive: true, force: true }));
 
 /** Next 가 route handler 에 넘기는 것과 같은 Web Request. Host 는 브라우저처럼 직접 단다(Request 는 URL 에서 채우지 않는다). */
 const request = (path: string, init: RequestInit & { host?: string } = {}) => {
@@ -61,7 +65,7 @@ describe('Next.js route handler', () => {
   it('상한을 넘는 본문은 받지 않는다', async () => {
     const { POST: post } = createRdxReportRoute(root);
     const big = `{"x":"${'a'.repeat(5 * 1024 * 1024)}"}`;
-    expect((await post(postJson('/__rdx/report?name=big', big))).status).toBe(400);
+    expect((await post(postJson('/__rdx/report?name=big', big))).status).toBe(413);
     await expect(readFile(join(root, '.rdx/big.json'), 'utf8')).rejects.toThrow('ENOENT');
   });
 
@@ -79,6 +83,20 @@ describe('Next.js route handler', () => {
     expect((await GET(request('/__rdx/report'))).headers.get('x-rdx-report')).toBe('1');
     expect((await POST(postJson('/__rdx/report?name=default-route', '{"ok":true}'))).status).toBe(204);
     expect(JSON.parse(await readFile(join(root, '.rdx/default-route.json'), 'utf8'))).toEqual({ ok: true });
-    vi.restoreAllMocks();
+  });
+
+  it('모듈이 여러 번 평가돼도(Next dev) 동시에 온 탭 보고서가 서로의 목록 항목이나 임시 파일을 덮지 않는다', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'rdx-next-multi-'));
+    vi.resetModules();
+    const a = (await import('../next.js')).createRdxReportRoute(dir);
+    vi.resetModules();
+    const b = (await import('../next.js')).createRdxReportRoute(dir);
+    const ids = Array.from({ length: 12 }, (_, i) => `tab${i}`);
+    const results = await Promise.all(ids.map((id, i) => (i % 2 ? a : b).POST(postJson(`/__rdx/report?tab=${id}`, `{"i":${i}}`))));
+    expect(results.map((r) => r.status)).toEqual(ids.map(() => 204));
+    const index = JSON.parse(await readFile(join(dir, '.rdx/tabs/index.json'), 'utf8')) as Array<{ id: string }>;
+    expect(index.map((t) => t.id).sort()).toEqual([...ids].sort());
+    expect((await readdir(join(dir, '.rdx/tabs'))).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    await rm(dir, { recursive: true, force: true });
   });
 });

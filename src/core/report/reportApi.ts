@@ -9,6 +9,12 @@ import { getResetAt, writeResetAt } from './resetAt.js';
 import { buildReport, type RdxReport } from './buildReport.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
+/** 처리기가 이 Host 를 막았을 때의 안내. dev 서버마다 붙이는 방법이 달라 셋 다 적는다. */
+const blockedHostMessage = (): string => {
+  const hosts = `{ allowedHosts: ['${location.hostname}'] }`;
+  return `[react-data-xray] The dev server blocked a report from ${location.host}. Allow it with rdx(${hosts}) (Vite), rdxReportMiddleware(root, ${hosts}) (webpack), or createRdxReportRoute(process.cwd(), ${hosts}) (Next.js).`;
+};
+
 const UPLOAD_MS = 5000;
 const TAB_ID_KEY = 'rdx:tabId';
 const SNAPSHOTS_KEY = 'rdx:snapshots';
@@ -160,9 +166,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
   const send = getNativeFetch();
   const state = send ? await endpoint : 'missing';
   if (state === 'forbidden-host') {
-    throw new Error(
-      `[react-data-xray] The dev server blocked a report from ${location.host}. Allow it with rdx({ allowedHosts: ['${location.hostname}'] }).`,
-    );
+    throw new Error(blockedHostMessage());
   }
   if (!send || state === 'missing') {
     throw new Error(NO_PLUGIN_MESSAGE);
@@ -211,9 +215,7 @@ const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
   const res = (await ask()) ?? (await new Promise((resolve) => window.setTimeout(resolve, HANDSHAKE_RETRY_MS)).then(ask));
   const mark = res?.headers.get(REPORT_HEADER);
   if (mark === 'forbidden-host') {
-    console.warn(
-      `[react-data-xray] The dev server blocked a report from ${location.host}. Allow it with rdx({ allowedHosts: ['${location.hostname}'] }).`,
-    );
+    console.warn(blockedHostMessage());
   }
   return mark === '1' ? 'ready' : mark === 'forbidden-host' ? 'forbidden-host' : 'missing';
 };

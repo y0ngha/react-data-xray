@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
@@ -14,8 +15,34 @@ interface TabEntry {
 
 /** 보고서 본문 상한. 넘으면 받지 않는다. */
 export const MAX_REPORT_BYTES = 5 * 1024 * 1024;
-// 동시에 들어온 보고서가 같은 임시 파일 이름을 쓰지 않게 붙이는 순번
-let writeSeq = 0;
+
+/** 본문이 MAX_REPORT_BYTES 를 넘었다. 413 으로 답한다 */
+class TooLargeError extends Error {}
+
+/**
+ * 본문을 조각마다 세어 읽고, 상한을 넘으면 그 자리에서 그만 받는다(전부 받은 뒤 버리지 않게).
+ * connect 미들웨어(`Readable.toWeb(req)`)와 Next 의 `request.body` 가 같이 쓴다.
+ */
+export const readBody = (body: ReadableStream<Uint8Array> | null): Promise<string> => {
+  const reader = body?.getReader();
+  if (!reader) return Promise.resolve('');
+  const decoder = new TextDecoder();
+  let text = '';
+  let bytes = 0;
+  const next = async (): Promise<string> => {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    bytes += value.byteLength;
+    if (bytes > MAX_REPORT_BYTES) {
+      // 남은 본문은 받지 않는다.
+      await reader.cancel().catch(() => undefined);
+      throw new TooLargeError('too large');
+    }
+    text += decoder.decode(value, { stream: true });
+    return next();
+  };
+  return next();
+};
 
 export interface RdxReportOptions {
   /** 보고서를 쓸 폴더. 기본: 프로젝트 루트의 .rdx */
@@ -35,8 +62,8 @@ export interface ReportRequest {
   host: string | undefined;
   origin: string | undefined;
   contentType: string | undefined;
-  /** 본문을 읽는다. MAX_REPORT_BYTES 를 넘으면 거절(reject)한다 */
-  readBody: () => Promise<string>;
+  /** 본문. MAX_REPORT_BYTES 까지만 읽는다 */
+  body: ReadableStream<Uint8Array> | null;
 }
 
 export interface ReportReply {
@@ -84,12 +111,10 @@ const isTrusted = ({ host, origin }: ReportRequest, allowedHosts: readonly strin
   }
 };
 
-// 탭 목록은 읽고 고쳐 쓰므로 한 번에 하나씩 처리한다.
-let indexQueue: Promise<unknown> = Promise.resolve();
-
 const writeJson = async (file: string, value: unknown): Promise<void> => {
   // 임시 파일에 쓰고 이름을 바꾼다. 탭 여러 개가 동시에 보내거나 AI 가 읽는 도중이어도 잘린 JSON 을 보지 않는다.
-  const temp = `${file}.${process.pid}.${writeSeq++}.tmp`;
+  // Next dev 는 같은 모듈을 여러 번 평가하기도 해서(서버 번들마다) 모듈 안 순번으로는 이름이 겹칠 수 있다. 무작위 이름을 쓴다.
+  const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`);
   await rename(temp, file);
 };
@@ -106,31 +131,49 @@ const readIndex = async (file: string): Promise<TabEntry[]> => {
   }
 };
 
-/** 탭 파일을 쓰고 탭 목록을 갱신하며, 오래 갱신이 없는 탭(닫힌 탭)의 파일은 지운다. 쓰기와 정리가 같은 큐 안이라 방금 쓴 파일을 옛 목록 기준으로 지우지 않는다. */
-const updateTabIndex = (folder: string, entry: TabEntry, report: object): Promise<unknown> => {
-  const run = async () => {
+/** 지금 목록에 이 탭을 넣고 오래된 탭을 빼서 쓴다. 뺀 탭의 파일도 지운다. */
+const mergeIndex = async (folder: string, indexFile: string, entry: TabEntry): Promise<void> => {
+  const all = [...(await readIndex(indexFile)).filter((t) => t.id !== entry.id), entry];
+  const stale = all.filter((t) => entry.updatedAt - t.updatedAt > TAB_STALE_MS && isTabId(t.id) && t.id !== TABS_INDEX);
+  const staleSet = new Set(stale);
+  await Promise.all(stale.map((t) => unlink(join(folder, reportFileFor(t.id))).catch(() => undefined)));
+  await writeJson(
+    indexFile,
+    all.filter((t) => !staleSet.has(t)).sort((a, b) => b.updatedAt - a.updatedAt),
+  );
+};
+
+const hasEntry = async (indexFile: string, entry: TabEntry): Promise<boolean> =>
+  (await readIndex(indexFile)).some((t) => t.id === entry.id && t.updatedAt >= entry.updatedAt);
+
+// 탭 목록은 읽고 고쳐 쓰므로 한 번에 하나씩 처리한다. 모듈이 여러 번 평가돼도 한 프로세스 안에서는 같은 큐를 쓰게 전역에 둔다.
+const INDEX_QUEUE = Symbol.for('react-data-xray.tabIndexQueue');
+const enqueueIndex = (run: () => Promise<void>): Promise<unknown> => {
+  const holder = globalThis as { [INDEX_QUEUE]?: Promise<unknown> };
+  const queued = (holder[INDEX_QUEUE] ?? Promise.resolve()).then(run, run);
+  holder[INDEX_QUEUE] = queued;
+  return queued;
+};
+
+/**
+ * 탭 파일을 쓰고 탭 목록을 갱신하며, 오래 갱신이 없는 탭(닫힌 탭)의 파일은 지운다. 쓰기와 정리가 같은 큐 안이라 방금 쓴 파일을 옛 목록 기준으로 지우지 않는다.
+ * 다른 프로세스가 같은 목록을 동시에 고쳐 써 이 탭이 빠졌으면 한 번 더 합쳐 쓴다. 그 사이에 또 덮이면 빠진 채로 남지만,
+ * 열린 탭은 TAB_HEARTBEAT_MS 마다 다시 알리므로 다음 알림에 다시 들어간다.
+ */
+const updateTabIndex = (folder: string, entry: TabEntry, report: object): Promise<unknown> =>
+  enqueueIndex(async () => {
     const dir = join(folder, 'tabs');
     await mkdir(dir, { recursive: true });
     await writeJson(join(folder, entry.file), { tab: entry, ...report });
     const indexFile = join(dir, `${TABS_INDEX}.json`);
-    const now = entry.updatedAt;
-    const all = [...(await readIndex(indexFile)).filter((t) => t.id !== entry.id), entry];
-    const stale = all.filter((t) => now - t.updatedAt > TAB_STALE_MS && isTabId(t.id) && t.id !== TABS_INDEX);
-    const staleSet = new Set(stale);
-    await Promise.all(stale.map((t) => unlink(join(folder, reportFileFor(t.id))).catch(() => undefined)));
-    await writeJson(
-      indexFile,
-      all.filter((t) => !staleSet.has(t)).sort((a, b) => b.updatedAt - a.updatedAt),
-    );
-  };
-  indexQueue = indexQueue.then(run, run);
-  return indexQueue;
-};
+    await mergeIndex(folder, indexFile, entry);
+    if (!(await hasEntry(indexFile, entry))) await mergeIndex(folder, indexFile, entry);
+  });
 
 const writeReport = async (folder: string, req: ReportRequest, query: URLSearchParams): Promise<ReportReply> => {
   const name = query.get('name');
   const tab = query.get('tab');
-  const report: unknown = JSON.parse(await req.readBody());
+  const report: unknown = JSON.parse(await readBody(req.body));
   await mkdir(folder, { recursive: true });
   // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다. 이미 있으면 그대로 둔다.
   await writeFile(join(folder, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined);
@@ -168,6 +211,6 @@ export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts =
     if (name !== null && !isReportName(name)) return { status: 400, mark: '1' };
     const tab = query.get('tab');
     if (tab !== null && (!isTabId(tab) || tab === TABS_INDEX || name !== null)) return { status: 400, mark: '1' };
-    return writeReport(folder, req, query).catch(() => ({ status: 400, mark: '1' }));
+    return writeReport(folder, req, query).catch((error: unknown) => ({ status: error instanceof TooLargeError ? 413 : 400, mark: '1' }));
   };
 };

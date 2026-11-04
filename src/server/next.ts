@@ -1,5 +1,5 @@
 import { REPORT_HEADER } from '../shared/reportPath.js';
-import { createReportHandler, MAX_REPORT_BYTES, type RdxReportOptions } from './reportHandler.js';
+import { createReportHandler, type RdxReportOptions } from './reportHandler.js';
 
 export type { RdxReportOptions };
 
@@ -9,27 +9,6 @@ export interface RdxReportRoute {
   GET: RouteHandler;
   POST: RouteHandler;
 }
-
-/** 본문을 조각마다 세어 읽고, 상한을 넘으면 그 자리에서 그만 받는다(전부 받은 뒤 버리지 않게). */
-const readBody = (request: Request): Promise<string> => {
-  const reader = request.body?.getReader();
-  if (!reader) return Promise.resolve('');
-  const decoder = new TextDecoder();
-  let text = '';
-  let bytes = 0;
-  const next = async (): Promise<string> => {
-    const { done, value } = await reader.read();
-    if (done) return text + decoder.decode();
-    bytes += value.byteLength;
-    if (bytes > MAX_REPORT_BYTES) {
-      await reader.cancel();
-      throw new Error('too large');
-    }
-    text += decoder.decode(value, { stream: true });
-    return next();
-  };
-  return next();
-};
 
 const respond = (status: number, mark?: string): Response => new Response(null, { status, headers: mark ? { [REPORT_HEADER]: mark } : {} });
 
@@ -52,7 +31,7 @@ export const createRdxReportRoute = (root = process.cwd(), options: RdxReportOpt
       host: request.headers.get('host') ?? undefined,
       origin: request.headers.get('origin') ?? undefined,
       contentType: request.headers.get('content-type') ?? undefined,
-      readBody: () => readBody(request),
+      body: request.body,
     });
     return respond(status, mark);
   };
