@@ -3,6 +3,7 @@ import { registerOrigins } from './origins.js';
 import { currentCommitSeq } from '../render/commitCauses.js';
 import { repeatCauseStep } from './repeatCause.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
+import { createResponseHasher } from './responseHash.js';
 import type { RequestRecord } from './types.js';
 
 const MAX_RECORDS = 200;
@@ -115,8 +116,17 @@ export const keepResponseText = (record: RequestRecord, text: string, { compare 
   enqueue(() => {
     if (isStale(record)) return true;
     record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (truncated after 100KB)` : text;
-    if (compare) record.sameResponseAs = detectSameResponse(record, text);
     notify();
+    return true;
+  });
+  if (!compare) return;
+  // 큰 응답은 해시를 여러 조각에 나눠 계산한다. 큐는 앞 step 이 끝나야 다음으로 넘어가므로 판정 순서는 그대로다.
+  const hasher = createResponseHasher(text);
+  enqueue(() => {
+    if (isStale(record)) return true;
+    if (!hasher.step()) return false;
+    record.sameResponseAs = detectSameResponse(record, hasher.digest());
+    if (record.sameResponseAs !== undefined) notify();
     return true;
   });
 };

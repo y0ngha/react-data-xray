@@ -1,4 +1,5 @@
 import { requestKeyOf } from './requestKey.js';
+import { sameDigest, type ResponseDigest } from './responseHash.js';
 import type { RequestRecord } from './types.js';
 
 const DUPLICATE_WINDOW_MS = 2000;
@@ -14,7 +15,11 @@ const remember = <T>(map: Map<string, T>, key: string, value: T): void => {
 
 // 모든 요청(본문 등록 여부와 무관)의 최근 기록. 중복·같은 응답 판정에 쓴다.
 const lastStartByRequest = new Map<string, { id: number; startedAt: number; commitSeq?: number }>();
-const lastResponseByRequest = new Map<string, { id: number; text: string }>();
+// 응답 원문 대신 길이·해시만 남긴다(#65). 원문을 두면 큰 응답 × 500키가 그대로 힙에 남는다.
+const lastResponseByRequest = new Map<string, { id: number; digest: ResponseDigest }>();
+
+/** 테스트용: 판정을 위해 남긴 값 */
+export const responseMemoryForTest = (): ReadonlyMap<string, { id: number; digest: ResponseDigest }> => lastResponseByRequest;
 
 /** 2초 안에 같은 요청이 다시 나갔으면 앞선 요청(id 와 그 요청을 만들 때의 commit 순번). payload 를 모르면 판정하지 않는다. */
 export const detectDuplicate = (record: RequestRecord): { id: number; commitSeq?: number } | undefined => {
@@ -25,13 +30,13 @@ export const detectDuplicate = (record: RequestRecord): { id: number; commitSeq?
   return last && record.startedAt - last.startedAt <= DUPLICATE_WINDOW_MS ? { id: last.id, commitSeq: last.commitSeq } : undefined;
 };
 
-/** 같은 요청의 직전 응답과 본문이 똑같으면 직전 요청의 id */
-export const detectSameResponse = (record: RequestRecord, text: string): number | undefined => {
+/** 같은 요청의 직전 응답과 본문(길이·해시)이 똑같으면 직전 요청의 id */
+export const detectSameResponse = (record: RequestRecord, digest: ResponseDigest): number | undefined => {
   if (record.bodyUnreadable) return undefined;
   const key = requestKeyOf(record);
   const last = lastResponseByRequest.get(key);
-  remember(lastResponseByRequest, key, { id: record.id, text });
-  return last && last.text === text ? last.id : undefined;
+  remember(lastResponseByRequest, key, { id: record.id, digest });
+  return last && sameDigest(last.digest, digest) ? last.id : undefined;
 };
 
 export const resetRepeatDetection = (): void => {
