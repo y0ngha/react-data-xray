@@ -10,6 +10,7 @@ Use this when you want to hand off "this screen is slow" or "too many requests" 
 window.__RDX__.reset();                   // start a fresh measurement
 // … interact with the page …
 const report = await window.__RDX__.report();
+window.__RDX__.doctor();                  // is rdx attached? same as report.diagnostics
 await window.__RDX__.snapshot('before');  // saves to .rdx/before.json (plugin required, see below)
                                           // or Measure › Save in the panel toolbar (same effect)
 ```
@@ -57,6 +58,7 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 | `renders.truncated` · `droppedInstances` | Whether rendered instances exceeded 5000 and the count excluded (those with fewest renders). When true, `components[]` counts may be lower than actual |
 | `renders.components[]` | `renders` · `avoidable`, per-reason counts, `stateChanges` (changed hooks and periodicity), `startedRenders` (child renders started by this component and which props changed), `causedBy`, `renderedAt`, `networkCauses`, `changedProps`, `advice` |
 | `resetAt` | ms epoch of the last `reset()` call in this tab; `null` if never reset. When comparing two snapshots, check that both have a `resetAt` — if only one does, the comparison may mix post-reset and pre-reset data |
+| `diagnostics` | Same as `window.__RDX__.doctor()`: `renderHook` (`commitsSeen`, `reactVersion`, `strictMode`), `capture` (`requestsBeforeInstall`), `requests` (`recorded`, `jsonResponses`), `reportPlugin` (`ready` · `missing` · `forbidden-host` · `checking`), `sourceMaps.failures`, `sameResponseMemory`, and `problems` with how to fix each. Read `problems` first: if rdx loaded after react-dom, render data is empty and early requests are missing |
 | `howToRead` | How to interpret the fields above |
 
 - `snapshot(name)`: name may contain letters, digits, and `. _ -`, up to 64 characters; `report` is reserved. Rejected if the plugin is not running.

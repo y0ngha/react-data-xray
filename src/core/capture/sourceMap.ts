@@ -122,6 +122,12 @@ const parseMapJson = (text: string | null): unknown => {
 /** 실패 응답(dev 서버 재시작 중의 502 등)은 거부해서, 캐시에 남지 않고 다음에 다시 받게 한다. */
 const textOf = (r: Response): Promise<string> => (r.ok ? r.text() : Promise.reject(new Error(String(r.status))));
 
+// 모듈·소스맵을 받거나 읽지 못한 횟수(자가 점검용, #76). 소스맵이 없는 모듈은 세지 않는다.
+let failures = 0;
+
+/** 소스맵을 받거나 읽지 못한 횟수 */
+export const sourceMapFailures = (): number => failures;
+
 const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   const send = getNativeFetch();
   if (!send) return null;
@@ -133,7 +139,10 @@ const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
     ? parseMapJson(dataUrlText(mapUrl))
     : parseMapJson(await send(mapUrl, { credentials: 'same-origin' }).then(textOf));
   const map = json as { sources?: string[]; sourceRoot?: string; mappings?: string } | null;
-  if (!map?.mappings || !map.sources) return null;
+  if (!map?.mappings || !map.sources) {
+    failures++; // sourceMappingURL 은 있는데 읽을 수 없는 소스맵
+    return null;
+  }
   const root = map.sourceRoot ? map.sourceRoot.replace(/\/?$/, '/') : '';
   const base = entryBase();
   // sources 는 소스맵(또는 모듈) 위치 기준 상대 경로일 수 있다(Vite: "client.ts"). 모듈 주소 기준으로 풀어 경로를 살린다.
@@ -149,6 +158,7 @@ const mapOf = (scriptUrl: string): Promise<ParsedMap | null> => {
   const cached = maps.get(scriptUrl);
   if (cached) return cached;
   const loading: Promise<ParsedMap | null> = loadMap(scriptUrl).catch(() => {
+    failures++;
     // 그 사이 캐시에서 밀려났다가 다시 받은 항목은 지우지 않는다.
     if (maps.get(scriptUrl) === loading) maps.delete(scriptUrl);
     return null;

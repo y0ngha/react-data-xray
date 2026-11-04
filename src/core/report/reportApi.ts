@@ -7,6 +7,8 @@ import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
 import { buildReport, type RdxReport } from './buildReport.js';
+import { buildDiagnostics, type RdxDiagnostics } from '../diagnostics/diagnostics.js';
+import { setReportPluginState } from './endpointState.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
 const UPLOAD_MS = 5000;
@@ -105,6 +107,8 @@ export interface RdxApi {
   snapshot: (name: string) => Promise<RdxReport>;
   /** 이 탭에서 저장한 두 보고서(전, 후)의 증감을 돌려주고 .rdx/compare-<전>-<후>.json 에도 쓴다(쓰지 못해도 거부되지 않는다) */
   compare: (before: string, after: string) => Promise<ReportComparison>;
+  /** rdx 가 제대로 붙었는지 자가 점검: 렌더 훅·가로채기·기록·보고서 플러그인·소스맵 상태와, 찾은 문제(problems) */
+  doctor: () => RdxDiagnostics;
 }
 
 declare global {
@@ -225,8 +229,11 @@ const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
 const startUpload = async (): Promise<void> => {
   const send = getNativeFetch();
   if (!send) return;
+  setReportPluginState('checking');
   endpoint = checkEndpoint(send);
-  if ((await endpoint) !== 'ready') return;
+  const state = await endpoint;
+  setReportPluginState(state);
+  if (state !== 'ready') return;
   keepRenderMonitoring();
   let last = '';
   let lastSent = 0;
@@ -264,7 +271,7 @@ const startUpload = async (): Promise<void> => {
 /** `window.__RDX__` 를 걸고, dev 서버 플러그인이 있으면 보고서를 파일로 보낸다. */
 export const installReportApi = (): void => {
   if (typeof window === 'undefined' || window.__RDX__) return;
-  window.__RDX__ = { report, reset, snapshot, compare: compareSnapshots };
+  window.__RDX__ = { report, reset, snapshot, compare: compareSnapshots, doctor: () => buildDiagnostics() };
   watchTabIdConflict();
   void startUpload();
 };

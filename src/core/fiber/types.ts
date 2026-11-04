@@ -14,6 +14,8 @@ export interface Fiber {
   sibling: Fiber | null;
   alternate: Fiber | null;
   flags: number;
+  /** 모드 비트(StrictMode·Concurrent 등). 부모에게서 물려받는다. */
+  mode?: number;
   memoizedProps: unknown;
   memoizedState: unknown;
   stateNode: unknown;

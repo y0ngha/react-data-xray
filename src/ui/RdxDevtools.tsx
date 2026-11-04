@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { scheduleLoadOrderCheck } from '../core/diagnostics/loadOrder.js';
 import { isWastefulStat } from '../core/requests/endpointStats.js';
 import type { RequestRecord } from '../core/requests/types.js';
 import { RequestActionsProvider, type Focus, type RequestActions } from './contexts.js';
@@ -50,6 +51,9 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   const { result, scope: activeScope, pick, clear: clearScope } = useAnalysisScope();
   const [selected, setSelected] = useState<{ record: RequestRecord; focus?: Focus } | null>(null);
   const [hovered, setHovered] = useState<RequestRecord | null>(null);
+
+  // 자기 commit 이 훅을 지난 뒤 import 순서를 한 번 판정한다(react-dom 보다 늦게 불렀으면 콘솔에 알린다).
+  useEffect(() => scheduleLoadOrderCheck(), []);
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);

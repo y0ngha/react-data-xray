@@ -122,7 +122,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
 <summary><b>Troubleshooting</b></summary>
 
 - **The button does not appear**: check that `<RdxDevtools />` is actually rendered and that you are on the dev server.
-- **Early requests are missing**: make sure `import 'react-data-xray'` comes before all other imports. For Next.js, `instrumentation-client.ts` must sit at the same level as the `app` folder (inside `src/` if you use one).
+- **Not sure rdx is attached**: open **Status** in the panel toolbar, or run `window.__RDX__.doctor()`. It shows whether React commits reach rdx, how many requests and JSON responses were recorded, the report plugin state, and each problem found with how to fix it.
+- **Early requests are missing**: make sure `import 'react-data-xray'` comes before all other imports. If it comes after react-dom, rdx warns once in the console and says how many requests went out before it loaded. For Next.js, `instrumentation-client.ts` must sit at the same level as the `app` folder (inside `src/` if you use one).
 - **Clicking shows no source**: check that the value comes from a JSON response. Data rendered on the server is not traced.
 - **Shortcut conflicts with the browser**: use the panel button, or change it with `<RdxDevtools hotkey={{ key: 'x', shift: true }} />`.
 

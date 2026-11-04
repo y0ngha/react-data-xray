@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 
+import { renderEmptyReason } from '../../../core/diagnostics/diagnostics.js';
 import { type RenderGroup, type RenderSort } from '../../../core/render/groups.js';
 import type { Hit } from '../../../core/inspect/types.js';
 import type { EndpointStat } from '../../../core/requests/endpointStats.js';
@@ -84,7 +85,7 @@ export const RendersTab = ({
         ))}
       </div>
       {computed?.truncated && <Muted>Too many instances; {computed.droppedInstances} with fewest renders were excluded.</Muted>}
-      {computed && rows.length === 0 && <Muted>No renders yet. Interact with the page.</Muted>}
+      {computed && rows.length === 0 && <Muted>{renderEmptyReason() ?? 'No renders yet. Interact with the page.'}</Muted>}
       {rows.map(({ group, source }, i) => (
         <RenderGroupRow
           key={group.key ?? group.name}

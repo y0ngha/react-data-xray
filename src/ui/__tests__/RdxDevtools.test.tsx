@@ -51,7 +51,7 @@ describe('RdxDevtools', () => {
     fireEvent.keyDown(window, { key: 'e', metaKey: true, shiftKey: true });
     expect(screen.getByText(/Click an element on the page to inspect it/)).toBeTruthy();
     fireEvent.click(target);
-    expect(screen.getByText('No linked API response found.')).toBeTruthy();
+    expect(screen.getByText(/^No linked API response found\./)).toBeTruthy();
     fireEvent.keyDown(window, { key: 'Escape' });
     target.remove();
   });
