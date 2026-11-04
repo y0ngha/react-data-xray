@@ -84,6 +84,21 @@ createRoot(document.getElementById('root')!).render(
 ```
 
 <details>
+<summary><b>Vite: 플러그인이 import 를 넣게 하기</b></summary>
+
+`rdx({ inject: true })` 를 쓰면 dev 서버가 `index.html` 의 `<head>` 맨 앞, 진입 스크립트보다 앞에 `import 'react-data-xray'` 를 넣습니다. 그러면 `main.tsx` 에는 `<RdxDevtools />` 만 두면 되고, import 순서와 상관없이 첫 모듈의 요청과 렌더부터 잡힙니다. dev 서버(`vite`)에서만 넣고 production 빌드에는 넣지 않습니다. `main.tsx` 의 import 를 그대로 둬도 됩니다. 같은 모듈을 불러오므로 한 번만 설치됩니다.
+
+```ts
+// vite.config.ts
+import { rdx } from 'react-data-xray/vite';
+export default defineConfig({ plugins: [react(), rdx({ inject: true })] });
+```
+
+요청하지 않았는데 HTML 이 바뀌지 않도록 기본값은 꺼져 있습니다. 같은 플러그인이 `.rdx/report.json` 도 씁니다([AI 에이전트와 함께 쓰기](./docs/ai.md)).
+
+</details>
+
+<details>
 <summary><b>Next.js App Router</b></summary>
 
 Next.js 에는 시작 파일이 없어서 `instrumentation-client.ts`(브라우저에서 React 보다 먼저 실행되는 파일)에 import 를 둡니다. `src` 폴더를 쓰지 않으면 경로에서 `src/` 를 빼세요.
@@ -122,7 +137,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 <summary><b>잘 안 될 때</b></summary>
 
 - **버튼이 안 보입니다**: `<RdxDevtools />` 가 실제로 그려지는 곳에 있는지, 개발 서버인지 확인합니다.
-- **처음 나간 요청이 안 보입니다**: `import 'react-data-xray'` 가 다른 import 보다 앞에 있는지 확인합니다. Next.js 라면 `instrumentation-client.ts` 가 `app` 폴더와 같은 높이(`src` 를 쓰면 `src/` 안)에 있어야 합니다.
+- **처음 나간 요청이 안 보입니다**: `import 'react-data-xray'` 가 다른 import 보다 앞에 있는지 확인합니다(Vite 는 `rdx({ inject: true })` 로 맡길 수 있습니다). Next.js 라면 `instrumentation-client.ts` 가 `app` 폴더와 같은 높이(`src` 를 쓰면 `src/` 안)에 있어야 합니다.
 - **클릭해도 출처가 안 나옵니다**: 그 값이 JSON 응답에서 왔는지 확인합니다. 서버에서 그려 보낸 값은 이어지지 않습니다.
 - **단축키가 브라우저와 겹칩니다**: 패널의 버튼을 쓰거나 `<RdxDevtools hotkey={{ key: 'x', shift: true }} />` 로 바꿉니다.
 
