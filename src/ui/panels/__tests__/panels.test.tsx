@@ -48,7 +48,7 @@ describe('InspectTab', () => {
     const { rerender } = renderWithActions(<InspectTab result={null} stats={new Map()} />);
     expect(screen.getByText(/Pick element\] to select an element and see/)).toBeTruthy();
     rerender(<InspectTab result={{ components: [{ depth: 0, name: 'A', hits: [], fiber: null }], guesses: [] }} stats={new Map()} />);
-    expect(screen.getByText('No linked API response found.')).toBeTruthy();
+    expect(screen.getByText(/^No linked API response found\./)).toBeTruthy();
     const record = finished('/api/g');
     record.body = { v: 'x' };
     rerender(<InspectTab result={{ components: [], guesses: [{ record, path: '$.v', via: 'text', match: 'text' }] }} stats={new Map()} />);

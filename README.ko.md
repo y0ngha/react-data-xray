@@ -147,7 +147,8 @@ export { GET, POST } from 'react-data-xray/next';
 <summary><b>잘 안 될 때</b></summary>
 
 - **버튼이 안 보입니다**: `<RdxDevtools />` 가 실제로 그려지는 곳에 있는지, 개발 서버인지 확인합니다.
-- **처음 나간 요청이 안 보입니다**: `import 'react-data-xray'` 가 다른 import 보다 앞에 있는지 확인합니다(Vite 는 `rdx({ inject: true })` 로 맡길 수 있습니다). Next.js 라면 `instrumentation-client.ts` 가 `app` 폴더와 같은 높이(`src` 를 쓰면 `src/` 안)에 있어야 합니다.
+- **rdx 가 붙었는지 모르겠습니다**: 패널 도구 막대의 **Status** 를 펼치거나 `window.__RDX__.doctor()` 를 부릅니다. React commit 이 rdx 에 오는지, 기록한 요청과 JSON 응답 수, 보고서 플러그인 상태, 찾은 문제와 고치는 방법을 보여 줍니다.
+- **처음 나간 요청이 안 보입니다**: `import 'react-data-xray'` 가 다른 import 보다 앞에 있는지 확인합니다(Vite 는 `rdx({ inject: true })` 로 맡길 수 있습니다). react-dom 보다 늦으면 rdx 가 콘솔에 한 번 경고하고, 로드 전에 나간 요청 수를 알려 줍니다. Next.js 라면 `instrumentation-client.ts` 가 `app` 폴더와 같은 높이(`src` 를 쓰면 `src/` 안)에 있어야 합니다.
 - **클릭해도 출처가 안 나옵니다**: 그 값이 JSON 응답에서 왔는지 확인합니다. 서버에서 그려 보낸 값은 이어지지 않습니다.
 - **단축키가 브라우저와 겹칩니다**: 패널의 버튼을 쓰거나 `<RdxDevtools hotkey={{ key: 'x', shift: true }} />` 로 바꿉니다.
 

@@ -19,6 +19,7 @@ AI-generated pages often ship without verifying actual render and request costs.
 5. Two ways to read the report:
    - File: the plugin writes `.rdx/report.json` every 5s (relative to the directory where the dev command runs).
    - Browser tool: `window.__RDX__.report()`
+6. Check `diagnostics.problems` in the report (or `window.__RDX__.doctor()`). If it says rdx loaded after react-dom or requests went out before it loaded, tell the user how to fix the import order and stop: the measurement would be incomplete.
 
 ## 2. Measure
 

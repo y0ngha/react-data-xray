@@ -1,5 +1,7 @@
 import { useReducer } from 'react';
 
+import { problemCount } from '../../core/diagnostics/diagnostics.js';
+import { STATUS_LABELS } from '../../core/diagnostics/messages.js';
 import { getResetAt } from '../../core/report/reportApi.js';
 import { formatTime } from '../../shared/format.js';
 import { Button } from '../components/Button.js';
@@ -7,11 +9,12 @@ import { TabGroup } from '../components/TabGroup.js';
 import type { Dock } from '../hooks/useDockSettings.js';
 import { useStoredState } from '../hooks/useStoredState.js';
 import { color } from '../theme.js';
-import { MEASURE_KEY, parseBool } from '../viewState.js';
+import { MEASURE_KEY, parseBool, STATUS_KEY } from '../viewState.js';
 import { CompareReports } from './compare/CompareReports.js';
 import { SnapshotButton } from './compare/SnapshotButton.js';
 import { DockPicker } from './DockPicker.js';
 import { ResetButton } from './ResetButton.js';
+import { StatusLine } from './StatusLine.js';
 import { TabReportButton } from './TabReportButton.js';
 import { TAB_GROUPS, type Tab } from './tabs.js';
 
@@ -41,9 +44,13 @@ interface PanelToolbarProps {
  * 두 줄로 나눈다.
  * - 1줄: Target · View · Measure 토글 / Window(도킹·닫기, marginLeft:auto 로 맨 끝)
  * - 2줄(Measure 펼침 시): Clear records → Save → Compare → Copy report path
+ * - 3줄(Status 펼침 시): 자가 점검(window.__RDX__.doctor() 와 같은 값)
  */
 export const PanelToolbar = (props: PanelToolbarProps) => {
   const [measureOpen, setMeasureOpen] = useStoredState(MEASURE_KEY, parseBool, no, SESSION);
+  const [statusOpen, setStatusOpen] = useStoredState(STATUS_KEY, parseBool, no, SESSION);
+  // 접혀 있어도 문제가 있으면 버튼에 수를 단다(싼 카운터만 읽는다).
+  const problems = problemCount();
   // ResetButton 이 Measure 행에 있어 클릭해도 PanelToolbar 가 다시 그려지지 않으므로, 강제로 다시 그려
   // `since HH:MM` 힌트를 갱신한다.
   const [, forceUpdate] = useReducer((n: number) => n + 1, 0);
@@ -100,6 +107,13 @@ export const PanelToolbar = (props: PanelToolbarProps) => {
         {at !== null && <span style={{ color: color.muted, fontSize: 11, whiteSpace: 'nowrap' }}>since {formatTime(at).slice(0, 5)}</span>}
       </TabGroup>
 
+      <TabGroup>
+        <Button active={statusOpen} onClick={() => setStatusOpen(!statusOpen)} title={STATUS_LABELS.buttonTitle}>
+          {STATUS_LABELS.button}
+          {problems > 0 && ` ⚠${problems}`} {statusOpen ? '▴' : '▾'}
+        </Button>
+      </TabGroup>
+
       {/* 창 묶음: 맨 끝에 고정(marginLeft:auto), 줄 바꿈 없이 한 덩어리로 */}
       <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 2, flexWrap: 'nowrap' }}>
         <DockPicker dock={props.dock} onChange={props.onDock} />
@@ -120,6 +134,8 @@ export const PanelToolbar = (props: PanelToolbarProps) => {
           <TabReportButton />
         </div>
       )}
+
+      {statusOpen && <StatusLine />}
     </div>
   );
 };
