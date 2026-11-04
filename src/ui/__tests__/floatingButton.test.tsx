@@ -62,3 +62,18 @@ it('페이지 첫 로딩 3초 안의 몰림에는 알리지 않는다', () => {
   });
   expect(result.current.alert).toBe(false);
 });
+
+it('라우트를 옮긴 직후 새 화면의 몰림에는 알리지 않는다 (#82)', () => {
+  fakeAt(performance.timeOrigin + 60_000);
+  // route 는 가로채기가 보낸 시점의 pathname 으로 채운다. 여기서는 직접 단다.
+  const home = createRecord('fetch', 'GET', '/api/home');
+  home.route = '/home';
+  finishRecord(home, 200);
+  vi.advanceTimersByTime(5000);
+  for (const r of burst('d')) r.route = '/orders';
+  const { result } = renderHook(() => useProblemSignal(getRecords(), ok, 0));
+  act(() => {
+    vi.advanceTimersByTime(1000);
+  });
+  expect(result.current.alert).toBe(false);
+});

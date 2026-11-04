@@ -1,4 +1,4 @@
-import { findBursts, isInitialLoad } from '../../../core/requests/bursts.js';
+import { findBursts, screenEntryTest } from '../../../core/requests/bursts.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import type { Commit } from '../../../core/render/types.js';
 
@@ -23,7 +23,7 @@ interface BurstLayout {
   x: number;
   width: number;
   count: number;
-  /** 페이지 진입 직후의 몰림(확인 필요)인지 */
+  /** 화면 진입(페이지 첫 로딩·라우트 이동) 직후의 몰림(확인 필요)인지 */
   initial: boolean;
 }
 
@@ -75,6 +75,8 @@ export const layoutTimeline = (
   const reqH = Math.max(1, ...lanes.map((l) => l + 1)) * (LANE_H + LANE_GAP);
   const recentCommits = commits.filter((c) => c.time >= from);
   const maxCount = Math.max(1, ...recentCommits.map((c) => c.count));
+  // 20초 창 밖의 앞 요청까지 봐야 창 안에서 라우트가 바뀐 지점을 안다.
+  const isEntry = screenEntryTest(records);
   return {
     width,
     height: reqH + COMMIT_H + AXIS_H,
@@ -92,7 +94,7 @@ export const layoutTimeline = (
       x: x(b.from) - 2,
       width: Math.max(4, x(b.to) - x(b.from) + 4),
       count: b.count,
-      initial: isInitialLoad(b.from),
+      initial: isEntry(b.from),
     })),
     commits: recentCommits.map((c) => ({
       key: c.id,

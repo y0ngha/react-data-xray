@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { findQueryClients } from '../../core/reactQuery/cacheAudit.js';
 import { getTopRenders } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
-import { findBursts, isInitialLoad } from '../../core/requests/bursts.js';
+import { findBursts, screenEntryTest } from '../../core/requests/bursts.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { useInterval } from './useInterval.js';
@@ -26,10 +26,17 @@ const stormingNames = (now: number): Set<string> =>
 /** 방금 끝난 요청 몰림의 끝 시각. 화면 진입(페이지 첫 로딩·라우트 이동) 몰림과, 이유가 확실한 반복(무시·StrictMode)은 뺀다. */
 const latestBurstEnd = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass, now: number): number => {
   const starts = records
-    .filter((r) => now - r.startedAt <= RECENT_MS && !isInitialLoad(r.startedAt))
+    .filter((r) => now - r.startedAt <= RECENT_MS)
     .filter((r) => classOf(r) !== 'ignored' && classOf(r) !== 'strict-mode')
     .map((r) => r.startedAt);
-  return Math.max(0, ...findBursts(starts).map((b) => b.to));
+  // 타임라인과 같은 판정으로, 몰림 단위로 화면 진입인지 본다.
+  const isEntry = screenEntryTest(records);
+  return Math.max(
+    0,
+    ...findBursts(starts)
+      .filter((b) => !isEntry(b.from))
+      .map((b) => b.to),
+  );
 };
 
 interface Signal {

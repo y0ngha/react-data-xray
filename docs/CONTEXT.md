@@ -77,7 +77,7 @@ React Query의 `QueryObserver`는 모양(`getCurrentResult`, `options.queryKey`)
 | 중복 요청, 같은 응답 재요청 | 위 판정에 걸리고 아래 어디에도 해당하지 않음 | 빨강(낭비) |
 | 주기 요청 | 같은 요청이 3번 이상, 1초 이상의 일정한 간격(중앙값 ±25%)으로 반복 | 노랑(확인 필요) |
 | 포커스 재요청 | 창 포커스·탭 전환 직후 1초 안에 같은 응답을 다시 받음(React Query `refetchOnWindowFocus`, SWR `revalidateOnFocus`) | 노랑(확인 필요) |
-| 화면 진입 몰림 | 페이지 진입 또는 SPA 라우트 이동(`pushState`·`replaceState`·`popstate`, Navigation API `navigate` 로 경로가 바뀜) 후 3초 안의 요청 몰림. 쿼리·해시만 바뀐 것은 이동이 아닙니다. | 노랑(확인 필요) |
+| 화면 진입 몰림 | 페이지 진입 후 3초 안, 또는 SPA 라우트가 바뀐 지점의 1초 전부터 3초 뒤까지 시작한 요청 몰림. 라우트가 바뀐 지점은 같은 페이지에서 앞 요청과 `route`(보낸 시점의 pathname)가 다른 요청의 시작 시각입니다. 쿼리·해시만 바뀐 것은 이동이 아닙니다. | 노랑(확인 필요) |
 | staleTime 경과 재조회 | React Query 가 staleTime 이 지나 다시 받았고 응답이 같음(`stale-elapsed`) | 노랑(확인 필요) |
 | 무효화 뒤 재조회 | 무효화해서 다시 받았지만 바뀐 것이 없음(`after-invalidate`) | 노랑(확인 필요) |
 | StrictMode | 중복이지만 앞선 요청이 취소(abort)됐거나, 호출 스택에 React의 StrictMode 재실행 함수(`commitDoubleInvokeEffectsInDEV` 등)가 있음 | 회색(정상) |
@@ -88,6 +88,9 @@ React Query의 `QueryObserver`는 모양(`getCurrentResult`, `options.queryKey`)
 - StrictMode는 "같은 위치에서 동시에 2건" 같은 추정을 쓰지 않습니다. 같은 위젯 두 개가 동시에 같은 요청을 보내는 진짜 낭비와 구별할 수 없기 때문입니다.
 - 포커스·재연결 규칙은 같은 응답 재요청에만 적용합니다. 포커스 직후 여러 곳에서 겹쳐 보낸 중복은 낭비로 남깁니다.
 - 간격이 불규칙한 반복(정리되지 않은 interval 등)은 주기 요청으로 보지 않습니다.
+- 라우트 이동은 history 를 감싸지 않고 기록의 `route` 로 찾습니다. 앱이 원래 `pushState` 를 미리 잡아 두거나 Navigation API 로 옮겨도 똑같이 보이고, 앱 경로에 가로채기를 늘리지 않습니다.
+- 라우트 지점 1초 전까지 보는 것은 데이터 라우터(React Router loader, Next.js App Router 의 RSC 요청)가 새 화면의 요청을 주소를 바꾸기 전에 보내 앞 화면의 `route` 를 달기 때문입니다. 그 대가로 이동 직전 1초 안의 진짜 낭비 몰림도 노랑이 되지만, 숨기지 않고 타임라인에 남습니다.
+- 진입인지는 요청이 아니라 몰림 단위(몰림의 시작 시각)로 봅니다. 지점에 걸친 몰림을 반만 빼면 남은 반이 낭비 몰림으로 잡히기 때문입니다. 버튼 깜빡임과 타임라인이 같은 판정(`screenEntryTest`)을 씁니다.
 
 플로팅 버튼 테두리, 요청 탭 배지, 전체 표시 박스, 타임라인 막대가 모두 같은 분류를 씁니다.
 
