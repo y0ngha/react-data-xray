@@ -5,9 +5,9 @@ import type { Box } from '../../core/inspect/types.js';
 import { getRenderInfo, subscribeCommits } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
 import type { RequestRecord } from '../../core/requests/types.js';
-import { isWaste } from '../../core/requests/classify.js';
-import { pathOf, requestKeyOf } from '../../core/requests/requestKey.js';
-import { getEndpointStats, statSummary, type EndpointStat } from '../../core/requests/endpointStats.js';
+import { pathOf } from '../../core/requests/requestKey.js';
+import { buildBoxIndex, type BoxIndex } from '../../core/requests/boxIndex.js';
+import { statSummary } from '../../core/requests/endpointStats.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
@@ -27,7 +27,8 @@ interface BoxElements {
   metrics: HTMLElement;
 }
 
-type StatOf = (record: RequestRecord) => EndpointStat | undefined;
+/** 박스 색: 출처 이후의 같은 요청에 낭비가 있으면 빨강, 아니면 매칭 색. React 첫 모양과 painter 가 같이 쓴다. */
+const boxColorOf = (box: Box, index: BoxIndex): string => (index.isWastefulSince(box.hit.record) ? color.warn : MATCH_COLOR[box.hit.match]);
 
 const placeBox = (root: HTMLDivElement, rect: DOMRect | null): void => {
   root.style.display = rect ? '' : 'none';
@@ -43,9 +44,23 @@ const setText = (el: HTMLElement, text: string): void => {
   if (el.textContent !== text) el.textContent = text;
 };
 
-const paintMetrics = ({ box, metrics }: BoxElements, statOf: StatOf): void => {
-  const text = statSummary(statOf(box.hit.record));
+/** 테두리·바탕을 지금 색으로 쓴다. 렌더 직후에는 깜빡임 색이 먼저다. */
+const paintOutline = (root: HTMLDivElement): void => {
+  const base = root.dataset.color ?? '';
+  const flashing = root.dataset.flashing === '1';
+  root.style.outline = flashing ? `2px solid ${color.render}` : `1px solid ${base}`;
+  root.style.background = flashing ? `${color.render}33` : `${base}14`;
+};
+
+/** 라벨 지표와 박스 색을 같은 집계로 한꺼번에 칠해, 둘이 잠깐이라도 어긋나지 않게 한다. */
+const paintMetrics = ({ box, root, label, metrics }: BoxElements, index: BoxIndex): void => {
+  const text = statSummary(index.statOf(box.hit.record));
   setText(metrics, text ? ` req ${text}` : '');
+  const boxColor = boxColorOf(box, index);
+  if (root.dataset.color === boxColor) return;
+  root.dataset.color = boxColor;
+  label.style.background = boxColor;
+  paintOutline(root);
 };
 
 /**
@@ -82,10 +97,8 @@ export const separateLabels = (all: BoxElements[], rects: (DOMRect | null)[]): v
 
 const paintRenders = ({ box, root, label, count }: BoxElements, now: number): void => {
   const render = getRenderInfo(box.fiber, now);
-  const flashing = !!render && now - render.last < FLASH_MS;
-  const base = root.dataset.color ?? '';
-  root.style.outline = flashing ? `2px solid ${color.render}` : `1px solid ${base}`;
-  root.style.background = flashing ? `${color.render}33` : `${base}14`;
+  root.dataset.flashing = render && now - render.last < FLASH_MS ? '1' : '';
+  paintOutline(root);
   const recent = render?.recent ?? 0;
   count.style.display = recent > 0 ? '' : 'none';
   count.style.color = recent >= RENDER_STORM ? '#7f1d1d' : '#000';
@@ -94,16 +107,16 @@ const paintRenders = ({ box, root, label, count }: BoxElements, now: number): vo
 };
 
 /**
- * 박스 위치와 렌더 표시를 React 렌더 없이 DOM 에 직접 쓴다. 박스가 수백 개라 150ms 마다 React 로
+ * 박스 위치·렌더 표시·지표·낭비 색을 React 렌더 없이 DOM 에 직접 쓴다. 박스가 수백 개라 150ms 마다 React 로
  * 다시 그리면 메인 스레드를 다 쓴다. 스크롤은 위치만, commit 은 렌더 표시와 위치를 한 프레임에 한 번 고친다.
  */
-const useBoxPainter = (statOf: StatOf) => {
+const useBoxPainter = (index: BoxIndex) => {
   const elements = useRef(new Map<number, BoxElements>());
-  // 요청이 들어올 때마다 박스를 React 로 다시 그리지 않도록, 지표는 최신 집계를 읽어 painter 가 쓴다.
-  const latestStatOf = useRef(statOf);
+  // 요청이 들어올 때마다 박스를 React 로 다시 그리지 않도록, 지표와 색은 최신 집계를 읽어 painter 가 1초마다 함께 쓴다.
+  const latestIndex = useRef(index);
   useEffect(() => {
-    latestStatOf.current = statOf;
-  }, [statOf]);
+    latestIndex.current = index;
+  }, [index]);
   const register = useCallback((box: Box, el: HTMLDivElement | null) => {
     const label = el?.querySelector('button');
     const count = el?.querySelector('b');
@@ -116,7 +129,7 @@ const useBoxPainter = (statOf: StatOf) => {
     elements.current.set(box.id, els);
     paintRenders(els, Date.now());
     // ref 는 effect 보다 먼저 붙으므로, 같은 렌더에서 바뀐 집계를 읽도록 다음 프레임에 칠한다.
-    requestAnimationFrame(() => paintMetrics(els, latestStatOf.current));
+    requestAnimationFrame(() => paintMetrics(els, latestIndex.current));
   }, []);
 
   useEffect(() => {
@@ -131,7 +144,7 @@ const useBoxPainter = (statOf: StatOf) => {
       const rects = all.map((els) => unionRect(els.box.nodes));
       if (pending.position) all.forEach((els, i) => placeBox(els.root, rects[i]));
       if (pending.renders) all.forEach((els) => paintRenders(els, now));
-      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestStatOf.current));
+      if (pending.metrics) all.forEach((els) => paintMetrics(els, latestIndex.current));
       // 렌더 수·지표 글자가 바뀌면 라벨 너비도 바뀐다.
       separateLabels(all, rects);
       Object.assign(pending, { position: false, renders: false, metrics: false });
@@ -175,15 +188,14 @@ const useBoxPainter = (statOf: StatOf) => {
 
 interface SourceBoxProps {
   box: Box;
-  waste: boolean;
+  /** 처음 모양의 색. 낭비 박스가 한 프레임이라도 매칭 색으로 보이지 않게 painter 와 같은 색인으로 정한다. */
+  boxColor: string;
   onOpen: (record: RequestRecord) => void;
   register: (box: Box, el: HTMLDivElement | null) => void;
 }
 
-/** 박스 하나. 처음 모양만 React 로 그리고, 위치·렌더 표시는 useBoxPainter 가 고친다. */
-const SourceBox = memo(function SourceBox({ box, waste, onOpen, register }: SourceBoxProps) {
-  // 같은 엔드포인트의 다른 호출이 아니라, 이 데이터를 준 요청 자체가 낭비였을 때만 빨갛게 그린다.
-  const boxColor = waste ? color.warn : MATCH_COLOR[box.hit.match];
+/** 박스 하나. 처음 모양만 React 로 그리고, 위치·렌더 표시·지표·색은 useBoxPainter 가 고친다. */
+const SourceBox = memo(function SourceBox({ box, boxColor, onOpen, register }: SourceBoxProps) {
   const ref = useCallback((el: HTMLDivElement | null) => register(box, el), [box, register]);
   return (
     <FixedRect
@@ -230,15 +242,13 @@ export const SourceOverlay = ({
   records: readonly RequestRecord[];
   classes: ReadonlyMap<number, RequestClass>;
 }) => {
-  // 박스 하나는 쿼리·본문까지 같은 요청 하나를 가리키므로, 지표도 같은 요청별로 센다(page=1 과 page=2 를 섞지 않게).
-  const stats = useMemo(() => new Map(getEndpointStats(records, classes, requestKeyOf).map((s) => [s.endpoint, s])), [records, classes]);
-  const statOf = useCallback((record: RequestRecord) => stats.get(requestKeyOf(record)), [stats]);
-  const register = useBoxPainter(statOf);
-  const { open, classOf } = useRequestActions();
+  const index = useMemo(() => buildBoxIndex(records, classes), [records, classes]);
+  const register = useBoxPainter(index);
+  const { open } = useRequestActions();
   return (
     <>
       {boxes.map((box) => (
-        <SourceBox key={box.id} box={box} waste={isWaste(classOf(box.hit.record))} onOpen={open} register={register} />
+        <SourceBox key={box.id} box={box} boxColor={boxColorOf(box, index)} onOpen={open} register={register} />
       ))}
     </>
   );
