@@ -128,6 +128,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
+To have AI agents read `.rdx/report.json` (see [Working with AI agents](./docs/ai.md)), add one route file. Next.js leaves folders starting with `_` out of routing, so the first `_` is written as `%5F`; the route answers at `/__rdx/report`, only under `next dev`. Apps with a `basePath` are not supported yet: the browser always sends to `/__rdx/report`, which does not reach the route.
+
+```ts
+// src/app/%5F_rdx/report/route.ts
+export { GET, POST } from 'react-data-xray/next';
+```
+
 </details>
 
 ### 3. Try it
