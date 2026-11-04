@@ -1,4 +1,4 @@
-import { commitCausesBetween, type CommitCause } from '../render/commitCauses.js';
+import { commitCausesBetween, hasCommitRecord, type CommitCause } from '../render/commitCauses.js';
 import { getMountStats } from '../render/mounts.js';
 import type { RequestRecord } from './types.js';
 
@@ -55,21 +55,36 @@ const repeatCauseOf = (record: RequestRecord, previousSeq: number | undefined): 
   return previousSeq === undefined ? undefined : causeOf(component, commitCausesBetween(component, previousSeq, at));
 };
 
-/** 보낸 컴포넌트가 요청 순번의 commit 에서 마운트됐는가. 렌더 기록은 이름마다 최근 몇 commit 만 남아 지금 정해 고정한다. 모르면 undefined. */
-const sentOnMountOf = (record: RequestRecord): boolean | undefined => {
+// 마운트 commit 의 effect 가 보낸 요청은 commit 직후에 나간다. 이보다 늦으면 마운트 뒤 핸들러(다시 받기 두 번 누름 등)가 보낸 것이다.
+const MOUNT_TO_REQUEST_MS = 2000;
+
+/**
+ * 보낸 컴포넌트가 요청 순번의 commit 에서 마운트됐는가(StrictMode 재실행 판정의 근거). 렌더 기록은 이름마다 최근 몇 commit 만 남아 지금 정해 고정한다.
+ * - useLayoutEffect 의 요청은 commit 순번이 오르기 전이라 앞 순번을 단다. 그래서 순번과 다음 순번의 commit 을 함께 본다.
+ * - 마운트 기록을 못 찾았고 요청 순번의 commit 에 렌더 기록이 없으면 'unrecorded'(감시가 꺼져 있었다. 앱의 첫 마운트는 대개 RDX 버튼이
+ *   감시를 켜기 전이다. 다음 순번은 RDX 버튼이 감시를 켠 뒤의 commit 일 수 있어 보지 않는다).
+ * - 기록은 있는데 보낸 컴포넌트를 모르거나, 그 commit 에서 마운트되지 않았거나, commit 시각에서 2초 넘게 지나 나갔으면 'not-mounted'.
+ */
+const mountEvidenceOf = (record: RequestRecord): RequestRecord['mountEvidence'] => {
   const at = record.commitSeq;
-  if (!record.component || at === undefined) return undefined;
-  return commitCausesBetween(record.component, at - 1, at).some((c) => c.mounted) || undefined;
+  if (at === undefined) return undefined;
+  const mounted =
+    !!record.component &&
+    commitCausesBetween(record.component, at - 1, at + 1).some(
+      (c) => c.mounted && c.time !== undefined && Math.abs(record.startedAt - c.time) <= MOUNT_TO_REQUEST_MS,
+    );
+  if (mounted) return 'mounted';
+  return hasCommitRecord(at) ? 'not-mounted' : 'unrecorded';
 };
 
 /**
- * record.repeatCause 와 sentOnMount 를 채우는 큐 step. 끝나면 true. 앱 경로가 아니라 유휴 큐에서 부른다(보낸 컴포넌트를 채우는 step 뒤에 걸린다).
+ * record.repeatCause 와 mountEvidence 를 채우는 큐 step. 끝나면 true. 앱 경로가 아니라 유휴 큐에서 부른다(보낸 컴포넌트를 채우는 step 뒤에 걸린다).
  * previousSeq 는 앞선 같은 요청(duplicateOf)을 만들 때의 commit 순번이다.
  */
 export const repeatCauseStep =
   (record: RequestRecord, previousSeq?: number): (() => boolean) =>
   () => {
     record.repeatCause = repeatCauseOf(record, previousSeq);
-    record.sentOnMount = sentOnMountOf(record);
+    record.mountEvidence = mountEvidenceOf(record);
     return true;
   };

@@ -80,7 +80,7 @@ React Query의 `QueryObserver`는 모양(`getCurrentResult`, `options.queryKey`)
 | 첫 로딩 몰림 | 페이지 진입 후 3초 안의 요청 몰림 | 노랑(확인 필요) |
 | staleTime 경과 재조회 | React Query 가 staleTime 이 지나 다시 받았고 응답이 같음(`stale-elapsed`) | 노랑(확인 필요) |
 | 무효화 뒤 재조회 | 무효화해서 다시 받았지만 바뀐 것이 없음(`after-invalidate`) | 노랑(확인 필요) |
-| StrictMode | 중복이고 호출 스택에 React의 StrictMode 재실행 함수(`commitDoubleInvokeEffectsInDEV` 등)가 있음. 또는 앞선 요청이 취소(abort)됐고, 두 요청이 200ms 안에 같은 commit 순번에서 나갔고, 보낸 컴포넌트가 그 commit 에서 마운트됐고, 겹친 무효화가 그 요청을 취소한 것이 아님 | 회색(정상) |
+| StrictMode | 중복이고 호출 스택에 React의 StrictMode 재실행 함수(`commitDoubleInvokeEffectsInDEV` 등)가 있음. 또는 앞선 요청이 취소(abort)됐고, 두 요청이 200ms 안에 같은 commit 순번에서 나갔고, 겹친 무효화가 그 요청을 취소한 것이 아니고, 보낸 컴포넌트가 그 commit(useLayoutEffect 면 다음 commit)에서 마운트됐고 그 commit 뒤 2초 안에 나감. 그 commit 에 렌더 기록이 없으면(감시를 켜기 전 첫 마운트) 마운트 조건은 보지 않음 | 회색(정상) |
 | 재연결 재요청 | 네트워크 재연결(`online`) 직후 1초 안에 같은 응답을 다시 받음 | 회색(정상) |
 | 무시 | 사용자가 요청 탭에서 무시로 지정한 엔드포인트(설정 기억) | 회색(정상) |
 
@@ -88,7 +88,7 @@ React Query의 `QueryObserver`는 모양(`getCurrentResult`, `options.queryKey`)
 - StrictMode는 "같은 위치에서 동시에 2건" 같은 추정을 쓰지 않습니다. 같은 위젯 두 개가 동시에 같은 요청을 보내는 진짜 낭비와 구별할 수 없기 때문입니다.
 - 포커스·재연결 규칙은 같은 응답 재요청에만 적용합니다. 포커스 직후 여러 곳에서 겹쳐 보낸 중복은 낭비로 남깁니다.
 - 간격이 불규칙한 반복(정리되지 않은 interval 등)은 주기 요청으로 보지 않습니다. 10초 주기가 5초로 바뀌는 것처럼 박자가 바뀐 반복도 interval 이 겹쳐 돈 신호라 주기로 보지 않습니다. 반대로 간격 하나가 어긋났다고 그 요청의 기록 전체를 빨강으로 바꾸지는 않습니다(끊김 하나는 허용 오차를 넓혀도 못 잡습니다).
-- 취소(abort)만으로는 StrictMode 로 보지 않습니다. React Query 는 마지막 관찰자가 빠질 때, 겹친 무효화는 앞 재조회를, 다시 받기 핸들러와 AbortController 를 쓰는 검색 입력은 앞 요청을 취소합니다. StrictMode 는 마운트할 때만 effect 를 두 번 돌리므로, 취소는 마운트한 commit 의 요청일 때만 근거로 씁니다. 보낸 컴포넌트나 그 commit 의 렌더 기록을 모르면 근거가 아닙니다.
+- 취소(abort)만으로는 StrictMode 로 보지 않습니다. React Query 는 마지막 관찰자가 빠질 때, 겹친 무효화는 앞 재조회를, 다시 받기 핸들러와 AbortController 를 쓰는 검색 입력은 앞 요청을 취소합니다. StrictMode 는 마운트할 때만 effect 를 두 번 돌리므로, 취소는 마운트한 commit 직후의 요청일 때만 근거로 씁니다(마운트 뒤 2초가 지나 핸들러가 보낸 요청은 아닙니다). 보낸 컴포넌트를 모르면 근거가 아닙니다. 다만 앱의 첫 마운트는 RDX 버튼이 렌더 감시를 켜기 전이라 그 commit 의 렌더 기록이 없습니다. 이때만 간격·순번·취소로 판단합니다(이 판단은 유휴 큐에서 정해 기록에 담습니다).
 
 플로팅 버튼 테두리, 요청 탭 배지, 전체 표시 박스, 타임라인 막대가 모두 같은 분류를 씁니다.
 
@@ -222,7 +222,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 - 렌더의 네트워크 원인은 응답 객체를 그대로 쓸 때만 찾습니다. 응답을 가공해 새 객체로 만들면(map, select 등) 네트워크와 무관으로 보일 수 있습니다.
 - 요청 헤더는 비교하지 않습니다. 헤더만 다른 요청은 같은 요청으로 봅니다.
 - 주기 요청은 같은 요청이 3번 쌓여야 알아봅니다. 그 전까지(첫 두 번)는 낭비로 보일 수 있습니다.
-- StrictMode 재실행 확인은 effect 안에서 바로(await 전에) 요청을 보낼 때만 호출 스택으로 됩니다. await 뒤에 보내면 앞 요청을 cleanup 에서 취소할 때만, 그리고 두 요청이 마운트한 commit 의 순번에 남을 때(재실행은 같은 passive effect 비우기 안에서 일어나 대개 그렇습니다)만 알아봅니다. await 하는 동안 다른 commit 이 끼거나, 취소하지 않거나, 렌더 감시를 늦게 켜 마운트 기록이 없으면 중복으로 잡힙니다.
+- StrictMode 재실행 확인은 effect 안에서 바로(await 전에) 요청을 보낼 때만 호출 스택으로 됩니다. await 뒤에 보내면 앞 요청을 cleanup 에서 취소할 때만, 그리고 두 요청이 마운트한 commit 의 순번에 남을 때(재실행은 같은 passive effect 비우기 안에서 일어나 대개 그렇습니다)만 알아봅니다. 렌더 기록이 있는 commit 이면 보낸 컴포넌트를 스택의 첫 앱 프레임 파일 이름(`Profile.tsx`)으로만 알 수 있어, 컴포넌트 파일이 아니면 중복으로 잡힙니다. 반대로 렌더 기록이 없는 commit(감시를 켜기 전)에서 마운트 직후 핸들러가 200ms 안에 같은 요청을 취소하고 다시 보내면 StrictMode 로 보입니다.
 - React Query의 structural sharing 때문에 다시 받아 온 데이터라도 바뀌지 않은 객체는 처음 요청이 출처로 표시됩니다.
 - 응답 경로가 `$`(응답 전체)인 매칭은 "이 API 어딘가"라는 뜻입니다. 요소를 누르면 누른 글자로 필드까지 좁히지만, 같은 값이 여러 곳에 있으면 좁히지 않습니다.
 - ESM 전용 패키지라 CJS 모드 Jest(babel-jest 기본 설정)는 불러오지 못합니다. `exports` 에 `default` 조건을 둬 해석은 되지만, `import.meta.url` 이 있어 `transformIgnorePatterns` 로 변환해도 CJS 로 실행되지 않습니다. README 에 `moduleNameMapper` 로 빈 모듈을 쓰는 방법을 적었습니다. CJS 빌드를 함께 내지 않는 것은 두 벌이 함께 로드되면 가로채기가 두 번 설치되기 때문입니다. `import.meta.url` 을 호출 스택에서 구한 값으로 바꾸면 변환은 되지만, 스택 형식이 엔진·번들러마다 달라(Firefox·Safari 는 첫 줄이 프레임, Node CJS 는 URL 이 아닌 경로, webpack eval 은 `webpack-internal://`, 앱이 `Error.stackTraceLimit = 0` 으로 두면 프레임 없음) rdx 자신의 프레임을 빼는 규칙이 틀어질 수 있어 두었습니다.

@@ -6,7 +6,7 @@ import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
 import { getRecords, lastRecordId, touchRecords } from '../requests/store.js';
 import type { Origin, RequestRecord } from '../requests/types.js';
-import { cancelledBy, noteOverlap, resetOverlaps, type Overlap } from './overlapCancel.js';
+import { cancelledBy, noteOverlap, resetOverlaps, sentAfter, type Overlap } from './overlapCancel.js';
 import { isPinned, pinnedRefetchReason, pinReason, type RefetchReason } from './refetchReason.js';
 
 export type { RefetchReason } from './refetchReason.js';
@@ -335,7 +335,8 @@ const recordOverlap = (
         at: now.at,
         fetchStarts: history.fetchStarts.filter((f) => hashes.has(f.queryHash) && f.at >= first.at && f.at <= now.at).map((f) => f.at),
       };
-      noteOverlap(overlap); // 요청 분류가 이 겹침으로 취소된 요청을 StrictMode 로 보지 않게
+      // 요청 분류가 이 겹침으로 취소된 요청을 StrictMode 로 보지 않게 기록에 표시한다
+      if (noteOverlap(overlap, getRecords())) touchRecords();
       const stack = callerStack(now.error);
       pushBounded(history.misses, {
         at: now.at,
@@ -647,8 +648,6 @@ export const auditQueryCache = (
 
 // 사용자 조회가 큐를 비우는 데 쓰는 시간 상한
 const USER_FLUSH_MS = 1000;
-// 무효화 호출이 요청을 보내기까지 걸리는 시간의 상한
-const INVALIDATE_TO_REQUEST_MS = 1000;
 // 요청이 끝난 뒤 쿼리 성공이 기록되기까지의 여유
 const SUCCESS_SLACK_MS = 200;
 
@@ -678,7 +677,7 @@ const successOf = (record: RequestRecord): { client: QueryClientLike; history: C
 
 // 이 요청의 fetch 시작(쿼리 성공 직전에 그 쿼리가 시작한 fetch)
 const fetchStartOf = (starts: readonly FetchStart[], record: RequestRecord): FetchStart | undefined =>
-  [...starts].reverse().find((f) => f.at <= record.startedAt + 5 && record.startedAt - f.at <= INVALIDATE_TO_REQUEST_MS);
+  [...starts].reverse().find((f) => sentAfter(f.at, record));
 
 /**
  * 이 요청이 React Query 쿼리의 재조회일 때의 원인. 앞선 성공(dataUpdatedAt)과 비교해 판정한다. 쿼리 성공과 맞춰지지 않으면
@@ -699,13 +698,7 @@ const decideRefetchReason = (record: RequestRecord): RefetchReason | 'none' | un
     .find((f) => f.queryHash === queryHash);
   if (!prev) return 'none';
   const key = history.keys.get(queryHash);
-  if (
-    history.invalidations.some(
-      (i) =>
-        i.at >= prev.at && i.at <= record.startedAt + 5 && record.startedAt - i.at <= INVALIDATE_TO_REQUEST_MS && partialMatch(i.key, key),
-    )
-  )
-    return 'after-invalidate';
+  if (history.invalidations.some((i) => i.at >= prev.at && sentAfter(i.at, record) && partialMatch(i.key, key))) return 'after-invalidate';
   const fetch = fetchStartOf(
     history.fetchStarts.filter((f) => f.queryHash === queryHash),
     record,

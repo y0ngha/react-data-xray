@@ -1,5 +1,4 @@
 import { groupBy } from '../../shared/collections.js';
-import { cancelledByOverlap } from '../reactQuery/overlapCancel.js';
 import { pinnedRefetchReason } from '../reactQuery/refetchReason.js';
 import { isAborted } from './aborted.js';
 import { endpointOf, requestKeyOf } from './requestKey.js';
@@ -103,7 +102,7 @@ export { isAborted };
 const periodicKeyOf = (r: RequestRecord): string => `${r.load ?? 0}|${requestKeyOf(r)}`;
 
 /** 주기 반복에 든 요청의 id. 같은 요청끼리 모아 보되, 사이에 끼어든 요청은 빼고 반복에 든 요청만 담는다. */
-const periodicRequestIds = (records: readonly RequestRecord[]): Set<number> => {
+export const periodicRequestIds = (records: readonly RequestRecord[]): Set<number> => {
   const byKey = groupBy(
     records.filter((r) => !r.bodyUnreadable),
     periodicKeyOf,
@@ -122,21 +121,21 @@ const STRICT_ABORT_GAP_MS = 200;
 /**
  * 앞 요청이 취소된 중복이 StrictMode 재실행인가. 취소만으로는 확실하지 않다(React Query 는 마지막 관찰자가 빠지면 취소하고,
  * 겹친 무효화, 이벤트 핸들러의 다시 받기(두 번 누름), AbortController 를 쓰는 검색 입력도 앞 요청을 취소한다). 그래서 모두 맞을 때만 본다.
- * - 두 요청의 시작 간격이 매우 짧다.
- * - 이 요청을 취소한 겹친 무효화가 없다(React Query 점검의 double-invalidate 와 같은 cancelledBy 로 본다).
- * - 두 요청이 같은 commit 순번에 속하고, 보낸 컴포넌트를 알고, 그 컴포넌트가 그 commit 에서 마운트됐다(유휴 큐가 sentOnMount 로 고정).
- *   StrictMode 는 마운트할 때만 effect 를 두 번 돌린다. 핸들러가 연달아 보낸 두 요청도 같은 순번이라 순번만으로는 모자란다.
- * 모르는 것(순번·컴포넌트·마운트 기록이 없음)은 근거가 아니다.
+ * - 두 요청의 시작 간격이 매우 짧고 같은 commit 순번에 속한다.
+ * - 겹친 무효화가 앞 요청을 취소한 것이 아니다(유휴 큐가 cancelledByOverlap 으로 고정. React Query 점검의 double-invalidate 와 같은 판정).
+ * - 보낸 컴포넌트가 그 commit 에서 마운트됐고 곧바로 보냈다(mountEvidence 'mounted'). StrictMode 는 마운트할 때만 effect 를 두 번 돌리고,
+ *   핸들러가 연달아 보낸 두 요청도 같은 순번이라 순번만으로는 모자란다.
+ * - 단, 그 commit 에 렌더 기록이 아예 없으면('unrecorded', 감시가 꺼져 있던 앱의 첫 마운트) 마운트를 확인할 수 없어 위 나머지 조건만 본다.
+ * 그 밖에 모르는 것(순번·컴포넌트를 모름)은 근거가 아니다.
  */
 const abortedByStrictMode = (r: RequestRecord, prev: RequestRecord | undefined): boolean =>
   !!prev &&
   isAborted(prev) &&
-  !cancelledByOverlap(prev) &&
+  !prev.cancelledByOverlap &&
   r.startedAt - prev.startedAt <= STRICT_ABORT_GAP_MS &&
   r.commitSeq !== undefined &&
   r.commitSeq === prev.commitSeq &&
-  !!r.component &&
-  r.sentOnMount === true;
+  (r.mountEvidence === 'mounted' || r.mountEvidence === 'unrecorded');
 
 interface ClassifyContext {
   byId: ReadonlyMap<number, RequestRecord>;

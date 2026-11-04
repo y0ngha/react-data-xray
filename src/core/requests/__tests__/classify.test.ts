@@ -46,7 +46,7 @@ describe('classifyRecords', () => {
 
   it('마운트한 commit 에서 앞선 요청이 취소됐거나 StrictMode 재실행 중이면 StrictMode 로 본다', () => {
     const a = rec(0, { error: 'AbortError: aborted', commitSeq: 3 });
-    const b = rec(5, { duplicateOf: a.id, commitSeq: 3, component: 'Profile', sentOnMount: true });
+    const b = rec(5, { duplicateOf: a.id, commitSeq: 3, component: 'Profile', mountEvidence: 'mounted' });
     const c = rec(50_000, { url: '/api/z' });
     const d = rec(50_003, { url: '/api/z', duplicateOf: c.id, strictModeReplay: true });
     const classes = classifyRecords([a, b, c, d], new Set());

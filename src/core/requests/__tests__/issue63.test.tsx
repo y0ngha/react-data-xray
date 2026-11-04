@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { flush, jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { auditQueryCache, findQueryClients, resetCacheAudit } from '../../reactQuery/cacheAudit.js';
-import { noteOverlap } from '../../reactQuery/overlapCancel.js';
+import { markOverlapCancelled, noteOverlap } from '../../reactQuery/overlapCancel.js';
+import { noteCommitCause, resetCommitCauses } from '../../render/commitCauses.js';
 import { resetRenderStats, setRenderMonitoring } from '../../render/monitor.js';
 import { classifyRecords } from '../classify.js';
 import { repeatCauseStep } from '../repeatCause.js';
+import { RdxDevtools } from '../../../ui/RdxDevtools.js';
 import { getRecords } from '../store.js';
 import type { RequestRecord } from '../types.js';
 
@@ -31,7 +33,7 @@ afterEach(() => resetCacheAudit());
 
 describe('이슈 63: 앞 요청의 취소만으로 StrictMode 로 보지 않는다 (기록 단위)', () => {
   // 마운트한 commit 의 effect 가 보냈고 곧바로 다시 나간 요청(StrictMode 재실행의 모양)
-  const onMount = { commitSeq: 7, component: 'Profile', sentOnMount: true };
+  const onMount = { commitSeq: 7, component: 'Profile', mountEvidence: 'mounted' as const };
 
   it('마운트한 commit 에서 곧바로 다시 나간 요청(cleanup 이 취소)은 StrictMode 다', () => {
     const a = rec(1_000, { error: ABORTED, commitSeq: 7 });
@@ -41,17 +43,25 @@ describe('이슈 63: 앞 요청의 취소만으로 StrictMode 로 보지 않는�
 
   it('이벤트 핸들러가 연달아 보낸 요청(다시 받기를 두 번 누름)은 같은 commit 순번이어도 StrictMode 가 아니다', () => {
     const a = rec(2_000, { error: ABORTED, commitSeq: 7 });
-    const b = rec(2_090, { duplicateOf: a.id, commitSeq: 7, component: 'Profile' });
+    const b = rec(2_090, { duplicateOf: a.id, commitSeq: 7, component: 'Profile', mountEvidence: 'not-mounted' });
     expect(classOf([a, b], b)).toBe('duplicate');
   });
 
-  it('보낸 컴포넌트·commit 순번·마운트 기록을 모르면 StrictMode 가 아니다', () => {
+  it('commit 순번이나 마운트 근거를 모르면 StrictMode 가 아니다', () => {
     const a = rec(2_500, { error: ABORTED, commitSeq: 7 });
-    const unknownComponent = rec(2_502, { duplicateOf: a.id, commitSeq: 7, sentOnMount: true });
-    const unknownSeq = rec(2_503, { duplicateOf: a.id, component: 'Profile', sentOnMount: true });
+    const unknownEvidence = rec(2_502, { duplicateOf: a.id, commitSeq: 7, component: 'Profile' });
+    const unknownSeq = rec(2_503, { duplicateOf: a.id, component: 'Profile', mountEvidence: 'mounted' });
     const otherCommit = rec(2_504, { duplicateOf: a.id, ...onMount, commitSeq: 8 });
-    const list = [a, unknownComponent, unknownSeq, otherCommit];
-    expect([unknownComponent, unknownSeq, otherCommit].map((r) => classOf(list, r))).toEqual(['duplicate', 'duplicate', 'duplicate']);
+    const list = [a, unknownEvidence, unknownSeq, otherCommit];
+    expect([unknownEvidence, unknownSeq, otherCommit].map((r) => classOf(list, r))).toEqual(['duplicate', 'duplicate', 'duplicate']);
+  });
+
+  it('렌더 기록이 없는 commit(감시를 켜기 전 첫 마운트)은 간격·순번·취소만으로 StrictMode 다', () => {
+    const a = rec(2_700, { error: ABORTED, commitSeq: 3 });
+    const b = rec(2_701, { duplicateOf: a.id, commitSeq: 3, mountEvidence: 'unrecorded' });
+    const far = rec(2_950, { duplicateOf: a.id, commitSeq: 3, mountEvidence: 'unrecorded' });
+    expect(classOf([a, b, far], b)).toBe('strict-mode');
+    expect(classOf([a, b, far], far)).toBe('duplicate');
   });
 
   it('호출 스택의 재실행 근거는 취소·간격과 상관없이 StrictMode 다', () => {
@@ -75,16 +85,66 @@ describe('이슈 63: 앞 요청의 취소만으로 StrictMode 로 보지 않는�
   it('겹친 무효화가 취소한 요청의 중복은 마운트한 commit 이라도 StrictMode 가 아니다', () => {
     const a = rec(5_000, { error: ABORTED, commitSeq: 7, durationMs: 5 });
     const b = rec(5_003, { duplicateOf: a.id, ...onMount });
-    noteOverlap({ at: 5_003, fetchStarts: [4_999] });
+    expect(noteOverlap({ at: 5_003, fetchStarts: [4_999] }, [a, b])).toBe(true);
+    expect(a.cancelledByOverlap).toBe(true);
     expect(classOf([a, b], b)).toBe('duplicate');
+  });
+
+  it('겹침 판정 뒤에 끝난 요청도 유휴 큐에서 표시된다', () => {
+    noteOverlap({ at: 5_503, fetchStarts: [5_499] }, []);
+    const a = rec(5_500, { error: ABORTED, durationMs: 5 });
+    expect(markOverlapCancelled(a)).toBe(true);
+    expect(markOverlapCancelled(a)).toBe(false);
   });
 
   it('다른 쿼리의 겹친 무효화는 StrictMode 취소를 막지 않는다', () => {
     const a = rec(6_000, { error: ABORTED, commitSeq: 7, durationMs: 5 });
     const b = rec(6_003, { duplicateOf: a.id, ...onMount });
     // 같은 시각에 진행 중이었지만 그 겹침이 덮은 쿼리의 fetch 는 이 요청보다 한참 앞에 시작했다
-    noteOverlap({ at: 6_003, fetchStarts: [3_000] });
+    expect(noteOverlap({ at: 6_003, fetchStarts: [3_000] }, [a, b])).toBe(false);
+    expect(markOverlapCancelled(a)).toBe(false);
     expect(classOf([a, b], b)).toBe('strict-mode');
+  });
+
+  it('분류는 기록에 담긴 겹친 무효화 표시만 읽는다(겹침 목록을 비워도 같다)', () => {
+    const a = rec(6_500, { error: ABORTED, commitSeq: 7, durationMs: 5 });
+    const b = rec(6_503, { duplicateOf: a.id, ...onMount });
+    noteOverlap({ at: 6_503, fetchStarts: [6_499] }, [a]);
+    resetCacheAudit(); // 겹침 목록을 비운다
+    expect(a.cancelledByOverlap).toBe(true);
+    expect(classOf([a, b], b)).toBe('duplicate');
+  });
+});
+
+describe('이슈 63: 마운트 근거(mountEvidence)', () => {
+  beforeEach(() => resetCommitCauses());
+  const evidenceOf = (extra: Partial<RequestRecord>) => {
+    const r = rec(10_000, { duplicateOf: 1, component: 'Profile', commitSeq: 50, ...extra });
+    repeatCauseStep(r)();
+    return r.mountEvidence;
+  };
+
+  it('마운트 commit 직후의 요청은 mounted, 5초 뒤(마운트 뒤 핸들러)는 not-mounted', () => {
+    noteCommitCause('Profile', 50, { time: 10_000, mounted: true });
+    expect(evidenceOf({ startedAt: 10_005 })).toBe('mounted');
+    expect(evidenceOf({ startedAt: 15_000 })).toBe('not-mounted');
+  });
+
+  it('useLayoutEffect 의 요청은 앞 순번을 달아도 다음 순번의 마운트로 본다', () => {
+    noteCommitCause('Profile', 51, { time: 10_000, mounted: true });
+    expect(evidenceOf({ startedAt: 9_999 })).toBe('mounted');
+  });
+
+  it('기록이 있는 commit 에서 보낸 컴포넌트를 모르거나 마운트되지 않았으면 not-mounted', () => {
+    noteCommitCause('Profile', 50, { time: 10_000 });
+    expect(evidenceOf({})).toBe('not-mounted');
+    expect(evidenceOf({ component: undefined })).toBe('not-mounted');
+  });
+
+  it('요청 순번의 commit 에 렌더 기록이 없으면 unrecorded, 순번을 모르면 undefined', () => {
+    noteCommitCause('Other', 49, { time: 10_000 });
+    expect(evidenceOf({})).toBe('unrecorded');
+    expect(evidenceOf({ commitSeq: undefined })).toBeUndefined();
   });
 });
 
@@ -176,7 +236,7 @@ describe('이슈 63: 실제 React·React Query', () => {
     // 컴포넌트 파일(Later.tsx)이면 첫 앱 프레임의 파일 이름으로 정해진다. 그러면 마운트 기록으로 회색이 된다.
     list[1].record.component = 'Later';
     repeatCauseStep(list[1].record)();
-    expect(list[1].record.sentOnMount).toBe(true);
+    expect(list[1].record.mountEvidence).toBe('mounted');
     expect(classesFor(url)[1].cls).toBe('strict-mode');
   });
 
@@ -255,5 +315,37 @@ describe('이슈 63: 실제 React·React Query', () => {
     expect(again?.cls).not.toBe('strict-mode');
     const finding = auditQueryCache(() => 'ok', getRecords()).find((f) => f.kind === 'double-invalidate');
     expect(finding?.requests).toEqual([`GET ${url} (cancelled by overlapping invalidation)`]);
+  });
+});
+
+describe('이슈 63: README 설정(감시는 RdxDevtools 가 마운트된 뒤 켜진다)', () => {
+  it('앱의 첫 마운트 StrictMode 재실행(await 뒤 요청, cleanup 이 abort)은 렌더 기록이 없어도 회색이다', async () => {
+    abortableFetch(30);
+    const url = '/api/i63-first-mount';
+    const App = () => {
+      useEffect(() => {
+        const controller = new AbortController();
+        void (async () => {
+          await Promise.resolve();
+          await fetch(url, { signal: controller.signal }).catch(() => undefined);
+        })();
+        return () => controller.abort();
+      }, []);
+      return <p>app</p>;
+    };
+    render(
+      <StrictMode>
+        <App />
+        <RdxDevtools />
+      </StrictMode>,
+    );
+    await sleep(50);
+    await flush();
+    const list = classesFor(url);
+    expect(list).toHaveLength(2);
+    expect(list[0].record.error).toMatch(/abort/i);
+    expect(list[1].record.strictModeReplay).toBeFalsy();
+    expect(list[1].record.mountEvidence).toBe('unrecorded');
+    expect(list[1].cls).toBe('strict-mode');
   });
 });

@@ -1,6 +1,8 @@
 import { enqueue } from '../scheduler/idleQueue.js';
 import { registerOrigins } from './origins.js';
+import { markOverlapCancelled } from '../reactQuery/overlapCancel.js';
 import { currentCommitSeq } from '../render/commitCauses.js';
+import { isAborted } from './aborted.js';
 import { repeatCauseStep } from './repeatCause.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import { createResponseHasher, digestOf, HASH_CHUNK } from './responseHash.js';
@@ -88,7 +90,8 @@ export const createRecord = (
       const step = repeatCauseStep(record, duplicate.commitSeq);
       enqueue(() => {
         const done = step();
-        if (done && record.repeatCause) notify(); // 요청 탭·상세가 다시 그리도록
+        // 요청 탭·상세·버튼이 다시 그리도록(반복 이유, StrictMode 판정에 쓰는 마운트 근거)
+        if (done && (record.repeatCause || record.mountEvidence)) notify();
         return done;
       });
     }
@@ -103,6 +106,12 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
   record.error = error;
   record.durationMs = Date.now() - record.startedAt;
   if (isStale(record)) return;
+  // 겹친 무효화가 취소한 요청인지는 유휴 큐에서 정해 기록에 담는다(앞서 판정된 겹침과 맞춘다. 뒤에 판정되는 겹침은 그쪽이 담는다).
+  if (isAborted(record))
+    enqueue(() => {
+      if (markOverlapCancelled(record)) notify();
+      return true;
+    });
   records.push(record);
   if (records.length > MAX_RECORDS) {
     records.shift();
