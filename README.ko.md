@@ -128,7 +128,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
-AI 에이전트가 `.rdx/report.json` 을 읽게 하려면([AI 에이전트와 함께 쓰기](./docs/ai.md)) route 파일 하나를 더합니다. Next.js 는 `_` 로 시작하는 폴더를 라우팅에서 빼므로 첫 `_` 를 `%5F` 로 씁니다. 주소는 그대로 `/__rdx/report` 이고 `next dev` 에서만 답합니다. `basePath` 를 쓰는 앱은 아직 지원하지 않습니다. 브라우저가 늘 `/__rdx/report` 로 보내서 route 에 닿지 않습니다.
+AI 에이전트가 `.rdx/report.json` 을 읽게 하려면([AI 에이전트와 함께 쓰기](./docs/ai.md)) route 파일 하나를 더합니다. Next.js 는 `_` 로 시작하는 폴더를 라우팅에서 빼므로 첫 `_` 를 `%5F` 로 씁니다. 주소는 그대로 `/__rdx/report` 이고 `next dev` 에서만 답합니다. `basePath` 를 쓰면 route 파일은 그 자리에 두고(Next 가 `<basePath>/__rdx/report` 로 내보냅니다), 브라우저에는 `configure({ reportPath: '<basePath>/__rdx/report' })` 로 알립니다(아래).
 
 ```ts
 // src/app/%5F_rdx/report/route.ts
@@ -157,9 +157,9 @@ configure({
 ```
 
 - `ignore` 는 패널에서 고른 무시와 합쳐집니다. 그 줄에는 "Ignored (config)" 가 보이고 패널에서 풀 수 없습니다.
-- 부를 때마다 앞 설정을 통째로 바꿉니다. 맞지 않는 값은 경고하고 기본값을 씁니다.
-- `reportPath` 는 브라우저가 보내는 경로만 바꿉니다. dev 서버 쪽 경로는 같은 주소로 직접 붙입니다.
-- 적용된 설정은 보고서(`config`)에 남고, 설정이 다른 두 보고서를 비교하면 경고합니다.
+- 부를 때마다 앞 설정을 통째로 바꿉니다. 맞지 않는 값은 경고하고 기본값을 씁니다. `maxRecords` 는 5000 까지입니다.
+- `reportPath` 는 브라우저가 보고서를 보내는 경로입니다. dev 서버도 같은 경로로 받아야 합니다: `rdx({ path })`(Vite), `rdxReportMiddleware(root, { path })`(webpack). Next.js route 는 Next 가 내보내는 주소에서 답합니다.
+- 적용된 설정은 보고서(`config`, 코드와 패널의 무시를 나눠)에 남습니다. 판정 기준(`dedupeWindowMs`, `burst`, `keyHeaders`, `ignore`, 버린 요청이 있으면 `maxRecords`)이 다른 두 보고서를 비교하면 경고합니다.
 
 </details>
 

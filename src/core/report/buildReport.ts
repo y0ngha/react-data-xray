@@ -48,7 +48,7 @@ const HOW_TO_READ = [
   ...REQUEST_HOW_TO_READ_EXTRA,
   ...RENDER_HOW_TO_READ_EXTRA,
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
-  'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoint names and /RegExp/ strings not counted as waste), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), maxRecords, reportPath. Reports measured with different config are not directly comparable.',
+  'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
   'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
 ];
 
@@ -68,7 +68,7 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true)
     resetAt: getResetAt(),
     page: typeof location === 'undefined' ? '' : location.pathname,
     howToRead: HOW_TO_READ,
-    config: effectiveConfig(),
+    config: effectiveConfig(ignored.panel),
     requests: buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf),
     reactQuery: buildReactQuerySection(records, classes),
     renders: buildRenderSection(monitoring, now),

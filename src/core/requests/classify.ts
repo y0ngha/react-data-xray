@@ -1,7 +1,7 @@
 import { groupBy } from '../../shared/collections.js';
 import { pinnedRefetchReason } from '../reactQuery/refetchReason.js';
 import { isAborted } from './aborted.js';
-import { isIgnoredEndpoint } from '../config.js';
+import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 import { endpointOf, requestKeyOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
@@ -141,7 +141,7 @@ const abortedByStrictMode = (r: RequestRecord, prev: RequestRecord | undefined):
 interface ClassifyContext {
   byId: ReadonlyMap<number, RequestRecord>;
   periodicIds: ReadonlySet<number>;
-  ignoredEndpoints: ReadonlySet<string>;
+  ignoredEndpoints: IgnoreMatcher;
 }
 
 /** 위에서부터 처음 맞는 규칙이 이긴다. 이유가 확실한 것부터 보고, 남은 것만 낭비로 둔다. */
@@ -153,7 +153,7 @@ const classifyOne = (r: RequestRecord, { byId, periodicIds, ignoredEndpoints }: 
   const flagged = !!(r.duplicateOf || (r.sameResponseAs && !crossLoad));
   if (!flagged) return 'ok';
   // 패널에서 고른 무시와 코드(configure)의 무시를 합쳐 본다.
-  if (isIgnoredEndpoint(endpointOf(r), ignoredEndpoints)) return 'ignored';
+  if (ignoredEndpoints.sourceOf(endpointOf(r))) return 'ignored';
   if (periodicIds.has(r.id)) return 'periodic';
   // StrictMode 는 dev 에서 effect 를 두 번 실행한다. 호출 스택에 React 의 재실행 함수가 있거나, 재실행의 정리(cleanup)가
   // 앞 요청을 취소했을 때만 확실하다고 본다(await 뒤에 보낸 요청은 스택에 남지 않아 취소가 유일한 근거다). 같은 위젯 두 개의 동시 요청은 낭비로 남는다.
@@ -169,11 +169,14 @@ const classifyOne = (r: RequestRecord, { byId, periodicIds, ignoredEndpoints }: 
 };
 
 /** 기록 전체를 한 번에 나눈다. 주기 판정은 같은 요청끼리 모아 봐야 해서 한 건씩은 할 수 없다. */
-export const classifyRecords = (records: readonly RequestRecord[], ignoredEndpoints: ReadonlySet<string>): Map<number, RequestClass> => {
+export const classifyRecords = (
+  records: readonly RequestRecord[],
+  ignoredEndpoints: IgnoreMatcher | ReadonlySet<string>,
+): Map<number, RequestClass> => {
   const context: ClassifyContext = {
     byId: new Map(records.map((r) => [r.id, r])),
     periodicIds: periodicRequestIds(records),
-    ignoredEndpoints,
+    ignoredEndpoints: toIgnoreMatcher(ignoredEndpoints),
   };
   return new Map(records.map((r) => [r.id, classifyOne(r, context)]));
 };

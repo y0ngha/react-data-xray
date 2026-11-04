@@ -8,7 +8,11 @@ export interface ComparableReport {
   resetAt?: number | null;
   /** 잰 때의 판정 기준(이 필드 전에 저장한 스냅샷에는 없다) */
   config?: EffectiveConfig;
-  requests: { endpoints: Array<{ endpoint: string; count: number; duplicates: number; sameResponses: number }> };
+  requests: {
+    /** 기록 상한을 넘어 버린 요청 수(이 필드 전에 저장한 스냅샷에는 없다) */
+    dropped?: number;
+    endpoints: Array<{ endpoint: string; count: number; duplicates: number; sameResponses: number }>;
+  };
   renders: {
     monitoring: boolean;
     windowSeconds: number;
@@ -22,6 +26,7 @@ export const toComparable = (r: RdxReport): ComparableReport => ({
   resetAt: r.resetAt,
   config: r.config,
   requests: {
+    dropped: r.requests.dropped,
     endpoints: r.requests.endpoints.map(({ endpoint, count, duplicates, sameResponses }) => ({
       endpoint,
       count,
@@ -109,14 +114,25 @@ const splitEndpoints = (a: ComparableReport, b: ComparableReport): string[] => {
   return [...new Set([...splitIn(x, y), ...splitIn(y, x)])];
 };
 
-/** 두 설정에서 값이 다른 항목("dedupeWindowMs 2000 / 1000"). 한쪽이라도 설정을 남기지 않은 옛 보고서면 비교하지 않는다. */
-const configDifferences = (a: EffectiveConfig | undefined, b: EffectiveConfig | undefined): string[] => {
-  if (!a || !b) return [];
-  // 버전마다 항목이 늘 수 있어 양쪽 키를 합쳐 본다.
-  return ([...new Set([...Object.keys(a), ...Object.keys(b)])] as Array<keyof EffectiveConfig>)
-    .map((key) => [key, JSON.stringify(a[key]), JSON.stringify(b[key])] as const)
-    .filter(([, x, y]) => x !== y)
-    .map(([key, x, y]) => `${key} ${x} / ${y}`);
+// 판정 기준만 본다. 기준이 다르면 중복·같은 응답 수가 달라진다. reportPath 는 보내는 곳일 뿐이라 보지 않는다.
+const CRITERIA = ['dedupeWindowMs', 'burst', 'keyHeaders'] as const;
+
+const sortedText = (values: readonly string[]): string => JSON.stringify([...values].sort());
+
+/**
+ * 두 설정에서 판정 기준이 다른 항목("dedupeWindowMs 2000 / 1000"). 무시 목록은 순서와 무관한 집합으로 코드·패널을 따로 본다.
+ * 기억할 요청 수는 어느 한쪽에서라도 넘쳐 버린 요청이 있을 때만 결과를 바꾸므로 그때만 본다.
+ * 한쪽이라도 설정을 남기지 않은 옛 보고서면 비교하지 않는다.
+ */
+const configDifferences = (a: ComparableReport, b: ComparableReport): string[] => {
+  const [x, y] = [a.config, b.config];
+  if (!x || !y) return [];
+  const rows: Array<[string, string, string]> = CRITERIA.map((key) => [key, JSON.stringify(x[key]), JSON.stringify(y[key])]);
+  rows.push(['ignore (code)', sortedText(x.ignore.code), sortedText(y.ignore.code)]);
+  rows.push(['ignore (panel)', sortedText(x.ignore.panel), sortedText(y.ignore.panel)]);
+  if ((a.requests.dropped ?? 0) > 0 || (b.requests.dropped ?? 0) > 0)
+    rows.push(['maxRecords', JSON.stringify(x.maxRecords), JSON.stringify(y.maxRecords)]);
+  return rows.filter(([, before, after]) => before !== after).map(([key, before, after]) => `${key} ${before} / ${after}`);
 };
 
 const findingId = (f: ComparableReport['reactQuery']['findings'][number]): string => `${f.kind} ${f.keys.join(', ')}`;
@@ -137,7 +153,7 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
     const afterStr = rb !== null ? formatTime(rb) : 'none';
     warnings.push(`only one report was measured after a reset (before: ${beforeStr}, after: ${afterStr})`);
   }
-  configDifferences(a.config, b.config).forEach((d) => warnings.push(`detection config differs: ${d}`));
+  configDifferences(a, b).forEach((d) => warnings.push(`detection config differs: ${d}`));
   splitEndpoints(a, b).forEach((e) =>
     warnings.push(`endpoint naming changed for ${e} (one report splits it into "${e} (…)" rows; likely different rdx versions)`),
   );

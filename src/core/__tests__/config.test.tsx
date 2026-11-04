@@ -1,16 +1,23 @@
-import { screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { jsonResponse, mockFetch } from '../../testing/fetchMock.js';
 import { renderWithActions } from '../../testing/withActions.js';
 import { RequestsTab } from '../../ui/panels/requests/RequestsTab.js';
-import { configure, effectiveConfig, isConfigIgnored } from '../config.js';
+import { IGNORE_KEY, ignoreMatcher } from '../../shared/ignoredEndpoints.js';
+import { useIgnoredEndpoints } from '../../ui/hooks/useIgnoredEndpoints.js';
+import { useRequestAnalysis } from '../../ui/hooks/useRequestAnalysis.js';
+import { configure, configVersion, effectiveConfig, isConfigIgnored, subscribeConfig } from '../config.js';
+import { flushIndex } from '../inspect/derivedMatch.js';
+import { auditQueryCache, findQueryClients } from '../reactQuery/cacheAudit.js';
 import { buildReport } from '../report/buildReport.js';
-import { compare, toComparable } from '../report/compare.js';
+import { compare, toComparable, type ComparableReport } from '../report/compare.js';
 import { findBursts } from '../requests/bursts.js';
 import { classifyRecords } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
-import { requestKeyOf } from '../requests/requestKey.js';
-import { createRecord, finishRecord, getDroppedCount, getRecords } from '../requests/store.js';
+import { paramKeyOf, requestKeyOf } from '../requests/requestKey.js';
+import { createRecord, finishRecord, getDroppedCount, getRecords, mergeRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
 import { flushQueue } from '../scheduler/idleQueue.js';
 
@@ -31,7 +38,7 @@ const send = (url: string, headers?: Record<string, string>): RequestRecord => {
 describe('configure 값 검사 (#78)', () => {
   it('정하지 않으면 지금까지의 기본값이다', () => {
     expect(effectiveConfig()).toEqual({
-      ignore: [],
+      ignore: { code: [], panel: [] },
       keyHeaders: [],
       dedupeWindowMs: 2000,
       burst: { windowMs: 500, count: 5 },
@@ -52,7 +59,7 @@ describe('configure 값 검사 (#78)', () => {
     });
     expect(effectiveConfig()).toEqual({
       // 경로만 쓴 것과 문자열이 아닌 것은 빠지고, 저장된 무시처럼 ID 는 :id 로 묶는다.
-      ignore: ['GET /items/:id', '/\\/metrics/'],
+      ignore: { code: ['/\\/metrics/', 'GET /items/:id'], panel: [] },
       keyHeaders: ['x-tenant'],
       dedupeWindowMs: 2000,
       burst: { windowMs: 500, count: 3 },
@@ -76,7 +83,7 @@ describe('configure 값 검사 (#78)', () => {
       burst: 5 as unknown as { count: number },
     });
     configure(null as unknown as Record<string, never>);
-    expect(effectiveConfig().ignore).toEqual([]);
+    expect(effectiveConfig().ignore).toEqual({ code: [], panel: [] });
     expect(effectiveConfig().burst).toEqual({ windowMs: 500, count: 5 });
     expect(warn).toHaveBeenCalledTimes(4);
   });
@@ -160,17 +167,119 @@ describe('보고서와 비교 (#78)', () => {
     expect(report.requests.endpoints.find((e) => e.endpoint === 'GET /api/health')?.ignored).toBe(true);
   });
 
-  it('설정이 다른 두 보고서를 비교하면 다른 항목을 경고한다', () => {
+  it('보고서의 config.ignore 는 코드와 패널의 무시를 나눠 담는다', () => {
+    configure({ ignore: [/health/, 'GET /api/b'] });
+    localStorage.setItem(IGNORE_KEY, JSON.stringify(['GET /api/users']));
+    expect(buildReport(false).config.ignore).toEqual({ code: ['/health/', 'GET /api/b'], panel: ['GET /api/users'] });
+  });
+
+  it('판정 기준이 다른 두 보고서를 비교하면 그 항목만 경고한다', () => {
+    const configWarnings = (a: ComparableReport, b: ComparableReport) =>
+      compare(a, b).warnings.filter((w) => w.startsWith('detection config'));
     const before = toComparable(buildReport(false));
-    configure({ dedupeWindowMs: 1000, ignore: [/health/] });
+    configure({ dedupeWindowMs: 1000, ignore: [/health/], reportPath: '/app/__rdx/report', maxRecords: 100 });
+    localStorage.setItem(IGNORE_KEY, JSON.stringify(['GET /api/users']));
     const after = toComparable(buildReport(false));
-    const { warnings } = compare(before, after);
-    expect(warnings).toContain('detection config differs: ignore [] / ["/health/"]');
-    expect(warnings).toContain('detection config differs: dedupeWindowMs 2000 / 1000');
-    const configWarnings = (a: typeof before, b: typeof before) => compare(a, b).warnings.filter((w) => w.startsWith('detection config'));
+    // reportPath 는 보내는 곳일 뿐이고, maxRecords 는 버린 요청이 없으면 결과를 바꾸지 않는다.
+    expect(configWarnings(before, after)).toEqual([
+      'detection config differs: dedupeWindowMs 2000 / 1000',
+      'detection config differs: ignore (code) [] / ["/health/"]',
+      'detection config differs: ignore (panel) [] / ["GET /api/users"]',
+    ]);
+    expect(configWarnings({ ...before, requests: { ...before.requests, dropped: 3 } }, after)).toContain(
+      'detection config differs: maxRecords 200 / 100',
+    );
     expect(configWarnings(before, before)).toEqual([]);
+    // 무시 목록은 순서와 무관하다.
+    const reordered = (r: ComparableReport, code: string[]): ComparableReport => ({
+      ...r,
+      config: { ...r.config!, ignore: { code, panel: [] } },
+    });
+    expect(configWarnings(reordered(before, ['a', 'b']), reordered(before, ['b', 'a']))).toEqual([]);
     // 설정을 남기기 전에 저장한 스냅샷과는 비교하지 않는다.
     expect(configWarnings({ ...before, config: undefined }, after)).toEqual([]);
+  });
+});
+
+describe('리뷰 반영 (#78)', () => {
+  it('maxRecords 는 5000 을 넘으면 경고하고 5000 으로 둔다', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    configure({ maxRecords: 100_000 });
+    expect(effectiveConfig().maxRecords).toBe(5000);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxRecords 100000 is above the limit'));
+  });
+
+  it('되살린 기록은 configure 전에 기본 상한으로 자르지 않고, 그때의 설정으로 자르며 버린 수로 세지 않는다', () => {
+    const restored = Array.from({ length: 250 }, (_, i): RequestRecord => ({
+      ...createRecord('fetch', 'GET', `/api/old/${i}`),
+      id: 10_000 + i,
+      restored: true,
+    }));
+    mergeRecords(restored);
+    expect(getRecords()).toHaveLength(250);
+    configure({ maxRecords: 300 });
+    flushQueue();
+    expect(getRecords()).toHaveLength(250);
+    configure({ maxRecords: 240 });
+    send('/api/new');
+    expect(getRecords()).toHaveLength(240);
+    expect(getRecords().at(-1)?.url).toBe('/api/new');
+    expect(getDroppedCount()).toBe(0);
+  });
+
+  it('두 사본이 있어도 어느 사본의 configure 든 같은 설정에 닿는다', async () => {
+    vi.resetModules();
+    const other = await import('../config.js');
+    expect(other.configure).not.toBe(configure);
+    other.configure({ dedupeWindowMs: 1234 });
+    expect(effectiveConfig().dedupeWindowMs).toBe(1234);
+    configure({ dedupeWindowMs: 999 });
+    expect(other.effectiveConfig().dedupeWindowMs).toBe(999);
+  });
+
+  it('configure 하면 구독자에게 알리고 번호가 오른다', () => {
+    const listener = vi.fn<() => void>();
+    const off = subscribeConfig(listener);
+    const before = configVersion();
+    configure({ dedupeWindowMs: 10 });
+    expect(configVersion()).toBe(before + 1);
+    expect(listener).toHaveBeenCalledTimes(1);
+    off();
+    configure({});
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('keyHeaders 만 다른 요청은 캐시키 점검에서 키에 빠진 파라미터·중복 캐시가 아니다', async () => {
+    configure({ keyHeaders: ['x-tenant'] });
+    // 응답이 같으면 structural sharing 이 앞 객체를 그대로 두어 출처가 앞 요청으로 남는다. 테넌트마다 다르게 답한다.
+    mockFetch.mockImplementation(async (input, init) =>
+      jsonResponse({ page: `${String(input)} ${new Headers(init?.headers).get('x-tenant') ?? ''}`, size: 20, total: 100 }),
+    );
+    const client = new QueryClient();
+    render(
+      <QueryClientProvider client={client}>
+        <p>app</p>
+      </QueryClientProvider>,
+    );
+    findQueryClients();
+    const me =
+      (tenant: string, url = '/api/me') =>
+      () =>
+        fetch(url, { headers: { 'x-tenant': tenant } }).then((r) => r.json());
+    // 같은 키를 다른 테넌트로: 파라미터가 빠진 것이 아니다.
+    await client.fetchQuery({ queryKey: ['me'], queryFn: me('a') });
+    await client.fetchQuery({ queryKey: ['me'], queryFn: me('b') });
+    // 테넌트별 키: 같은 요청을 다른 키로 캐시한 것이 아니다(헤더가 다르다).
+    await client.fetchQuery({ queryKey: ['team', 'a'], queryFn: me('a', '/api/team') });
+    await client.fetchQuery({ queryKey: ['team', 'b'], queryFn: me('b', '/api/team') });
+    flushIndex();
+    flushQueue();
+    const kinds = auditQueryCache(() => 'ok', getRecords()).map((f) => f.kind);
+    expect(kinds).not.toContain('key-missing-param');
+    expect(kinds).not.toContain('duplicate-cache');
+    expect(paramKeyOf({ method: 'GET', url: '/a', requestHeaders: { 'x-tenant': 'a' } })).toBe(
+      paramKeyOf({ method: 'GET', url: '/a', requestHeaders: { 'x-tenant': 'b' } }),
+    );
   });
 });
 
@@ -184,5 +293,34 @@ describe('패널의 무시 표시 (#78)', () => {
     );
     expect(screen.getByText('Ignored (config)')).toBeTruthy();
     expect(screen.getAllByText('Ignore')).toHaveLength(1);
+  });
+
+  it('configure 를 다시 부르면 패널이 다시 분류해 요청 탭 표시와 분류가 같다', () => {
+    const records = [send('/api/health'), send('/api/health')];
+    const { result } = renderHook(() => {
+      const { ignored } = useIgnoredEndpoints();
+      return { ignored, analysis: useRequestAnalysis(ignored) };
+    });
+    expect(result.current.analysis.classOf(records[1])).toBe('duplicate');
+    act(() => configure({ ignore: ['GET /api/health'] }));
+    expect(result.current.analysis.classOf(records[1])).toBe('ignored');
+    expect(result.current.ignored.sourceOf('GET /api/health')).toBe('code');
+    act(() => configure({}));
+    expect(result.current.analysis.classOf(records[1])).toBe('duplicate');
+    expect(result.current.ignored.sourceOf('GET /api/health')).toBeUndefined();
+  });
+
+  it('코드로도 무시한 패널 키는 "보이지 않는 무시" 목록에 지울 수 있게 두지 않는다', () => {
+    configure({ ignore: [/^GET \/gone/] });
+    renderWithActions(
+      <RequestsTab
+        records={[]}
+        stats={[]}
+        ignored={ignoreMatcher(new Set(['GET /gone/a', 'GET /old']))}
+        onToggleIgnore={vi.fn<(endpoint: string) => void>()}
+      />,
+    );
+    expect(screen.getByText('GET /old')).toBeTruthy();
+    expect(screen.queryByText('GET /gone/a')).toBeNull();
   });
 });

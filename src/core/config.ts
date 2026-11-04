@@ -20,9 +20,10 @@ export interface RdxConfig {
   reportPath?: string;
 }
 
-/** 보고서에 남기는, 지금 적용된 설정. 정규식은 `/source/flags` 문자열이다. */
+/** 보고서에 남기는, 지금 적용된 설정 */
 export interface EffectiveConfig {
-  ignore: string[];
+  /** 무시 목록. code 는 configure 의 ignore(정규식은 `/source/flags` 문자열), panel 은 패널에서 고른 엔드포인트. 각각 정렬한다 */
+  ignore: { code: string[]; panel: string[] };
   keyHeaders: string[];
   dedupeWindowMs: number;
   burst: { windowMs: number; count: number };
@@ -53,10 +54,44 @@ const DEFAULTS: Settings = {
   reportPath: REPORT_PATH,
 };
 
-let current: Settings = DEFAULTS;
+/** 기억할 요청 수의 상한. 요청마다 응답 원문(최대 100KB)과 객체를 붙들므로 이보다 크면 힙이 커진다 */
+export const MAX_RECORDS_LIMIT = 5000;
 
-/** 판정이 읽는 지금의 설정. 속성 하나를 읽을 뿐이라 앱 경로·유휴 큐에 비용이 없다(O(1)). */
-export const config = (): Settings => current;
+interface ConfigState {
+  current: Settings;
+  /** configure 마다 오른다. 설정으로 계산한 값(패널의 분류)을 다시 계산할지 판단한다 */
+  version: number;
+  listeners: Set<() => void>;
+}
+
+// rdx 가 두 벌 평가되면(#79 의 표식) 처음 것만 설치된다. 어느 사본의 configure 든 설치된 사본에 닿도록 설정은 전역 하나에 둔다.
+// 모듈 최상위에서 만들지 않고 처음 읽을 때 만든다(sideEffects).
+const STATE = Symbol.for('react-data-xray.config');
+
+const state = (): ConfigState => {
+  const g = globalThis as { [STATE]?: ConfigState };
+  return (g[STATE] ??= { current: DEFAULTS, version: 0, listeners: new Set() });
+};
+
+const replace = (next: Settings): void => {
+  const s = state();
+  s.current = next;
+  s.version++;
+  s.listeners.forEach((listener) => listener());
+};
+
+/** 판정이 읽는 지금의 설정. 전역 하나를 읽을 뿐이라 앱 경로·유휴 큐에 비용이 없다(O(1)). */
+export const config = (): Settings => state().current;
+
+/** configure 할 때마다 오르는 번호 */
+export const configVersion = (): number => state().version;
+
+/** configure 될 때 부른다. 해제 함수를 돌려준다 */
+export const subscribeConfig = (listener: () => void): (() => void) => {
+  const { listeners } = state();
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
 
 const warn = (message: string): void => console.warn(`[react-data-xray] configure: ${message}`);
 
@@ -115,6 +150,12 @@ const isReportPath = (v: unknown): v is string => typeof v === 'string' && /^\/(
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+const capRecords = (n: number): number => {
+  if (n <= MAX_RECORDS_LIMIT) return n;
+  warn(`maxRecords ${n} is above the limit; using ${MAX_RECORDS_LIMIT}.`);
+  return MAX_RECORDS_LIMIT;
+};
+
 /**
  * 판정 기준과 무시 목록을 코드에서 정한다. `import 'react-data-xray'` 바로 뒤, 앱이 요청을 보내기 전에 부른다.
  * 부를 때마다 기본값 위에 받은 값을 얹어 통째로 바꾼다(같은 값으로 여러 번 불러도 같다). 맞지 않는 값은 경고하고 기본값을 쓴다.
@@ -123,42 +164,44 @@ export const configure = (options: RdxConfig = {}): void => {
   const base = DEFAULTS;
   if (!isObject(options)) {
     warn('options must be an object; using defaults.');
-    current = DEFAULTS;
+    replace(DEFAULTS);
     return;
   }
   const burst: unknown = options.burst;
   if (burst !== undefined && !isObject(burst)) warn('burst must be an object like { windowMs: 500, count: 5 }; using defaults.');
   const burstOptions = isObject(burst) ? burst : {};
-  current = {
+  replace({
     ...parseIgnore(options.ignore),
     keyHeaders: parseKeyHeaders(options.keyHeaders),
     dedupeWindowMs: pick(options.dedupeWindowMs, isNonNegative, base.dedupeWindowMs, 'dedupeWindowMs', 'a number >= 0'),
     burstWindowMs: pick(burstOptions.windowMs, isPositiveInt, base.burstWindowMs, 'burst.windowMs', 'a positive integer'),
     burstCount: pick(burstOptions.count, (v): v is number => isPositiveInt(v) && v >= 2, base.burstCount, 'burst.count', 'an integer >= 2'),
-    maxRecords: pick(options.maxRecords, isPositiveInt, base.maxRecords, 'maxRecords', 'a positive integer'),
+    maxRecords: capRecords(pick(options.maxRecords, isPositiveInt, base.maxRecords, 'maxRecords', 'a positive integer')),
     reportPath: pick(options.reportPath, isReportPath, base.reportPath, 'reportPath', "a path starting with '/' (no query)"),
-  };
+  });
 };
 
 /** 테스트에서 기본값으로 되돌린다. */
-export const resetConfig = (): void => {
-  current = DEFAULTS;
-};
+export const resetConfig = (): void => replace(DEFAULTS);
 
 /** 코드(configure)의 무시 목록에 든 엔드포인트인지. 패널에서 풀 수 없다. */
-export const isConfigIgnored = (endpoint: string): boolean =>
-  current.ignoreNames.has(endpoint) || current.ignorePatterns.some((re) => re.test(endpoint));
+export const isConfigIgnored = (endpoint: string): boolean => {
+  const { ignoreNames, ignorePatterns } = config();
+  return ignoreNames.has(endpoint) || ignorePatterns.some((re) => re.test(endpoint));
+};
 
-/** 패널에서 고른 무시와 코드의 무시를 합쳐 본다. */
-export const isIgnoredEndpoint = (endpoint: string, chosen: ReadonlySet<string>): boolean =>
-  chosen.has(endpoint) || isConfigIgnored(endpoint);
-
-/** 보고서에 남길, 지금 적용된 설정 */
-export const effectiveConfig = (): EffectiveConfig => ({
-  ignore: [...current.ignoreNames, ...current.ignorePatterns.map(String)],
-  keyHeaders: [...current.keyHeaders],
-  dedupeWindowMs: current.dedupeWindowMs,
-  burst: { windowMs: current.burstWindowMs, count: current.burstCount },
-  maxRecords: current.maxRecords,
-  reportPath: current.reportPath,
-});
+/** 보고서에 남길, 지금 적용된 설정. panel 은 패널에서 고른 무시(보고서를 만들 때 넘긴다) */
+export const effectiveConfig = (panel: ReadonlySet<string> = new Set()): EffectiveConfig => {
+  const current = config();
+  return {
+    ignore: {
+      code: [...current.ignoreNames, ...current.ignorePatterns.map(String)].sort(),
+      panel: [...panel].sort(),
+    },
+    keyHeaders: [...current.keyHeaders],
+    dedupeWindowMs: current.dedupeWindowMs,
+    burst: { windowMs: current.burstWindowMs, count: current.burstCount },
+    maxRecords: current.maxRecords,
+    reportPath: current.reportPath,
+  };
+};

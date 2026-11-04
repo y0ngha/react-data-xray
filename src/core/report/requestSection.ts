@@ -1,4 +1,3 @@
-import { isIgnoredEndpoint } from '../config.js';
 import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
@@ -8,6 +7,7 @@ import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
 import { queryContextOf, type QueryContext } from '../capture/queryContext.js';
 import { groupBy } from '../../shared/collections.js';
+import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 
 const MAX_CALLERS = 3;
 const MAX_EXAMPLES = 3;
@@ -141,10 +141,11 @@ const repeatCausesOf = (own: readonly RequestRecord[]) => {
 export const buildRequestSection = (
   records: readonly RequestRecord[],
   classes: ReadonlyMap<number, RequestClass>,
-  ignored: ReadonlySet<string>,
+  ignored: IgnoreMatcher | ReadonlySet<string>,
   queryOf: (record: RequestRecord) => QueryContext | undefined = queryContextOf,
 ): RequestSection => {
   const byEndpoint = groupBy(records, endpointOf);
+  const matcher = toIgnoreMatcher(ignored);
   return {
     total: records.length,
     dropped: getDroppedCount(),
@@ -152,7 +153,7 @@ export const buildRequestSection = (
       const own = byEndpoint.get(s.endpoint) ?? [];
       return {
         endpoint: s.endpoint,
-        ignored: isIgnoredEndpoint(s.endpoint, ignored),
+        ignored: !!matcher.sourceOf(s.endpoint),
         count: s.count,
         restoredCount: own.filter((r) => r.restored).length,
         avgMs: s.avgMs,

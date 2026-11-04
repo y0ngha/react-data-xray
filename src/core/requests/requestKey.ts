@@ -84,7 +84,7 @@ const headerPart = ({ requestHeaders }: KeyInput): string => {
  * 파라미터 순서만 다른 URL 은 같은 요청으로 본다. 값이 현재 시각인 cache-buster 짝은 뺀다(매 요청이 다른 요청이 된다).
  * 같은 이름이라도 값이 시각이 아닌 짝은 남긴다. configure 의 keyHeaders 로 정한 요청 헤더도 키에 든다.
  */
-export const requestKeyOf = (record: KeyInput): string => {
+const keyOf = (record: KeyInput, withHeaders: boolean): string => {
   const split = splitCacheBusters(record);
   if (split) {
     const params = new URLSearchParams(split.kept);
@@ -92,5 +92,14 @@ export const requestKeyOf = (record: KeyInput): string => {
     split.url.search = params.toString();
   }
   // 같은 요청인지는 이름을 알기 전후로 바뀌면 안 되므로 id 그대로 쓴다.
-  return `${record.method} ${split?.url.href ?? record.url}${record.action ? ` ${record.action}` : ''}${headerPart(record)} ${record.requestBody ?? ''}`;
+  const headers = withHeaders ? headerPart(record) : '';
+  return `${record.method} ${split?.url.href ?? record.url}${record.action ? ` ${record.action}` : ''}${headers} ${record.requestBody ?? ''}`;
 };
+
+export const requestKeyOf = (record: KeyInput): string => keyOf(record, true);
+
+/**
+ * keyHeaders 를 뺀 요청 키(메서드·URL·payload). 캐시키 점검의 "키에 빠진 파라미터" 는 URL·본문의 파라미터를 말하므로,
+ * 헤더만 다른 요청(다른 테넌트 토큰)을 파라미터가 다른 요청으로 보지 않는다.
+ */
+export const paramKeyOf = (record: KeyInput): string => keyOf(record, false);

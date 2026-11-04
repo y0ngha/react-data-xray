@@ -100,6 +100,17 @@ export const createRecord = (
   return record;
 };
 
+/**
+ * 상한(configure 의 maxRecords, 기본 200)을 넘은 만큼 오래된 기록부터 버린다. 그때의 설정을 읽으므로 도중에 줄여도 맞는다.
+ * 되살린 이전 페이지 기록은 버려도 세지 않는다(이번 측정에서 넘친 것이 아니다).
+ */
+const trimRecords = (): boolean => {
+  const over = records.length - config().maxRecords;
+  if (over <= 0) return false;
+  dropped += records.splice(0, over).filter((r) => !r.restored).length;
+  return true;
+};
+
 /** 응답이 오면 목록에 넣는다. 본문을 읽지 않는 요청과 실패한 요청도 감시 대상이다. */
 export const finishRecord = (record: RequestRecord, status: number, error?: string): void => {
   record.status = status;
@@ -113,11 +124,7 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
       return true;
     });
   records.push(record);
-  // 상한은 configure 의 maxRecords(기본 200)다. 도중에 줄였으면 넘친 만큼 버린다.
-  while (records.length > config().maxRecords) {
-    records.shift();
-    dropped++;
-  }
+  trimRecords();
   notify();
 };
 
@@ -162,9 +169,15 @@ export const mergeRecords = (others: readonly RequestRecord[]): void => {
   const known = new Set(records.map((r) => r.id));
   const added = others.filter((r) => !known.has(r.id));
   if (added.length === 0) return;
-  const merged = [...records, ...added].sort((a, b) => a.id - b.id).slice(-config().maxRecords);
+  const merged = [...records, ...added].sort((a, b) => a.id - b.id);
   records.splice(0, records.length, ...merged);
   nextId = Math.max(nextId, ...added.map((r) => r.id + 1));
+  // 새로고침 전 기록은 import 할 때 되살려 configure() 보다 먼저 들어온다. 여기서 자르면 기본 상한(200)으로 잘리므로,
+  // 유휴 큐에서(그때의 설정으로) 자른다. 그 전에 끝난 요청이 있으면 finishRecord 가 먼저 자른다.
+  enqueue(() => {
+    if (trimRecords()) notify();
+    return true;
+  });
   notify();
 };
 

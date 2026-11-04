@@ -30,7 +30,8 @@ describe('진입점', () => {
     vi.stubEnv('NODE_ENV', 'production');
     const prod = await import('../index.js');
     const prodConfig = await import('../core/config.js');
-    prod.configure({ maxRecords: 10 });
-    expect(prodConfig.effectiveConfig().maxRecords).toBe(200);
+    // 설정은 전역 하나라 개발 사본이 정한 10 이 남아 있다. production 의 configure 는 그것을 바꾸지 않는다.
+    prod.configure({ maxRecords: 20 });
+    expect(prodConfig.effectiveConfig().maxRecords).toBe(10);
   });
 });

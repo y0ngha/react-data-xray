@@ -12,7 +12,7 @@ const row = (stat: Partial<EndpointStat>, route?: string) =>
   renderWithActions(
     <EndpointRow
       stat={{ endpoint: 'GET /a', count: 2, duplicates: 0, sameResponses: 0, review: 0, explained: 0, avgMs: 5, ...stat }}
-      ignored={false}
+      ignored={undefined}
       route={route}
       onSelect={vi.fn<(e: string) => void>()}
       onToggleIgnore={vi.fn<(e: string) => void>()}

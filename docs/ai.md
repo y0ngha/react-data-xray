@@ -40,7 +40,7 @@ export default {
 export { GET, POST } from 'react-data-xray/next';
 ```
 
-Next.js treats folders starting with `_` as private and leaves them out of routing, so the first `_` of `__rdx` is written as `%5F` (`%5F_rdx`); the route still answers at `/__rdx/report`. It only answers under `next dev` and returns 404 in `next build`/`next start`. Apps with a `basePath` are not supported yet (the browser sends to `/__rdx/report`).
+Next.js treats folders starting with `_` as private and leaves them out of routing, so the first `_` of `__rdx` is written as `%5F` (`%5F_rdx`); the route still answers at `/__rdx/report`. It only answers under `next dev` and returns 404 in `next build`/`next start`. With a `basePath`, keep the route file where it is (Next serves it at `<basePath>/__rdx/report`) and call `configure({ reportPath: '<basePath>/__rdx/report' })` in the browser entry (see README).
 
 Add one line to your AI instruction file (`CLAUDE.md`, etc.): `Before fixing a performance or request problem, read .rdx/report.json.`
 
@@ -62,11 +62,11 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 | `renders.truncated` · `droppedInstances` | Whether rendered instances exceeded 5000 and the count excluded (those with fewest renders). When true, `components[]` counts may be lower than actual |
 | `renders.components[]` | `renders` · `avoidable`, per-reason counts, `stateChanges` (changed hooks and periodicity), `startedRenders` (child renders started by this component and which props changed), `causedBy`, `renderedAt`, `networkCauses`, `changedProps`, `advice` |
 | `resetAt` | ms epoch of the last `reset()` call in this tab; `null` if never reset. When comparing two snapshots, check that both have a `resetAt` — if only one does, the comparison may mix post-reset and pre-reset data |
-| `config` | Detection settings in effect, set in code with `configure()` (see README) or the defaults: `ignore` (endpoint names and `/RegExp/` strings), `keyHeaders`, `dedupeWindowMs` (2000), `burst` (`{ windowMs: 500, count: 5 }`), `maxRecords` (200), `reportPath` (`/__rdx/report`). `compare` warns when two reports were measured with different `config` — their counts are not directly comparable |
+| `config` | Detection settings in effect, set in code with `configure()` (see README) or the defaults: `ignore` (`code`: `configure()` endpoint names and `/RegExp/` strings; `panel`: chosen in the panel), `keyHeaders`, `dedupeWindowMs` (2000), `burst` (`{ windowMs: 500, count: 5 }`), `maxRecords` (200, max 5000), `reportPath` (`/__rdx/report`). `compare` warns when the detection criteria differ (`dedupeWindowMs`, `burst`, `keyHeaders`, `ignore`, and `maxRecords` when either report dropped requests) — their counts are not directly comparable |
 | `howToRead` | How to interpret the fields above |
 
 - `snapshot(name)`: name may contain letters, digits, and `. _ -`, up to 64 characters; `report` is reserved. Rejected if the plugin is not running.
 - Security: to prevent other sites from injecting fake reports, the plugin accepts requests only from `localhost`, `*.localhost`, and IP addresses. For other hostnames use `rdx({ allowedHosts: ['my-app.local'] })`. Vite reuses `server.allowedHosts` automatically.
-- Options: `rdx({ dir: '.rdx', allowedHosts: [...], inject: false })`, `rdxReportMiddleware(root, { dir, allowedHosts })`, `export const { GET, POST } = createRdxReportRoute(root, { dir, allowedHosts })` from `react-data-xray/next`. `inject: true` (Vite 4+) adds `import 'react-data-xray'` to the `index.html` Vite serves, running before the app's entry module, so the entry file needs only `<RdxDevtools />`. It does nothing when Vite does not serve the HTML (SSR, framework modes, backend integrations); see README.
+- Options: `rdx({ dir: '.rdx', allowedHosts: [...], inject: false, path: '/__rdx/report' })`, `rdxReportMiddleware(root, { dir, allowedHosts, path })` (`path` must match the browser's `configure({ reportPath })`), `export const { GET, POST } = createRdxReportRoute(root, { dir, allowedHosts })` from `react-data-xray/next`. `inject: true` (Vite 4+) adds `import 'react-data-xray'` to the `index.html` Vite serves, running before the app's entry module, so the entry file needs only `<RdxDevtools />`. It does nothing when Vite does not serve the HTML (SSR, framework modes, backend integrations); see README.
 
 </details>
