@@ -66,6 +66,6 @@ describe('보고서 쓰기 보안', () => {
 
   it('too_large_rejected: 본문 상한(바이트)을 넘으면 거절한다', async () => {
     const res = await post('name=big', JSON.stringify({ s: 'é'.repeat(3_000_000) })).catch(() => null);
-    expect(res === null || res.status === 400).toBe(true);
+    expect(res === null || res.status === 413).toBe(true);
   });
 });
