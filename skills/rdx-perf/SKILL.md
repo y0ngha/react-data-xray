@@ -10,7 +10,7 @@ AI-generated pages often ship without verifying actual render and request costs.
 ## 1. Check setup
 
 1. Check that `react-data-xray` is in the app's `devDependencies`. If not, tell the user to install it with their package manager (`npm install -D react-data-xray`, `pnpm add -D react-data-xray`, `yarn add -D react-data-xray` or `bun add -d react-data-xray`) and continue once it is installed.
-2. Verify that the app entry file has `import { RdxDevtools } from 'react-data-xray'` and `<RdxDevtools />` (it must be imported before react-dom, unless the Vite plugin is attached with `rdx({ inject: true })`, which adds the import before the entry script).
+2. Verify that the app renders `<RdxDevtools />` (`import { RdxDevtools } from 'react-data-xray'`) and that the entry file has `import 'react-data-xray'` as its first import (before react-dom). That side-effect import may be missing only if the app's HTML is Vite's own `index.html` and the plugin is attached as `rdx({ inject: true })`; with SSR, framework modes or a backend serving the HTML, the import is still required.
 3. Check whether the report plugin is attached to the dev server.
    - Vite: `rdx()` in `plugins` (`import { rdx } from 'react-data-xray/vite'`)
    - webpack: `rdxReportMiddleware()` in `devServer.setupMiddlewares` (`react-data-xray/middleware`)

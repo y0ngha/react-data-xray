@@ -86,7 +86,10 @@ createRoot(document.getElementById('root')!).render(
 <details>
 <summary><b>Vite: 플러그인이 import 를 넣게 하기</b></summary>
 
-`rdx({ inject: true })` 를 쓰면 dev 서버가 `index.html` 의 `<head>` 맨 앞, 진입 스크립트보다 앞에 `import 'react-data-xray'` 를 넣습니다. 그러면 `main.tsx` 에는 `<RdxDevtools />` 만 두면 되고, import 순서와 상관없이 첫 모듈의 요청과 렌더부터 잡힙니다. dev 서버(`vite`)에서만 넣고 production 빌드에는 넣지 않습니다. `main.tsx` 의 import 를 그대로 둬도 됩니다. 같은 모듈을 불러오므로 한 번만 설치됩니다.
+`rdx({ inject: true })`(Vite 4 이상)를 쓰면 dev 서버가 `index.html` 에 앱의 진입 모듈보다 먼저 도는 `<script type="module">import 'react-data-xray'</script>` 를 넣습니다. Vite 자신의 client 와 React Refresh 프리앰블 다음에 돌고, 다른 플러그인이 `<head>` 앞에 넣은 스크립트도 먼저 돌 수 있습니다. 그러면 `main.tsx` 에는 `<RdxDevtools />` 만 두면 되고, import 순서와 상관없이 진입 모듈부터의 요청과 렌더가 잡힙니다. dev 서버(`vite`)에서만 넣고 production 빌드에는 넣지 않습니다. `main.tsx` 의 import 를 그대로 둬도 됩니다. 같은 모듈을 불러오므로 한 번만 설치됩니다.
+
+- Vite 가 `index.html` 을 내보낼 때만 됩니다. SSR, React Router v7 framework 모드, 백엔드 연동(Rails, Laravel, Django 등), `server.middlewareMode` 서버는 HTML 을 직접 만들므로 진입 파일 맨 위의 `import 'react-data-xray'` 를 그대로 둡니다.
+- 같은 `vite.config` 를 읽는 Vitest 와 Storybook 의 `iframe.html` 에는 넣지 않습니다.
 
 ```ts
 // vite.config.ts
