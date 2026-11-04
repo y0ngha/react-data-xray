@@ -23,7 +23,7 @@ const stormingNames = (now: number): Set<string> =>
       .map((e) => e.name),
   );
 
-/** 방금 끝난 요청 몰림의 끝 시각. 페이지 첫 로딩 몰림과, 이유가 확실한 반복(무시·StrictMode)은 뺀다. */
+/** 방금 끝난 요청 몰림의 끝 시각. 화면 진입(페이지 첫 로딩·라우트 이동) 몰림과, 이유가 확실한 반복(무시·StrictMode)은 뺀다. */
 const latestBurstEnd = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass, now: number): number => {
   const starts = records
     .filter((r) => now - r.startedAt <= RECENT_MS && !isInitialLoad(r.startedAt))

@@ -70,14 +70,14 @@ React Query의 `QueryObserver`는 모양(`getCurrentResult`, `options.queryKey`)
 | 같은 응답 재요청 | 같은 요청의 직전 응답과 본문이 똑같음. 캐시를 쓸 수 있었다는 신호입니다. |
 | 요청 몰림 | 500ms 안에 요청 5건 이상 |
 
-위 판정만으로는 polling, StrictMode, 첫 로딩까지 낭비로 잡혀 빨간 표시가 늘 켜져 있게 됩니다. 빨간색이 기본 상태가 되면 아무것도 알려 주지 못하므로, 이유가 있는 반복은 회색으로 따로 나눕니다(`classify.ts`).
+위 판정만으로는 polling, StrictMode, 첫 로딩·화면 이동까지 낭비로 잡혀 빨간 표시가 늘 켜져 있게 됩니다. 빨간색이 기본 상태가 되면 아무것도 알려 주지 못하므로, 이유가 있는 반복은 회색으로 따로 나눕니다(`classify.ts`).
 
 | 분류 | 조건 | 표시 |
 |---|---|---|
 | 중복 요청, 같은 응답 재요청 | 위 판정에 걸리고 아래 어디에도 해당하지 않음 | 빨강(낭비) |
 | 주기 요청 | 같은 요청이 3번 이상, 1초 이상의 일정한 간격(중앙값 ±25%)으로 반복 | 노랑(확인 필요) |
 | 포커스 재요청 | 창 포커스·탭 전환 직후 1초 안에 같은 응답을 다시 받음(React Query `refetchOnWindowFocus`, SWR `revalidateOnFocus`) | 노랑(확인 필요) |
-| 첫 로딩 몰림 | 페이지 진입 후 3초 안의 요청 몰림 | 노랑(확인 필요) |
+| 화면 진입 몰림 | 페이지 진입 또는 SPA 라우트 이동(`pushState`·`replaceState`·`popstate`, Navigation API `navigate` 로 경로가 바뀜) 후 3초 안의 요청 몰림. 쿼리·해시만 바뀐 것은 이동이 아닙니다. | 노랑(확인 필요) |
 | staleTime 경과 재조회 | React Query 가 staleTime 이 지나 다시 받았고 응답이 같음(`stale-elapsed`) | 노랑(확인 필요) |
 | 무효화 뒤 재조회 | 무효화해서 다시 받았지만 바뀐 것이 없음(`after-invalidate`) | 노랑(확인 필요) |
 | StrictMode | 중복이지만 앞선 요청이 취소(abort)됐거나, 호출 스택에 React의 StrictMode 재실행 함수(`commitDoubleInvokeEffectsInDEV` 등)가 있음 | 회색(정상) |
