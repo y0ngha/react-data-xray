@@ -254,6 +254,8 @@ skills/rdx-perf/           AI 스킬(측정·결과 읽기·처방)
 
 품질 도구: oxlint(정적 검사), oxfmt(포맷), react-doctor(React 진단), vitest 커버리지(80% 이상). `pnpm check` 가 모두 돌립니다.
 
+`package.json` 의 `sideEffects` 는 `false` 가 아니라 모듈 최상위에서 설치하는 파일(`dist/index.js`, `dist/core/render/monitor.js`)의 목록입니다. `false` 면 Next.js `instrumentation-client.ts` 처럼 이름 없이 `import 'react-data-xray'` 만 둔 곳을 번들러가 지워, 요청 가로채기·렌더 감시가 조용히 꺼집니다(#61). production 은 설치 코드가 `NODE_ENV` 분기 안에 있어 목록과 상관없이 비워집니다. `pnpm check:side-effects`(CI)가 dist 의 최상위 문장을 읽어 목록과 맞는지, 단독 import 를 rolldown 으로 묶어 dev 에 남고 production 이 비는지 봅니다.
+
 ## 8. 개발 기록
 
 - 패키지 위치: `~/Project/react-data-xray`. 커밋은 개인 계정으로 합니다.
