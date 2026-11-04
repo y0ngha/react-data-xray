@@ -73,6 +73,7 @@ describe('타임라인', () => {
       ],
       now,
       400,
+      () => 'ok',
     );
     expect(layout.bars).toHaveLength(5);
     expect(new Set(layout.bars.map((b) => b.y)).size).toBe(5);

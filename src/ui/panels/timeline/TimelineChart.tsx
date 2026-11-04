@@ -10,7 +10,7 @@ interface TimelineChartProps {
   onHover: (bar: BarLayout | null) => void;
 }
 
-const burstLabel = (initial: boolean, count: number) => `${initial ? 'Initial burst' : 'Request burst'} ×${count}`;
+const burstLabel = (initial: boolean, count: number) => `${initial ? 'Screen entry burst' : 'Request burst'} ×${count}`;
 
 /** 라벨 폭을 글자 수로 어림해(10px 글꼴 한 글자 약 6px) 앞 라벨과 겹치는 몰림 구간의 라벨은 그리지 않는다(구간 툴팁에는 남는다). */
 export const visibleBurstLabels = (
