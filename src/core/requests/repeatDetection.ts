@@ -13,16 +13,16 @@ const remember = <T>(map: Map<string, T>, key: string, value: T): void => {
 };
 
 // 모든 요청(본문 등록 여부와 무관)의 최근 기록. 중복·같은 응답 판정에 쓴다.
-const lastStartByRequest = new Map<string, { id: number; startedAt: number }>();
+const lastStartByRequest = new Map<string, { id: number; startedAt: number; commitSeq?: number }>();
 const lastResponseByRequest = new Map<string, { id: number; text: string }>();
 
-/** 2초 안에 같은 요청이 다시 나갔으면 앞선 요청의 id. payload 를 모르면 판정하지 않는다. */
-export const detectDuplicate = (record: RequestRecord): number | undefined => {
+/** 2초 안에 같은 요청이 다시 나갔으면 앞선 요청(id 와 그 요청을 만들 때의 commit 순번). payload 를 모르면 판정하지 않는다. */
+export const detectDuplicate = (record: RequestRecord): { id: number; commitSeq?: number } | undefined => {
   if (record.bodyUnreadable) return undefined;
   const key = requestKeyOf(record);
   const last = lastStartByRequest.get(key);
-  remember(lastStartByRequest, key, { id: record.id, startedAt: record.startedAt });
-  return last && record.startedAt - last.startedAt <= DUPLICATE_WINDOW_MS ? last.id : undefined;
+  remember(lastStartByRequest, key, { id: record.id, startedAt: record.startedAt, commitSeq: record.commitSeq });
+  return last && record.startedAt - last.startedAt <= DUPLICATE_WINDOW_MS ? { id: last.id, commitSeq: last.commitSeq } : undefined;
 };
 
 /** 같은 요청의 직전 응답과 본문이 똑같으면 직전 요청의 id */

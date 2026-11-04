@@ -10,11 +10,12 @@ import {
 import { isComposite, MEMO_COMPONENT, PERFORMED_WORK, SIMPLE_MEMO_COMPONENT, type Fiber } from '../fiber/types.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { listenToCommits } from './devtoolsHook.js';
-import { getMountStats, recordMounts, resetMounts, type MountRef } from './mounts.js';
+import { getMountStats, recordMounts, remountAt, resetMounts, type MountRef } from './mounts.js';
 import { drain, groupRendersSteps, type RenderGroup } from './groups.js';
 import { causeOf } from './networkCause.js';
 import { reasonOf } from './renderReason.js';
-import { noteCommit, noteRender, resetRenderTimes } from './renderTimes.js';
+import { nextCommitSeq, noteCommitCause, resetCommitCauses } from './commitCauses.js';
+import { changedEffectDep } from './effectDeps.js';
 import { summarize, WINDOW_MS } from './summary.js';
 import type { Commit, NetworkCause, RenderEntry, RenderEvent, RenderOrigin, RenderReason, RenderSummary } from './types.js';
 
@@ -89,7 +90,7 @@ const entryOf = (fiber: Fiber, alt: Fiber | null, memoized: boolean, compiled: b
 const STARTS_RENDER = new Set<RenderReason>(['mount', 'state', 'context']);
 
 /** 이번 commit 에서 렌더된 컴포넌트를 기록한다. snap 은 commit 시점 값의 사본(React 가 fiber 를 재사용해 덮어쓴다). */
-const recordRender = (p: Pending, now: number, inherited: Inherited): RenderEvent => {
+const recordRender = (p: Pending, now: number, seq: number, inherited: Inherited): RenderEvent => {
   const { fiber, snap } = p;
   const entry = entryOf(fiber, p.alt, p.memoized, p.compiled);
   const result = reasonOf(snap);
@@ -104,7 +105,8 @@ const recordRender = (p: Pending, now: number, inherited: Inherited): RenderEven
     origin: startsRender ? undefined : inherited.origin,
   };
   entry.fiber = fiber;
-  noteRender(fiber, p.alt, now);
+  // 중복 요청이 다시 나간 이유(requests/repeatCause)를 이 commit 의 사본으로 정해 둔다. 뒤 렌더가 fiber 를 덮어도 그대로다.
+  noteCommitCause(entry.name, seq, p.alt ? { deps: changedEffectDep(snap) } : { remount: remountAt(entry.name, now) });
   entry.events.push(event);
   if (entry.events.length > MAX_EVENTS_PER_COMPONENT) entry.events.shift();
   active.add(entry);
@@ -177,6 +179,8 @@ const onUnmount = (fiber: Fiber): void => {
 };
 
 const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
+  // 감시가 꺼져 있어도 순번은 올린다. 요청은 만들 때의 순번으로 자기를 보낸 commit 을 찾는다(requests/repeatCause).
+  const seq = nextCommitSeq();
   if (isFrameworkDevtoolsRoot(root.containerInfo)) {
     unmounted = []; // 이 commit 이 지운 것은 앱 것이 아니다(다음 앱 commit 에 섞이지 않게)
     return;
@@ -238,7 +242,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       const p = pending[at];
       inheritedBy[at] = {}; // 한 fiber 가 던져도 나머지와 commit 기록·구독자 알림은 이어간다
       try {
-        const event = recordRender(p, now, p.parent < 0 ? {} : inheritedBy[p.parent]);
+        const event = recordRender(p, now, seq, p.parent < 0 ? {} : inheritedBy[p.parent]);
         if (event.ms !== undefined) totalMs = (totalMs ?? 0) + event.ms;
         if (startedBy === undefined && STARTS_RENDER.has(event.reason)) startedBy = getComponentName(p.fiber);
         inheritedBy[at] = {
@@ -258,7 +262,6 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       active.add(entry);
     });
     commits.push({ id: ++commitSeq, time: now, count: pending.length, ms: totalMs, startedBy });
-    noteCommit(now);
     if (commits.length > MAX_COMMITS) commits.shift();
     commitListeners.forEach((listener) => listener());
     return true;
@@ -281,7 +284,7 @@ export const setRenderMonitoring = (on: boolean): void => {
   active.clear();
   commits.length = 0;
   resetMounts();
-  resetRenderTimes();
+  resetCommitCauses();
   unmounted = [];
 };
 
@@ -298,7 +301,7 @@ export const resetRenderStats = (): void => {
   active.clear();
   commits.length = 0;
   resetMounts();
-  resetRenderTimes();
+  resetCommitCauses();
   unmounted = [];
 };
 

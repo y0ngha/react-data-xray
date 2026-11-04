@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as mountsModule from '../../render/mounts.js';
 
-import type { Fiber } from '../../fiber/types.js';
 import { flushQueue } from '../../scheduler/idleQueue.js';
 import { getEndpointStats } from '../endpointStats.js';
 import { maskEndpoint } from '../requestKey.js';
@@ -52,24 +51,10 @@ describe('재마운트 원인 (PR4-7)', () => {
   });
 });
 
-describe('repeatCause 조각 (PR4-10)', () => {
-  it('fiber 가 많으면 여러 step 으로 나눠 훑고 끝나면 store 에 알린다', () => {
-    // 실제 React 가 컨테이너에 붙이는 키로 fiber 1000개짜리 루트를 심는다.
-    const root = { tag: 3, type: undefined, return: null, child: null, sibling: null, alternate: null } as unknown as Fiber;
-    let tail = root;
-    for (let i = 0; i < 1000; i++) {
-      const next = { tag: 0, type: function Other() {}, return: tail, child: null, sibling: null, alternate: null } as unknown as Fiber;
-      tail.child = next;
-      tail = next;
-    }
-    const container = document.body.appendChild(document.createElement('div'));
-    (container as unknown as Record<string, unknown>)['__reactContainer$t'] = { tag: 3, stateNode: { current: root } };
+describe('repeatCause step (PR4-10)', () => {
+  it('원인을 찾으면 store 에 알린다(원인 판정은 commit 기록을 읽어 한 step 에 끝난다)', () => {
     const record = rec();
-    const step = repeatCauseStep(record);
-    let calls = 1;
-    while (!step()) calls++;
-    expect(calls).toBeGreaterThan(1);
-    container.remove();
+    expect(repeatCauseStep(record)()).toBe(true);
 
     const first = createRecord('fetch', 'GET', '/api/notify');
     const second = createRecord('fetch', 'GET', '/api/notify');
