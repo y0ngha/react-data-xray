@@ -48,7 +48,7 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
       rolldown:
-        specifier: 1.2.15
+        specifier: ^1.2.15
         version: 1.2.15
       typescript:
         specifier: ^7.0.2
