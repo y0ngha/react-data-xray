@@ -213,6 +213,8 @@ window.__RDX__.reset();                  // clear records and start a fresh meas
 await window.__RDX__.snapshot('before'); // save to .rdx/before.json
 ```
 
+No browser tool? With the dev server plugin attached and the app open in a tab, the same steps run from the terminal: `npx rdx reset`, `npx rdx snapshot before`, `npx rdx compare before after`. `npx rdx mcp` offers them as MCP tools (`claude mcp add rdx -- npx rdx mcp`).
+
 If you use Claude Code, copy the [`rdx-perf`](./skills/rdx-perf/SKILL.md) skill from the package. It runs the above sequence automatically when you ask "this screen is slow" or similar. For full details, see [Working with AI agents](./docs/ai.md).
 
 ## Docs

@@ -176,6 +176,14 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 - **전후 비교.** `compare(전, 후)` 와 패널의 Compare 는 이 탭에서 저장한 두 보고서의 증감을 보여 주고 `.rdx/compare-<전>-<후>.json` 에도 남깁니다. 스냅샷은 최근 6개까지 탭에 둡니다. 측정 구간이 다르거나, 한쪽만 reset 뒤에 쟀거나, 한쪽에서 렌더 감시가 꺼져 있었으면 증감을 믿기 어려우므로 경고합니다. 플러그인이 없는 dev 서버에서는 파일 없이 탭에만 남깁니다.
 - **보내기 전 확인.** 플러그인이 없는 dev 서버는 `/__rdx/report` 를 원격 백엔드로 프록시할 수 있습니다(whatap-front 가 그렇습니다). 그래서 본문 없는 GET 으로 미들웨어 표시 헤더를 확인한 뒤에만 보냅니다. 미들웨어는 Host 를 로컬 이름·IP·`allowedHosts` 로 제한하고(DNS 리바인딩), Origin 을 포트까지 비교하며, 임시 파일에 쓴 뒤 이름을 바꿉니다.
 - **원본 위치.** 호출 스택의 http 프레임을 모듈의 `sourceMappingURL` 로 원본 위치(`src/api/client.ts:42`)로 바꿉니다. 세 모델 감사에서 "줄 번호가 원본과 다르다"가 공통 지적이었습니다.
+- **브라우저 없이 부르기(#69).** 브라우저 도구가 없는 에이전트도 reset → 시나리오 → snapshot → compare 를 혼자 돌리도록 `rdx` CLI(`reset`·`snapshot`·`compare`·`report`·`tabs`)와 같은 도구를 내는 stdio MCP 서버(`rdx mcp`)를 둡니다. CLI 가 `POST /__rdx/command` 로 명령을 맡기면 dev 서버가 탭별로 메모리에 두고(90초 지나면 버림), 탭은 5초 업로드의 응답으로 받아 `window.__RDX__` 의 reset·snapshot 을 그대로 부른 뒤 `POST /__rdx/report?command=<id>` 로 결과를 알립니다. CLI 는 `GET /__rdx/command/<id>` 로 기다립니다.
+  - 받는 쪽은 업로드 주기를 그대로 씁니다. 보고서가 그대로라 올리지 않는 주기에는 본문 없는 `GET /__rdx/report?tab=` 로 받아 가며, 명령이 없으면 204 라 아무것도 읽지 않습니다. 앱 경로 비용은 없고 최대 5초 늦습니다. Vite 의 `server.ws` 로 바로 보내는 안은 webpack·Next 에 없는 길이라 두지 않았고, 오래 걸어 두는 요청(long-poll)은 HTTP/1 의 호스트당 연결 6개 중 하나를 계속 차지해 뺐습니다. 오래 가려진 탭은 브라우저가 타이머를 1분에 한 번으로 늦추므로 TTL 과 CLI 대기 기본값을 1분보다 길게(90초) 둡니다.
+  - 탭이 받아 가는 길을 보고서 경로에 둔 것은 Next 가 route 파일마다 따로 붙기 때문입니다. 명령 route 를 두지 않은 앱도 탭은 404 페이지를 5초마다 그리지 않습니다. CLI 쪽만 `app/%5F_rdx/command/[[...id]]/route.ts` 가 필요하고, Next dev 는 route 마다 모듈을 따로 평가하므로 큐는 `globalThis` 에 둡니다.
+  - 탭을 고르지 않으면 가장 최근에 보고서가 바뀐 탭(사용자가 만지는 탭)에서 실행하고 다른 탭을 알립니다. 여러 탭이면 거절하는 안은 닫힌 탭이 75초 동안 연결된 탭으로 남아 새 탭을 열 때마다 거절돼 뺐습니다.
+  - 보안: 보고서 경로와 같은 Host·Origin·content-type 검사를 거칩니다. CLI 는 Origin 없이 dev 서버의 Host 로 보냅니다. 명령은 측정 기록만 바꾸는 reset·snapshot 뿐이고 임의 코드는 실행하지 않습니다. 결과는 맡은 탭이 알린 것만 받습니다.
+  - dev 서버 주소는 브라우저의 Origin 을 `.rdx/.server.json` 에 적어 두고 CLI 가 읽습니다(`.` 으로 시작해 snapshot 이름과 겹치지 않습니다). 없거나 서버가 옮겼으면 `--url` 입니다.
+  - `rdx compare` 는 `.rdx/<이름>.json` 파일을 읽어 `compare.ts` 로 비교합니다. 브라우저의 compare 는 그 탭 sessionStorage 의 스냅샷만 읽어 탭을 새로 열면 쓰지 못하던 것도 함께 풀립니다.
+  - MCP 는 initialize·tools/list·tools/call·ping 만 직접 구현했습니다. CLI·MCP 는 사용자 개발 환경에서 돌므로 SDK 를 런타임 의존성으로 두면 모든 사용자에게 함께 설치됩니다.
 - **AI 스킬.** `skills/rdx-perf/SKILL.md`: 측정 → 결과 읽기 → 원인 확인 → 처방 → 다시 측정의 순서와 지킬 것.
 - **탭 단위 유지.** 패널 열림·박스·관점과 요청 기록을 sessionStorage 에 둡니다. 요청 기록은 페이지를 떠날 때 저장하고(응답 객체 제외, 원문 10KB·전체 500KB, 비밀번호·토큰 가림), 되살린 뒤 저장소를 비웁니다. 주기 판정은 페이지 로드별로 해서 새로고침 사이 간격이 주기를 깨지 않게 합니다.
 
@@ -250,7 +258,8 @@ src/
   core/render/             DevTools 훅, 렌더 이유, 네트워크 원인, 렌더를 시작한 조상, 렌더 감시, 마운트 이력, 요약·그룹·조언
   core/reactQuery/         React Query 캐시키 점검(QueryCache 구독, 무효화 감시), 재조회·fetch 원인
   core/report/             AI 용 보고서 만들기, window.__RDX__(report·reset·snapshot·compare), 보고서 비교, dev 서버로 보내기
-  server/                  dev 서버 쪽: 보고서 미들웨어, Vite 플러그인
+  server/                  dev 서버 쪽: 보고서 미들웨어, Vite 플러그인, Next route, 명령 큐
+  cli/                     rdx CLI 와 stdio MCP 서버(라이브러리에서 import 하지 않는다)
   shared/                  저장소(local·session), 무시 목록, 보고서 경로 등 브라우저·서버가 함께 쓰는 것
   ui/RdxDevtools.tsx       조립 지점(상태를 모아 패널·오버레이·버튼에 나눠 준다)
   ui/hooks/                useDraggable, useDockSettings, usePopupWindow, useElementPicker, useNow, useRequestAnalysis …
@@ -264,7 +273,7 @@ skills/rdx-perf/           AI 스킬(측정·결과 읽기·처방)
 
 품질 도구: oxlint(정적 검사), oxfmt(포맷), react-doctor(React 진단), vitest 커버리지(80% 이상). `pnpm check` 가 모두 돌립니다.
 
-`package.json` 의 `sideEffects` 는 `false` 가 아니라 모듈 최상위에서 설치하는 파일(`dist/index.js`, `dist/core/render/monitor.js`)의 목록입니다. `false` 면 Next.js `instrumentation-client.ts` 처럼 이름 없이 `import 'react-data-xray'` 만 둔 곳을 번들러가 지워, 요청 가로채기·렌더 감시가 조용히 꺼집니다(#61). production 은 설치 코드가 `NODE_ENV` 분기 안에 있어 목록과 상관없이 비워집니다. `pnpm check:side-effects`(CI)가 dist 의 최상위 문장을 읽어 목록과 맞는지, 단독 import 를 rolldown 으로 묶어 dev 에 남고 production 이 비는지 봅니다.
+`package.json` 의 `sideEffects` 는 `false` 가 아니라 모듈 최상위에서 설치하는 파일(`dist/index.js`, `dist/core/render/monitor.js`)과 최상위에서 `main()` 을 부르는 CLI 실행 파일(`dist/cli/bin.js`)의 목록입니다. 실행 파일은 라이브러리의 import 그래프에 없어 번들에는 들어가지 않습니다. 검사 스크립트에서 빼는 대신 목록에 넣은 것은, 최상위 부수 효과가 있는 파일은 목록에 있다는 검사의 규칙을 예외 없이 지키기 위해서입니다. `false` 면 Next.js `instrumentation-client.ts` 처럼 이름 없이 `import 'react-data-xray'` 만 둔 곳을 번들러가 지워, 요청 가로채기·렌더 감시가 조용히 꺼집니다(#61). production 은 설치 코드가 `NODE_ENV` 분기 안에 있어 목록과 상관없이 비워집니다. `pnpm check:side-effects`(CI)가 dist 의 최상위 문장을 읽어 목록과 맞는지, 단독 import 를 rolldown 으로 묶어 dev 에 남고 production 이 비는지 봅니다.
 
 Vite 플러그인의 `inject: true` 는 dev 서버가 내보내는 `index.html` 에 `<script type="module">import 'react-data-xray'</script>` 를 넣어 진입 import 를 대신합니다(#79). `head-prepend` 지만 Vite 의 client·React Refresh 프리앰블보다는 뒤이고 앱의 진입 모듈보다는 앞입니다. 켠 경우에만 훅을 달아 끈 사용자는 Vite 3 이하에서도 전과 같고, Vitest 와 Storybook `iframe.html` 에는 넣지 않으며, Vite 가 HTML 을 내보내지 않는 SSR·백엔드 연동에서는 효과가 없습니다. 모노레포 등에서 rdx 가 두 벌 평가되면 `globalThis[Symbol.for('react-data-xray.installed')]` 표식을 본 두 번째 사본이 설치를 건너뛰고 한 번 경고합니다(모듈 상태가 따로라 각 설치 함수의 가드로는 막지 못합니다). `transformIndexHtml` 을 `order: 'pre'` 로 두는 것은 Vite 가 인라인 모듈 스크립트를 html-proxy 모듈로 바꾸고 맨 이름 import 를 사전 번들 경로로 해석하는 단계보다 먼저 넣어야 하기 때문입니다. 진입 파일의 `import { RdxDevtools } from 'react-data-xray'` 와 같은 URL 이 되어 모듈은 한 번만 평가됩니다(`optimizeDeps.exclude` 로 둔 경우도 같습니다). 기본값을 끈 것은 사용자가 모르는 사이 앱의 HTML 을 바꾸지 않기 위해서이고, 플러그인은 `apply: 'serve'` 라 production 빌드에는 붙지 않습니다.
 

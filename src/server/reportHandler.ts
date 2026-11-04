@@ -3,7 +3,17 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 
-import { DEFAULT_REPORT_NAME, isReportName, isTabId, reportFileFor, TAB_STALE_MS, TABS_INDEX } from '../shared/reportPath.js';
+import {
+  COMMAND_PATH,
+  DEFAULT_REPORT_NAME,
+  isReportName,
+  isTabId,
+  reportFileFor,
+  SERVER_FILE,
+  TAB_STALE_MS,
+  TABS_INDEX,
+} from '../shared/reportPath.js';
+import { createCommand, finishCommand, getCommand, liveTabs, seeTab, storeFor, takeCommands } from './commandQueue.js';
 
 interface TabEntry {
   id: string;
@@ -70,7 +80,14 @@ export interface ReportReply {
   status: number;
   /** REPORT_HEADER 에 붙일 값. 없으면 붙이지 않는다 */
   mark?: '1' | 'forbidden-host';
+  /** JSON 본문(명령 경로, 탭에 넘길 명령). 없으면 본문 없이 답한다 */
+  body?: string;
 }
+
+/** 본문이 크거나 JSON 이 아니다 */
+const failure = (error: unknown): ReportReply => ({ status: error instanceof TooLargeError ? 413 : 400, mark: '1' });
+
+const json = (status: number, value: unknown): ReportReply => ({ status, mark: '1', body: JSON.stringify(value) });
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -170,6 +187,29 @@ const updateTabIndex = (folder: string, entry: TabEntry, report: object): Promis
     if (!(await hasEntry(indexFile, entry))) await mergeIndex(folder, indexFile, entry);
   });
 
+/** 탭이 보낸 path·title(탭 목록에 보이는 값) */
+const tabInfo = (tab: string, query: URLSearchParams) => ({
+  id: tab,
+  path: (query.get('path') ?? '').slice(0, 300),
+  title: (query.get('title') ?? '').slice(0, 200),
+});
+
+/** 이 탭에 맡긴 명령이 있으면 본문으로 넘긴다. 없으면 본문 없이 답한다(대부분의 주기) */
+const replyWithCommands = (store: ReturnType<typeof storeFor>, tab: string): ReportReply => {
+  const commands = takeCommands(store, tab, Date.now());
+  return commands.length > 0 ? json(200, { commands }) : { status: 204, mark: '1' };
+};
+
+/**
+ * CLI 가 `rdx` 명령의 dev 서버 주소를 따로 받지 않아도 되게, 브라우저가 쓰는 출처를 적어 둔다.
+ * 같은 출처의 POST 에는 Origin 이 붙는다(isTrusted 가 Host 와 같은지 이미 봤다). 바뀔 때만 쓴다.
+ */
+const rememberOrigin = async (folder: string, store: ReturnType<typeof storeFor>, origin: string | undefined): Promise<void> => {
+  if (!origin || store.origin === origin) return;
+  store.origin = origin;
+  await writeJson(join(folder, SERVER_FILE), { url: origin, updatedAt: Date.now() }).catch(() => undefined);
+};
+
 const writeReport = async (folder: string, req: ReportRequest, query: URLSearchParams): Promise<ReportReply> => {
   const name = query.get('name');
   const tab = query.get('tab');
@@ -177,24 +217,55 @@ const writeReport = async (folder: string, req: ReportRequest, query: URLSearchP
   await mkdir(folder, { recursive: true });
   // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다. 이미 있으면 그대로 둔다.
   await writeFile(join(folder, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined);
+  const store = storeFor(folder);
+  await rememberOrigin(folder, store, req.origin);
   if (tab !== null && typeof report === 'object' && report !== null) {
-    const entry: TabEntry = {
-      id: tab,
-      path: (query.get('path') ?? '').slice(0, 300),
-      title: (query.get('title') ?? '').slice(0, 200),
-      updatedAt: Date.now(),
-      file: reportFileFor(tab),
-    };
+    const idle = query.get('idle') === '1';
+    const info = tabInfo(tab, query);
+    const entry: TabEntry = { ...info, updatedAt: Date.now(), file: reportFileFor(tab) };
     await updateTabIndex(folder, entry, report);
+    seeTab(store, info, !idle, Date.now());
     // 열려 있다는 알림만이면 "가장 최근에 바뀐 탭"을 바꾸지 않는다.
-    if (query.get('idle') === '1') return { status: 204, mark: '1' };
+    if (!idle) await writeJson(join(folder, `${DEFAULT_REPORT_NAME}.json`), report);
+    return replyWithCommands(store, tab);
   }
   await writeJson(join(folder, `${name ?? DEFAULT_REPORT_NAME}.json`), report);
   return { status: 204, mark: '1' };
 };
 
+/** 탭이 맡은 명령을 마치고 결과를 알린다: `POST /__rdx/report?command=<id>&tab=<id>` */
+const writeCommandResult = async (folder: string, req: ReportRequest, query: URLSearchParams): Promise<ReportReply> => {
+  const id = query.get('command') ?? '';
+  const tab = query.get('tab') ?? '';
+  const result: unknown = JSON.parse(await readBody(req.body));
+  return finishCommand(storeFor(folder), id, tab, result, Date.now()) ? { status: 204, mark: '1' } : { status: 404, mark: '1' };
+};
+
 /**
- * rdx 보고서 요청(GET 은 있는지 묻기, POST 는 쓰기)을 처리한다. connect 미들웨어와 Next.js route handler 가 같이 쓴다.
+ * CLI·MCP 가 쓰는 명령 경로(#69).
+ * - `GET /__rdx/command`: 연결된 탭 목록
+ * - `POST /__rdx/command` `{ op: 'reset' | 'snapshot', name?, tab? }`: 탭에 명령을 맡긴다(202, 명령 id)
+ * - `GET /__rdx/command/<id>`: 명령이 끝났는지
+ * 탭은 5초 주기의 업로드·받아 가기 응답으로 명령을 받아 window.__RDX__ 의 reset·snapshot 을 부른다.
+ */
+const handleCommand = async (folder: string, req: ReportRequest, path: string): Promise<ReportReply> => {
+  const store = storeFor(folder);
+  const now = Date.now();
+  const id = path.slice(COMMAND_PATH.length + 1);
+  if (req.method === 'GET') {
+    if (path === COMMAND_PATH) return json(200, { tabs: liveTabs(store, now) });
+    const command = getCommand(store, id, now);
+    return command ? json(200, command) : json(404, { error: `unknown or expired command: ${id}` });
+  }
+  if (path !== COMMAND_PATH) return { status: 405, mark: '1' };
+  if (!req.contentType?.startsWith('application/json')) return { status: 403, mark: '1' };
+  const created = createCommand(store, JSON.parse(await readBody(req.body)), now);
+  if (!created.ok) return json(created.status, { error: created.error, ...(created.tabs && { tabs: created.tabs }) });
+  return json(202, { command: created.command, others: created.others });
+};
+
+/**
+ * rdx 보고서 요청(GET 은 있는지 묻기, POST 는 쓰기)과 명령 경로를 처리한다. connect 미들웨어와 Next.js route handler 가 같이 쓴다.
  * 보고서는 `<root>/<dir>/report.json`(이름을 주면 `<이름>.json`, 탭은 `tabs/<id>.json`)에 쓴다.
  */
 export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts = [] }: RdxReportOptions = {}) => {
@@ -202,15 +273,26 @@ export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts =
   return async (req: ReportRequest): Promise<ReportReply> => {
     // 브라우저가 "처리기는 있지만 이 주소는 막혔다"를 알고 안내할 수 있게 표시한다.
     if (!isTrusted(req, allowedHosts)) return { status: 403, mark: 'forbidden-host' };
-    // 브라우저가 보고서를 보내기 전에 이 처리기가 있는지 묻는다(없으면 프록시가 원격으로 넘길 수 있다).
-    if (req.method === 'GET') return { status: 204, mark: '1' };
+    const url = new URL(req.url, 'http://x');
+    const query = url.searchParams;
+    if (url.pathname === COMMAND_PATH || url.pathname.startsWith(`${COMMAND_PATH}/`))
+      return handleCommand(folder, req, url.pathname).catch(failure);
+    const tab = query.get('tab');
+    if (req.method === 'GET') {
+      // 탭이 5초마다 맡은 명령을 받아 간다(보고서가 그대로라 올리지 않는 주기). 열려 있다는 알림도 된다.
+      if (tab !== null && isTabId(tab) && tab !== TABS_INDEX) {
+        seeTab(storeFor(folder), tabInfo(tab, query), false, Date.now());
+        return replyWithCommands(storeFor(folder), tab);
+      }
+      // 브라우저가 보고서를 보내기 전에 이 처리기가 있는지 묻는다(없으면 프록시가 원격으로 넘길 수 있다).
+      return { status: 204, mark: '1' };
+    }
     if (!req.contentType?.startsWith('application/json')) return { status: 403, mark: '1' };
+    if (query.has('command')) return writeCommandResult(folder, req, query).catch(failure);
     // window.__RDX__.snapshot(이름) 은 ?name= 으로 따로 저장한다. 파일 이름이 되므로 경로를 만들 수 있는 글자는 받지 않는다.
-    const query = new URL(req.url, 'http://x').searchParams;
     const name = query.get('name');
     if (name !== null && !isReportName(name)) return { status: 400, mark: '1' };
-    const tab = query.get('tab');
     if (tab !== null && (!isTabId(tab) || tab === TABS_INDEX || name !== null)) return { status: 400, mark: '1' };
-    return writeReport(folder, req, query).catch((error: unknown) => ({ status: error instanceof TooLargeError ? 413 : 400, mark: '1' }));
+    return writeReport(folder, req, query).catch(failure);
   };
 };
