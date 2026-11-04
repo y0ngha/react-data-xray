@@ -9,6 +9,7 @@ pnpm test:react19   # 같은 테스트를 React 19 로(의존성은 tests/react1
 pnpm test           # 테스트만
 pnpm fmt            # 포맷 적용
 pnpm sync <앱 경로>  # 빌드해서 file: 로 연결한 앱의 node_modules 에 반영
+pnpm check:side-effects  # 빌드해서, 단독 import 'react-data-xray' 가 dev 번들에 남고 production 은 비는지 확인
 ```
 
 ## 연결한 앱에서 고치며 보기
@@ -27,7 +28,7 @@ pnpm sync <앱 경로>  # 빌드해서 file: 로 연결한 앱의 node_modules �
 
 ## 배포
 
-`main` 은 PR 로만 바뀌므로 버전도 PR 로 올리고, 머지된 `main` 에서 손으로 배포합니다. `prepublishOnly` 가 `pnpm check && pnpm build` 를 돌려, 검사가 깨지면 배포가 멈춥니다.
+`main` 은 PR 로만 바뀌므로 버전도 PR 로 올리고, 머지된 `main` 에서 손으로 배포합니다. `prepublishOnly` 가 `pnpm check && pnpm check:side-effects`(빌드 포함)를 돌려, 검사가 깨지면 배포가 멈춥니다.
 
 ```bash
 # 1. 브랜치에서 버전을 올리고 PR 로 머지한다
