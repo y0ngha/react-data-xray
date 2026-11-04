@@ -7,6 +7,11 @@ import type { RequestRecord } from '../../core/requests/types.js';
 import { FloatingButton } from '../FloatingButton.js';
 import { useProblemSignal } from '../hooks/useProblemSignal.js';
 
+// 낭비가 있는 엔드포인트 두 개(배지 수 2)
+const TWO_WASTEFUL = [
+  { endpoint: 'GET /a', duplicates: 1, sameResponses: 0 },
+  { endpoint: 'GET /b', duplicates: 0, sameResponses: 1 },
+];
 const handlers = { onPointerDown: () => undefined, onPointerMove: () => undefined, onPointerUp: () => undefined, onClick: () => undefined };
 const ok = (_r: RequestRecord): RequestClass => 'ok';
 // performance(timeOrigin) 는 진짜로 두고 타이머와 시계만 바꾼다(첫 로딩 판정이 timeOrigin 을 본다).
@@ -33,7 +38,9 @@ it('새 요청 몰림에 한 번만 알리고, 무시한 반복과 페이지 첫
   // 페이지 첫 로딩(3초 안)이 지난 시각으로 시작한다.
   fakeAt(performance.timeOrigin + 10_000);
   burst('a');
-  const { result, rerender } = renderHook(({ classOf }) => useProblemSignal(getRecords(), classOf, 2), { initialProps: { classOf: ok } });
+  const { result, rerender } = renderHook(({ classOf }) => useProblemSignal(getRecords(), classOf, TWO_WASTEFUL), {
+    initialProps: { classOf: ok },
+  });
   expect(result.current).toMatchObject({ issues: 2, alert: false });
   act(() => {
     vi.advanceTimersByTime(1000);
@@ -56,7 +63,7 @@ it('새 요청 몰림에 한 번만 알리고, 무시한 반복과 페이지 첫
 it('페이지 첫 로딩 3초 안의 몰림에는 알리지 않는다', () => {
   fakeAt(performance.timeOrigin + 500);
   burst('c');
-  const { result } = renderHook(() => useProblemSignal(getRecords(), ok, 0));
+  const { result } = renderHook(() => useProblemSignal(getRecords(), ok));
   act(() => {
     vi.advanceTimersByTime(1000);
   });
@@ -67,7 +74,7 @@ it('페이지 첫 로딩 3초 안의 몰림에는 알리지 않는다', () => {
 // 앞 테스트의 이동 기록과 겹치지 않게 테스트마다 다른 시각에서 시작한다.
 const alertsAroundLoader = (navigate: boolean, start: number): boolean[] => {
   fakeAt(performance.timeOrigin + start);
-  const { result } = renderHook(() => useProblemSignal(getRecords(), ok, 0));
+  const { result } = renderHook(() => useProblemSignal(getRecords(), ok));
   const alerts: boolean[] = [];
   const tick = (ms: number) => {
     act(() => {
@@ -98,7 +105,7 @@ it('이동이 따르지 않은 몰림은 끝나고 1초 뒤에 한 번 알린다
 
 it('응답이 1.4초 걸린 loader 몰림 뒤에 주소를 바꾸면 깜빡이지 않는다 (#82)', () => {
   fakeAt(performance.timeOrigin + 180_000);
-  const { result } = renderHook(() => useProblemSignal(getRecords(), ok, 0));
+  const { result } = renderHook(() => useProblemSignal(getRecords(), ok));
   const alerts: boolean[] = [];
   vi.advanceTimersByTime(100);
   const loader = Array.from({ length: 5 }, (_, i) => createRecord('fetch', 'GET', `/api/slow/${i}`));
@@ -125,7 +132,7 @@ it('응답이 1.4초 걸린 loader 몰림 뒤에 주소를 바꾸면 깜빡이�
 const alertsDuringLoop = (start: number, ms: number, navigate: boolean): boolean[] => {
   fakeAt(performance.timeOrigin + start);
   if (navigate) window.history.pushState(null, '', '/feed');
-  const { result } = renderHook(() => useProblemSignal(getRecords(), ok, 0));
+  const { result } = renderHook(() => useProblemSignal(getRecords(), ok));
   const alerts: boolean[] = [];
   for (let t = 100; t <= ms; t += 100) {
     finishRecord(createRecord('fetch', 'GET', '/api/loop'), 200);

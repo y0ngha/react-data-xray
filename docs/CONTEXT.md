@@ -172,7 +172,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 
 ### 4.9 AI 에게 결과 넘기기와 탭 단위 유지
 
-- **보고서.** `window.__RDX__.report()` 와, dev 서버 플러그인(`react-data-xray/vite`, `react-data-xray/middleware`, Next.js route `react-data-xray/next`)이 5초마다 쓰는 `.rdx/report.json`. 응답 본문과 헤더는 넣지 않습니다. `reset()` 으로 측정을 새로 시작하고 `snapshot(이름)` 으로 `.rdx/<이름>.json` 을 따로 남깁니다. 보고서에는 마지막 reset 시각(`resetAt`)이 남습니다.
+- **보고서.** `window.__RDX__.report()` 와, dev 서버 플러그인(`react-data-xray/vite`, `react-data-xray/middleware`, Next.js route `react-data-xray/next`)이 5초마다 쓰는 `.rdx/report.json`. 응답 본문과 헤더는 넣지 않습니다. `reset()` 으로 측정을 새로 시작하고 `snapshot(이름)` 으로 `.rdx/<이름>.json` 을 따로 남깁니다. 보고서에는 마지막 reset 시각(`resetAt`)이 남습니다. 보고서 맨 앞의 `summary` 는 이미 만든 섹션으로 고칠 것의 순위만 매기고(새 분석 없음), severity 는 RDX 버튼 배지와 같은 기준(`core/problems.ts`)을 써서 둘이 다른 말을 하지 않게 합니다. `howToRead` 는 `howToReadVersion` 으로 판을 남기고 `report({ howToRead: false })` 로 뺄 수 있습니다. 파일로 남기는 보고서에는 늘 싣습니다.
 - **탭별 보고서.** 탭마다 보고서를 따로 저장하고 열린 탭 목록을 둡니다. 여러 탭을 열어 둔 채 재도 결과가 서로 덮이지 않게 하기 위해서입니다.
 - **전후 비교.** `compare(전, 후)` 와 패널의 Compare 는 이 탭에서 저장한 두 보고서의 증감을 보여 주고 `.rdx/compare-<전>-<후>.json` 에도 남깁니다. 스냅샷은 최근 6개까지 탭에 둡니다. 측정 구간이 다르거나, 한쪽만 reset 뒤에 쟀거나, 한쪽에서 렌더 감시가 꺼져 있었으면 증감을 믿기 어려우므로 경고합니다. 플러그인이 없는 dev 서버에서는 파일 없이 탭에만 남깁니다.
 - **보내기 전 확인.** 플러그인이 없는 dev 서버는 `/__rdx/report` 를 원격 백엔드로 프록시할 수 있습니다(whatap-front 가 그렇습니다). 그래서 본문 없는 GET 으로 미들웨어 표시 헤더를 확인한 뒤에만 보냅니다. 미들웨어는 Host 를 로컬 이름·IP·`allowedHosts` 로 제한하고(DNS 리바인딩), Origin 을 포트까지 비교하며, 임시 파일에 쓴 뒤 이름을 바꿉니다.

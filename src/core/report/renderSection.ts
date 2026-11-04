@@ -5,7 +5,7 @@ import { withHookPathsSync } from '../render/summary.js';
 import { RENDER_REASONS } from '../render/types.js';
 import { endpointOf } from '../requests/requestKey.js';
 
-const MAX_RENDER_GROUPS = 30;
+export const MAX_RENDER_GROUPS = 30;
 const MAX_HEAVIEST_COMMITS = 3;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 

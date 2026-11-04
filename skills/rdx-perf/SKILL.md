@@ -36,11 +36,12 @@ Start each scenario from a clean state. Use the browser tool directly if availab
 
 ## 3. Read the results
 
-The `howToRead` field in the report is authoritative. This document does not duplicate it (fields grow with each rdx version), so read it before reading the results. Only the order of inspection is prescribed here.
+The `howToRead` field in the report is authoritative. This document does not duplicate it (fields grow with each rdx version), so read it before reading the results. Once you have read a given `howToReadVersion`, later calls can use `window.__RDX__.report({ howToRead: false })` to leave it out. Only the order of inspection is prescribed here.
 
-1. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
-2. `reactQuery.findings`: follow each item's `fix`.
-3. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
+1. `summary` first: `summary.verdict` is a one-line count, and `summary.topFindings` lists what to fix in order (severity `high` is what the RDX button badge counts). Open each finding's `detail` path for the full entry and start from `target.location`.
+2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
+3. `reactQuery.findings`: follow each item's `fix`.
+4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
 
 ## 4. Confirm the root cause (required before fixing)
 

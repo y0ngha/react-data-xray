@@ -69,9 +69,12 @@ const tally = (stat: EndpointStat & { totalMs: number }, r: RequestRecord, c: Re
   ...(isWaste(c) && isFailed(r) ? { failedDuplicates: (stat.failedDuplicates ?? 0) + 1 } : {}),
 });
 
-export const wasteCount = (stat: EndpointStat): number => stat.duplicates + stat.sameResponses;
+type WasteFields = Pick<EndpointStat, 'duplicates' | 'sameResponses'>;
 
-export const isWastefulStat = (stat: EndpointStat | undefined): boolean => !!stat && wasteCount(stat) > 0;
+export const wasteCount = (stat: WasteFields): number => stat.duplicates + stat.sameResponses;
+
+/** 낭비 요청이 있는 엔드포인트인지. RDX 버튼 배지와 보고서 summary 가 같이 쓴다(`core/problems.ts`). */
+export const isWastefulStat = (stat: WasteFields | undefined): boolean => !!stat && wasteCount(stat) > 0;
 
 /**
  * 엔드포인트별 호출 수와 낭비 지표. 낭비가 많은 순, 그다음 호출이 많은 순.

@@ -392,6 +392,23 @@ function* recentRendersSteps(
   return out;
 }
 
+/**
+ * 최근 windowMs(기본 10초) 렌더가 min 번 이상인 인스턴스와 그 수. 요약(summarize)하지 않고 렌더 시각만 끝에서부터 센다.
+ * 배지(1초마다)와 보고서(5초 주기 업로드 포함)가 렌더 폭주를 찾을 때 쓴다(`core/problems.ts`).
+ */
+export const busyInstances = (min: number, now = Date.now(), windowMs = WINDOW_MS): Array<{ entry: RenderEntry; recent: number }> => {
+  const cutoff = now - windowMs;
+  const out: Array<{ entry: RenderEntry; recent: number }> = [];
+  active.forEach((entry) => {
+    const { events } = entry;
+    if (events.length < min) return;
+    let recent = 0;
+    for (let i = events.length - 1; i >= 0 && events[i].time >= cutoff; i--) recent++;
+    if (recent >= min) out.push({ entry, recent });
+  });
+  return out;
+};
+
 const byRecent = (a: RenderSummary, b: RenderSummary): number => b.recent - a.recent;
 
 /** 최근 windowMs(기본 10초) 렌더가 있는 컴포넌트들(렌더 많은 순) */
