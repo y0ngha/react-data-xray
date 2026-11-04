@@ -244,7 +244,7 @@ describe('배지와 보고서가 같은 기준을 쓴다 (#70)', () => {
     });
 
     const report = buildReport(true);
-    expect(result.current.stormingNames).toEqual(['Ticker']);
+    expect(result.current.storming.map((s) => s.name)).toEqual(['Ticker']);
     expect(report.summary.badge).toEqual({ issues: result.current.issues, wasteEndpoints: 1, stormingComponents: 1 });
     expect(report.summary.topFindings.slice(0, 2).map((f) => [f.kind, f.severity, f.target.endpoint ?? f.target.component])).toEqual([
       ['duplicate', 'high', 'GET /api/dup70'],

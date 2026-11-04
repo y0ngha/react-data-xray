@@ -56,3 +56,29 @@ export const countProblems = <T extends WasteRow>(endpoints: readonly T[], storm
   const wasteEndpoints = endpoints.filter((e) => !e.ignored && isWastefulStat(e));
   return { issues: wasteEndpoints.length + storms.size, wasteEndpoints, storms };
 };
+
+/** 배지 내역의 렌더 폭주 한 줄. 배지가 그룹마다 세므로 내역도 그룹마다 한 줄이다. */
+export interface StormItem {
+  name: string;
+  /** 같은 이름의 폭주 그룹이 여럿일 때만 그 그룹의 위치(그리는 위치, 라이브러리면 그린 앱 컴포넌트의 위치) */
+  location?: string;
+  /** 렌더 탭에서 찾을 행의 렌더 그룹 키 */
+  key: string;
+  /** key 로 못 찾을 때 찾을 키: 라이브러리 그룹이 그린 앱 컴포넌트 행에 접혔으면 그 행 */
+  fallbacks?: string[];
+}
+
+/** 폭주 그룹을 내역 줄로 바꾼다(이름 → 위치 순). */
+export const stormItems = (storms: ReadonlyMap<string, RenderStorm>): StormItem[] => {
+  const list = [...storms];
+  const names = list.reduce((acc, [, s]) => acc.set(s.name, (acc.get(s.name) ?? 0) + 1), new Map<string, number>());
+  return list
+    .map(([key, s]): StormItem => {
+      const item: StormItem = { name: s.name, key };
+      const location = s.location ?? s.owner?.location;
+      if (names.get(s.name)! > 1 && location !== undefined) item.location = location;
+      if (s.owner) item.fallbacks = [renderGroupKey({ name: s.owner.name, location: s.owner.location })];
+      return item;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || (a.location ?? '').localeCompare(b.location ?? ''));
+};

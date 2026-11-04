@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 
 import { findQueryClients } from '../../core/reactQuery/cacheAudit.js';
-import { countProblems, findRenderStorms, type RenderStorm, type WasteRow } from '../../core/problems.js';
+import { countProblems, findRenderStorms, stormItems, type RenderStorm, type WasteRow } from '../../core/problems.js';
 import { analyzeBursts, BURST_WINDOW_MS, type BurstWindow } from '../../core/requests/bursts.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
@@ -66,7 +66,7 @@ interface Signal {
 /**
  * RDX 버튼에 보여 줄 신호. 버튼은 패널을 닫아 둔 동안에도 알려야 하므로, 붙어 있는 동안 렌더 감시를 켠다.
  * - issues: 낭비 요청이 있는 엔드포인트 수 + 렌더 폭주 중인 컴포넌트 그룹 수. 보고서 summary.badge 와 같은 함수(core/problems.ts)로 센다
- * - wasteEndpoints·stormingNames: 배지가 센 항목의 이름(내역 표시용)
+ * - wasteEndpoints·storming: 배지가 센 항목(내역 표시용). storming 은 폭주 그룹마다 한 줄이라 배지 수와 맞는다
  * - alert: 새 요청 몰림이 생겼거나 새 컴포넌트가 렌더 폭주에 들어왔다(그 1초 동안만 켜진다)
  */
 export const useProblemSignal = (
@@ -90,13 +90,12 @@ export const useProblemSignal = (
       return { storming, lastBurst: last, alert: newStorm || fresh };
     });
   }, TICK_MS);
-  // 배지 내역에 보일 이름. 폭주 이름은 시간 창 기준이라 시간이 지나면 빠진다.
+  // 배지 내역에 보일 항목. 폭주는 시간 창 기준이라 시간이 지나면 빠진다.
   const problems = countProblems(endpoints, signal.storming);
   return {
     issues: problems.issues,
     alert: signal.alert,
     wasteEndpoints: problems.wasteEndpoints.map((e) => e.endpoint),
-    // 같은 이름이 여러 위치에서 폭주해도 내역에는 이름을 한 번만 보인다(누르면 그 이름으로 렌더 탭을 연다).
-    stormingNames: [...new Set([...signal.storming.values()].map((s) => s.name))].sort(),
+    storming: stormItems(signal.storming),
   };
 };

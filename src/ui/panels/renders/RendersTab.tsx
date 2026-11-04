@@ -12,7 +12,7 @@ import { reportWindowMs } from '../../../core/render/monitor.js';
 import { WINDOW_MS } from '../../../core/render/summary.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
-import { useFocusedItem } from '../../viewState.js';
+import { focusedRenderRow, useFocusedItem } from '../../viewState.js';
 import { useNow } from '../../hooks/useNow.js';
 import { useRenderMonitoring } from '../../hooks/useRenderMonitoring.js';
 import { RenderGroupRow } from './RenderGroupRow.js';
@@ -69,7 +69,12 @@ export const RendersTab = ({
   // 정렬·자르기·출처 찾기는 useRenderGroups 가 유휴 큐에서 이미 했다.
   const rows = computed?.items ?? [];
   const focus = useFocusedItem('renders');
-  const focusedIndex = focus ? rows.findIndex((r) => r.group.name === focus.key) : -1; // 같은 이름이 여럿이면 첫 줄
+  const focusedIndex = focus
+    ? focusedRenderRow(
+        rows.map((r) => r.group),
+        focus,
+      )
+    : -1;
   const windowMs = reportWindowMs(now);
   const showTime = rows.some((r) => r.group.ms > 0);
   const statOf = (source: Hit | undefined) => (source ? statsByEndpoint.get(endpointOf(source.record)) : undefined);

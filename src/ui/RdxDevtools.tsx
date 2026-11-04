@@ -156,12 +156,12 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
           position={position}
           issues={signal.issues}
           alert={signal.alert}
-          breakdown={{ waste: signal.wasteEndpoints, storming: signal.stormingNames }}
-          onSelect={(next, key) => {
+          breakdown={{ waste: signal.wasteEndpoints, storming: signal.storming }}
+          onSelect={(next, key, fallbacks) => {
             show();
             setSelected(null);
             setTab(next);
-            if (next === 'requests' || next === 'renders') focusItem(next, key);
+            if (next === 'requests' || next === 'renders') focusItem(next, key, fallbacks);
           }}
           handlers={handlers}
         />

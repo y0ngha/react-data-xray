@@ -25,11 +25,13 @@ export const resetViewState = (): void => {
   }
 };
 
-// 배지 내역에서 고른 항목(엔드포인트·컴포넌트 이름). 그 탭이 아직 그려지지 않았어도 탭이 뜨면 받도록 모듈에 둔다.
+// 배지 내역에서 고른 항목(엔드포인트 이름, 렌더 그룹 키). 그 탭이 아직 그려지지 않았어도 탭이 뜨면 받도록 모듈에 둔다.
 type FocusTab = 'requests' | 'renders';
 export interface FocusRequest {
   tab: FocusTab;
   key: string;
+  /** key 로 못 찾으면 차례로 찾을 다른 키(라이브러리 폭주: 패키지 그룹이 앱 컴포넌트 행에 접혔을 때 그 행) */
+  fallbacks?: readonly string[];
 }
 let request: FocusRequest | null = null;
 // 탭이 닫히면 그 요청은 받은 것으로 친다(다시 열었을 때 지난 항목으로 가지 않게).
@@ -41,9 +43,18 @@ const subscribe = (listener: () => void) => {
 };
 
 /** 그 탭이 key 의 항목으로 가게 한다(탭 쪽은 useFocusedItem 으로 받는다). */
-export const focusItem = (tab: FocusTab, key: string): void => {
-  request = { tab, key };
+export const focusItem = (tab: FocusTab, key: string, fallbacks?: readonly string[]): void => {
+  request = { tab, key, ...(fallbacks && fallbacks.length > 0 && { fallbacks }) };
   listeners.forEach((l) => l());
+};
+
+/** 배지 내역에서 고른 렌더 행. 렌더 그룹 키(이름 + 그리는 위치)로 찾고, 없으면 fallbacks, 그다음 이름(같은 이름이 여럿이면 첫 줄)으로 찾는다. */
+export const focusedRenderRow = (groups: ReadonlyArray<{ key?: string; name: string }>, focus: FocusRequest): number => {
+  for (const key of [focus.key, ...(focus.fallbacks ?? [])]) {
+    const i = groups.findIndex((g) => g.key === key);
+    if (i >= 0) return i;
+  }
+  return groups.findIndex((g) => g.name === focus.key);
 };
 
 /** 이 탭으로 온 항목. 고를 때마다 새 객체라 같은 항목을 다시 골라도 바뀐 것으로 읽히고, 탭이 닫히면 비워진다. */
