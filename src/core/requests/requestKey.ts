@@ -1,4 +1,5 @@
 import { parseUrl } from '../../shared/format.js';
+import { graphqlOperationOf } from './graphqlOperation.js';
 import { actionNameOf } from './serverActionNames.js';
 import type { RequestRecord } from './types.js';
 
@@ -32,20 +33,55 @@ const maskIds = (path: string): string =>
     .map((segment) => (ID_SEGMENT_PATTERNS.some((re) => re.test(segment)) ? ':id' : segment))
     .join('/');
 
-/** 쿼리스트링을 빼고 경로 안의 ID 를 ':id' 로 묶은 "메서드 경로". 엔드포인트별 집계 단위다. 원래 URL 은 레코드에 그대로 있다. */
-export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url' | 'action'>): string =>
-  `${record.method} ${maskIds(pathOf(record.url))}${actionSuffix(record.action)}`;
+/** GraphQL 이면 연산 이름을 붙인다. 모든 연산이 한 주소(`POST /graphql`)로 가므로 이것이 없으면 엔드포인트 단위 기능이 GraphQL 전체를 한 줄로 뭉갠다. */
+const operationSuffix = (record: Pick<RequestRecord, 'url' | 'requestBody'>): string => {
+  const operation = graphqlOperationOf(record);
+  return operation ? ` (${operation})` : '';
+};
+
+/**
+ * 쿼리스트링을 빼고 경로 안의 ID 를 ':id' 로 묶은 "메서드 경로". 엔드포인트별 집계 단위다. 원래 URL 은 레코드에 그대로 있다.
+ * Server Action 이면 함수, GraphQL 이면 연산 이름을 괄호로 붙인다(무시 목록도 이 단위로 맞춘다).
+ */
+export const endpointOf = (record: Pick<RequestRecord, 'method' | 'url' | 'action' | 'requestBody'>): string =>
+  `${record.method} ${maskIds(pathOf(record.url))}${record.action ? actionSuffix(record.action) : operationSuffix(record)}`;
 
 /** ID 묶기가 생기기 전에 저장한 엔드포인트("GET /items/5")를 지금 형식("GET /items/:id")으로 바꾼다. 이미 묶인 것은 그대로다. */
 export const maskEndpoint = (endpoint: string): string =>
   endpoint.replace(/^(\S+ )(\S+)/, (_, method: string, path: string) => method + maskIds(path));
 
+// 요청 시작 시각과 이만큼 안쪽이면 그 시각으로 만든 값으로 본다. 값은 요청을 만들기 직전에 같은 시계로 찍으므로 넉넉하다.
+const CACHE_BUSTER_WINDOW_MS = 10_000;
+const EPOCH_MS = /^\d{13}$/;
+const EPOCH_S = /^\d{10}(?:\.\d+)?$/;
+
+const isNowStamp = (value: string, startedAt: number): boolean => {
+  const ms = EPOCH_MS.test(value) ? Number(value) : EPOCH_S.test(value) ? Number(value) * 1000 : NaN;
+  return Math.abs(ms - startedAt) <= CACHE_BUSTER_WINDOW_MS;
+};
+
+type KeyInput = Pick<RequestRecord, 'method' | 'url' | 'requestBody' | 'action'> & Partial<Pick<RequestRecord, 'startedAt'>>;
+
+/**
+ * 캐시를 피하려고 요청마다 현재 시각을 붙인 쿼리 파라미터(`?_t=1730700000000`, jQuery 의 `?_=…`) 이름.
+ * 이름이 아니라 값이 요청 시작 시각의 epoch(ms·초)인지로 가린다. 같은 이름의 진짜 파라미터를 빼지 않기 위해서다.
+ */
+export const cacheBusterParams = (record: Pick<RequestRecord, 'url'> & Partial<Pick<RequestRecord, 'startedAt'>>): string[] => {
+  const { startedAt } = record;
+  const params = startedAt === undefined ? undefined : parseUrl(record.url)?.searchParams;
+  if (!params || startedAt === undefined) return [];
+  return Array.from(params)
+    .filter(([, value]) => isNowStamp(value, startedAt))
+    .map(([name]) => name);
+};
+
 /**
  * 쿼리스트링과 payload 까지 포함한 요청 단위. 중복·같은 응답 판정은 같은 요청끼리만 한다.
- * 파라미터 순서만 다른 URL 은 같은 요청으로 본다.
+ * 파라미터 순서만 다른 URL 은 같은 요청으로 본다. 현재 시각을 붙인 cache-buster 파라미터는 뺀다(매 요청이 다른 요청이 된다).
  */
-export const requestKeyOf = (record: Pick<RequestRecord, 'method' | 'url' | 'requestBody' | 'action'>): string => {
+export const requestKeyOf = (record: KeyInput): string => {
   const u = parseUrl(record.url);
+  for (const name of cacheBusterParams(record)) u?.searchParams.delete(name);
   u?.searchParams.sort();
   // 같은 요청인지는 이름을 알기 전후로 바뀌면 안 되므로 id 그대로 쓴다.
   return `${record.method} ${u?.href ?? record.url}${record.action ? ` ${record.action}` : ''} ${record.requestBody ?? ''}`;
