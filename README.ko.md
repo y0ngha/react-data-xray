@@ -202,12 +202,19 @@ Claude Code 를 쓴다면 패키지의 스킬 [`rdx-perf`](./skills/rdx-perf/SKI
 - 응답을 `map` 등으로 가공해 state 에 넣으면 같은 객체로 이을 수 없어서, 응답이 도착한 직후에 바뀐 state 를 그 응답 때문이라고 추정합니다. 우연히 겹친 렌더가 붙을 수 있습니다.
 - 요청을 보낸 코드의 원래 파일 위치는 Vite 처럼 파일을 하나씩 보내는 개발 서버에서만 보여 줍니다. webpack, Turbopack 에서는 함수 이름으로 찾으세요.
 - 컴포넌트를 렌더한 JSX 위치는 개발 빌드에서만 나옵니다. React 19 는 개발 서버가 변환한 코드의 줄을 소스맵으로 원본 줄로 바꾸므로, 소스맵을 받기 전 잠깐은 변환된 줄이 보일 수 있습니다.
-- 패키지는 ESM 전용입니다. Vitest 와 ESM 모드 Jest 는 그대로 불러옵니다. 기본(CommonJS) 모드 Jest(babel-jest)는 불러오지 못해 `<RdxDevtools />` 를 그리는 컴포넌트 테스트가 깨집니다. 테스트에는 RDX 가 필요 없으니 빈 모듈로 바꾸세요.
+- 패키지는 ESM 전용입니다. Vitest 와 ESM 모드 Jest 는 그대로 불러옵니다. 기본(CommonJS) 모드 Jest(babel-jest)는 불러오지 못해 `<RdxDevtools />` 를 그리는 컴포넌트 테스트가 깨집니다. 테스트에는 RDX 가 필요 없으니 빈 모듈로 바꾸세요(이미 있는 설정에 합치세요).
 
   ```js
   // jest.config.js
-  moduleNameMapper: { '^react-data-xray$': '<rootDir>/test/rdx-mock.js' },
-  // test/rdx-mock.js
+  module.exports = {
+    moduleNameMapper: { '^react-data-xray$': '<rootDir>/test/rdx-mock.cjs' },
+  };
+  ```
+
+  빈 모듈은 앱이 `react-data-xray` 에서 가져오는 이름을 모두 내보내야 합니다(지금은 `RdxDevtools` 하나). 확장자를 `.cjs` 로 두면 `"type": "module"` 앱에서도 CommonJS 로 읽힙니다.
+
+  ```js
+  // test/rdx-mock.cjs
   module.exports = { RdxDevtools: () => null };
   ```
 
