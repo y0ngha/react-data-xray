@@ -38,6 +38,14 @@ describe('이슈 15: 변경 요청 뒤 조회 묶기', () => {
     expect(f.periodic).toBe(true);
   });
 
+  it('polling 중인 요청이라도 변경 뒤에 끼어든 재조회는 periodic 이 아니다(#62)', () => {
+    // 10초 polling 사이, 저장 응답 직후(1.2s)에 한 번 더 받음
+    const polls = [-19_000, -9_000, 1_000, 11_000, 21_000].map((t) => rec('GET', '/api/poll', t));
+    const refetch = rec('GET', '/api/poll', 1200);
+    const [f] = followUps(save, [save, ...polls, refetch]);
+    expect(f).toMatchObject({ count: 1, periodic: false });
+  });
+
   it('변경 요청이 아니면 빈 목록이다', () => {
     const get = rec('GET', '/api/x', 0);
     expect(followUps(get, [get, rec('GET', '/api/y', 150)])).toEqual([]);
