@@ -49,6 +49,8 @@ export const MEMO_COMPONENT = 14;
 export const SIMPLE_MEMO_COMPONENT = 15;
 // 이번 commit 에서 실제로 렌더 함수를 실행했다는 플래그(React 18, 19)
 export const PERFORMED_WORK = 1;
+// <StrictMode> 아래 fiber 의 mode 에 켜지는 비트(React 18, 19). 서브트리가 물려받는다.
+export const STRICT_LEGACY_MODE = 0b001000;
 
 // memo(Comp, compare)(tag 14)는 안쪽 Comp 가 따로 fiber 를 가지므로 넣지 않는다.
 const COMPOSITE_TAGS = new Set([FUNCTION_COMPONENT, CLASS_COMPONENT, FORWARD_REF, SIMPLE_MEMO_COMPONENT]);

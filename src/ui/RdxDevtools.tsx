@@ -52,8 +52,8 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
   const [selected, setSelected] = useState<{ record: RequestRecord; focus?: Focus } | null>(null);
   const [hovered, setHovered] = useState<RequestRecord | null>(null);
 
-  // 자기 commit 이 훅을 지난 뒤 import 순서를 한 번 판정한다(react-dom 보다 늦게 불렀으면 콘솔에 알린다).
-  useEffect(() => scheduleLoadOrderCheck(), []);
+  // 자기 commit 이 훅을 지난 뒤 import 순서를 판정한다(진입 모듈이 건 판정이 아직이면 그것과 합친다).
+  useEffect(() => scheduleLoadOrderCheck({ panel: true }), []);
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);

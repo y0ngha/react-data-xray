@@ -2,14 +2,13 @@ import { version as reactPackageVersion } from 'react';
 
 import { captureStatus } from '../capture/install.js';
 import { sourceMapFailures } from '../capture/sourceMap.js';
-import { findRootFibers } from '../fiber/tree.js';
-import type { Fiber } from '../fiber/types.js';
 import { commitHookStatus } from '../render/devtoolsHook.js';
+import { strictModeSeen } from '../render/monitor.js';
 import { getReportPluginState, type ReportPluginState } from '../report/endpointState.js';
 import { sameResponseMemory } from '../requests/repeatDetection.js';
 import { getDroppedCount, getRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
-import { earlyRequests, loadOrderFindings, loadOrderProblems, type EarlyRequests } from './loadOrder.js';
+import { loadOrderFindings, loadOrderProblems, type EarlyRequests } from './loadOrder.js';
 import { FIX_IMPORT_ORDER, MESSAGES } from './messages.js';
 
 /** window.__RDX__.doctor() 와 보고서의 diagnostics: rdx 가 제대로 붙었는지 */
@@ -20,18 +19,21 @@ export interface RdxDiagnostics {
     /** 지금까지 받은 commit 수(렌더 감시가 꺼져 있어도 센다). 앱이 그려졌는데 0 이면 react-dom 이 rdx 보다 먼저 로드됐다 */
     commitsSeen: number;
     reactVersion: string;
-    /** 앱이 StrictMode 안에서 그려지는지(루트 근처의 fiber 와 StrictMode 재실행 요청으로 본다) */
-    strictMode: boolean;
+    /** 앱이 StrictMode 안에서 그려지는지(기록한 앱 렌더의 fiber 모드로 본다). 아직 모르면 null */
+    strictMode: boolean | null;
   };
   capture: {
     installed: boolean;
     fetch: boolean;
     xhr: boolean;
-    /** rdx 가 설치되기 전에 나가 기록하지 못한 fetch·XHR 수(resource timing). 모르면 null */
+    /** rdx 가 설치되기 전에 나가 기록하지 못한 fetch·XHR 수(resource timing). 아직 판정하지 않았으면 null */
     requestsBeforeInstall: number | null;
   };
   requests: {
+    /** 기록한 요청 수(새로고침 전에서 되살린 것 포함) */
     recorded: number;
+    /** 그중 새로고침 전 페이지에서 되살린 것. 응답 객체가 없어 화면 값과 잇지 못한다 */
+    restored: number;
     /** 응답 객체를 출처로 등록한 JSON 응답 수(요소 → 응답 연결의 재료) */
     jsonResponses: number;
     /** 200건을 넘어 목록에서 밀려난 수 */
@@ -39,6 +41,7 @@ export interface RdxDiagnostics {
   };
   /** dev 서버 보고서 플러그인: ready, missing(없음), forbidden-host(이 호스트를 막음), checking(확인 중) */
   reportPlugin: ReportPluginState;
+  /** 소스맵을 받거나 읽지 못한 모듈 수 */
   sourceMaps: { failures: number };
   /** 같은 응답 판정이 붙든 메모리: 요청 키 수와 남은 응답 글자 수(0 이어야 한다) */
   sameResponseMemory: { keys: number; retainedChars: number };
@@ -46,80 +49,91 @@ export interface RdxDiagnostics {
   problems: string[];
 }
 
-// React 18·19 의 StrictLegacyMode 비트. <StrictMode> 아래 fiber 는 모두 물려받는다.
-const STRICT_LEGACY_MODE = 0b001000;
-// StrictMode 는 보통 루트 바로 아래에 둔다. 트리 전체를 훑지 않게 이만큼만 본다.
-const STRICT_SCAN_FIBERS = 300;
-
-const underStrictMode = (roots: readonly Fiber[]): boolean => {
-  const queue: Fiber[] = [...roots];
-  for (let i = 0; i < queue.length && i < STRICT_SCAN_FIBERS; i++) {
-    const fiber = queue[i];
-    if (((fiber.mode ?? 0) & STRICT_LEGACY_MODE) !== 0) return true;
-    for (let child = fiber.child; child; child = child.sibling) queue.push(child);
-  }
-  return false;
-};
-
-/** 응답 객체(객체·배열)가 있는 기록. 되살린 기록은 원문만 있어 빠진다. */
+/** 응답 객체(객체·배열)가 있는 기록 */
 const hasJsonBody = (r: RequestRecord): boolean => r.body !== null && typeof r.body === 'object';
 
 /** 앱에 도는 React 의 버전: 훅에 등록한 렌더러(react-dom)를 먼저, 없으면(훅에 붙지 않음) react 패키지 */
 const reactVersionOf = (rendererVersions: readonly string[]): string => rendererVersions[0] ?? reactPackageVersion;
 
-const hostname = (): string => (typeof location === 'undefined' ? 'localhost' : location.hostname);
+const host = (): [string, string] => (typeof location === 'undefined' ? ['localhost', 'localhost'] : [location.host, location.hostname]);
+
+/** 판정한 import 순서 결과를 지금 값으로. commit 이 그 뒤에 왔으면 문제가 아니다. */
+const loadOrderNow = (): { noCommits: boolean; early: EarlyRequests | null } => {
+  const f = loadOrderFindings();
+  return { noCommits: !!f?.noCommits && commitHookStatus().commitsSeen === 0, early: f?.early ?? null };
+};
 
 /**
- * 문제 목록. 렌더 중에도 부를 수 있게 싼 값만 읽는다: early 를 주지 않으면 마운트 뒤 판정한 값을 쓰고,
- * commit 이 없다는 것은 앱이 그려진 것을 알 때(마운트 뒤 판정했거나 appRendered)만 문제로 본다.
+ * 도구 막대 버튼에 다는 문제 수. 렌더마다 부르므로 배열을 만들거나 메모리를 훑지 않는다.
+ * (같은 응답 메모리 점검은 doctor()·보고서에서만 한다.)
  */
-export const diagnosticProblems = (
-  early: EarlyRequests | null = loadOrderFindings()?.early ?? null,
-  appRendered = loadOrderFindings() !== null,
-): string[] => {
-  const hook = commitHookStatus();
-  const capture = captureStatus();
-  const memory = sameResponseMemory();
-  const loadOrder = loadOrderProblems({ noCommits: appRendered && hook.listening && hook.commitsSeen === 0, early });
+export const problemCount = (): number => {
+  const { noCommits, early } = loadOrderNow();
+  return (
+    Number(noCommits) +
+    Number(!!early && early.count > 0) +
+    Number(!captureStatus().installed) +
+    Number(getReportPluginState() === 'forbidden-host')
+  );
+};
+
+const problemsOf = (retainedChars: number): string[] => {
+  const loadOrder = loadOrderProblems(loadOrderNow());
+  // 고치는 방법은 import 순서 문제의 마지막 문구에 한 번만 붙인다.
+  if (loadOrder.length > 0) loadOrder[loadOrder.length - 1] += ` ${FIX_IMPORT_ORDER}`;
   return [
     ...loadOrder,
-    ...(loadOrder.length > 0 ? [FIX_IMPORT_ORDER] : []),
-    ...(capture.installed ? [] : [MESSAGES.captureMissing]),
-    ...(getReportPluginState() === 'forbidden-host' ? [MESSAGES.forbiddenHost(hostname())] : []),
-    ...(memory.retainedChars > 0 ? [MESSAGES.retainedText(memory.retainedChars)] : []),
+    ...(captureStatus().installed ? [] : [MESSAGES.captureMissing]),
+    ...(getReportPluginState() === 'forbidden-host' ? [MESSAGES.forbiddenHost(...host())] : []),
+    ...(retainedChars > 0 ? [MESSAGES.retainedText(retainedChars)] : []),
   ];
 };
 
-/** 지금 상태로 자가 점검을 만든다. 큐를 비우지 않는다(이미 있는 카운터와 상태만 읽는다). */
+/**
+ * 지금 상태로 자가 점검을 만든다. 큐를 비우지 않고, 이미 있는 카운터와 판정 결과만 읽는다
+ * (resource timing·DOM 은 다시 훑지 않는다: 설치 전 요청은 import 순서 판정 때 센 값이다).
+ */
 export const buildDiagnostics = (): RdxDiagnostics => {
   const hook = commitHookStatus();
   const capture = captureStatus();
   const records = getRecords();
-  const early = earlyRequests();
-  const roots = typeof document === 'undefined' ? [] : findRootFibers();
+  const live = records.filter((r) => !r.restored);
+  const memory = sameResponseMemory();
   return {
     renderHook: {
       listening: hook.listening,
       commitsSeen: hook.commitsSeen,
       reactVersion: reactVersionOf(hook.rendererVersions),
-      strictMode: records.some((r) => r.strictModeReplay) || underStrictMode(roots),
+      // 렌더 기록이 없으면 이 페이지에서 StrictMode 재실행으로 보낸 요청이 있는지로만 안다(되살린 기록은 빼고).
+      strictMode: strictModeSeen() ?? (live.some((r) => r.strictModeReplay) ? true : null),
     },
-    capture: { installed: capture.installed, fetch: capture.fetch, xhr: capture.xhr, requestsBeforeInstall: early?.count ?? null },
-    requests: { recorded: records.length, jsonResponses: records.filter(hasJsonBody).length, dropped: getDroppedCount() },
+    capture: {
+      installed: capture.installed,
+      fetch: capture.fetch,
+      xhr: capture.xhr,
+      requestsBeforeInstall: loadOrderFindings()?.early?.count ?? null,
+    },
+    requests: {
+      recorded: records.length,
+      restored: records.length - live.length,
+      jsonResponses: live.filter(hasJsonBody).length,
+      dropped: getDroppedCount(),
+    },
     reportPlugin: getReportPluginState(),
     sourceMaps: { failures: sourceMapFailures() },
-    sameResponseMemory: sameResponseMemory(),
-    problems: diagnosticProblems(early, roots.length > 0 || loadOrderFindings() !== null),
+    sameResponseMemory: memory,
+    problems: problemsOf(memory.retainedChars),
   };
 };
 
 /** 데이터 관점의 빈 상태(연결된 응답·데이터를 쓰는 컴포넌트가 없음)에 붙일 이유. 모르면 undefined */
 export const dataEmptyReason = (): string | undefined => {
   if (!captureStatus().installed) return MESSAGES.captureMissing;
-  const records = getRecords();
-  if (records.length === 0) return MESSAGES.noRequests;
-  if (!records.some(hasJsonBody)) return MESSAGES.noJson(records.length);
-  const early = loadOrderFindings()?.early;
+  // 되살린 기록은 원문만 있고 응답 객체가 없으므로 JSON 이었는지 따지는 데서 뺀다.
+  const live = getRecords().filter((r) => !r.restored);
+  if (live.length === 0) return MESSAGES.noRequests;
+  if (!live.some(hasJsonBody)) return MESSAGES.noJson(live.length);
+  const { early } = loadOrderNow();
   return early && early.count > 0 ? `${MESSAGES.earlyRequests(early.count, early.urls)} ${FIX_IMPORT_ORDER}` : undefined;
 };
 

@@ -16,14 +16,14 @@ export const MESSAGES = {
   earlyRequests: (count: number, urls: readonly string[]): string =>
     `${plural(count, 'fetch/XHR request')} went out before rdx loaded and ${count === 1 ? 'was' : 'were'} not recorded${list(urls, count)}.`,
   captureMissing: 'Request capture is not installed, so no request is recorded.',
-  forbiddenHost: (hostname: string): string =>
-    `The dev server plugin blocks reports from this host. Allow it with rdx({ allowedHosts: ['${hostname}'] }).`,
+  forbiddenHost: (host: string, hostname: string): string =>
+    `The dev server blocked a report from ${host}. Allow this host in the rdx report plugin: Vite rdx({ allowedHosts: ['${hostname}'] }), webpack rdxReportMiddleware(root, { allowedHosts: ['${hostname}'] }), Next.js createRdxReportRoute(process.cwd(), { allowedHosts: ['${hostname}'] }).`,
   retainedText: (chars: number): string =>
     `Same-response detection holds ${chars} characters of response text; it should keep only lengths and hashes.`,
   noRequests:
-    'No requests recorded yet. Data rendered on the server (SSR/RSC) cannot be linked to a response; if the page fetched on load, check the import order.',
+    'No requests recorded on this page yet (records restored from before a reload have no response objects to link). Data rendered on the server (SSR/RSC) cannot be linked to a response; if the page fetched on load, check the import order.',
   noJson: (count: number): string =>
-    `None of the ${plural(count, 'recorded response')} was JSON with objects or arrays, so there is nothing to link. Data rendered on the server cannot be linked either.`,
+    `None of the ${plural(count, 'response')} recorded on this page was JSON with objects or arrays, so there is nothing to link. Data rendered on the server cannot be linked either.`,
 } as const;
 
 /** 패널 상태 줄의 이름 */

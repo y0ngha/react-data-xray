@@ -1,6 +1,6 @@
 import { useReducer } from 'react';
 
-import { diagnosticProblems } from '../../core/diagnostics/diagnostics.js';
+import { problemCount } from '../../core/diagnostics/diagnostics.js';
 import { STATUS_LABELS } from '../../core/diagnostics/messages.js';
 import { getResetAt } from '../../core/report/reportApi.js';
 import { formatTime } from '../../shared/format.js';
@@ -50,7 +50,7 @@ export const PanelToolbar = (props: PanelToolbarProps) => {
   const [measureOpen, setMeasureOpen] = useStoredState(MEASURE_KEY, parseBool, no, SESSION);
   const [statusOpen, setStatusOpen] = useStoredState(STATUS_KEY, parseBool, no, SESSION);
   // 접혀 있어도 문제가 있으면 버튼에 수를 단다(싼 카운터만 읽는다).
-  const problems = diagnosticProblems().length;
+  const problems = problemCount();
   // ResetButton 이 Measure 행에 있어 클릭해도 PanelToolbar 가 다시 그려지지 않으므로, 강제로 다시 그려
   // `since HH:MM` 힌트를 갱신한다.
   const [, forceUpdate] = useReducer((n: number) => n + 1, 0);

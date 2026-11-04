@@ -9,6 +9,7 @@ const renderHookText = ({ renderHook: h }: RdxDiagnostics): string => {
   if (!h.listening) return L.notListening;
   const parts = [h.commitsSeen > 0 ? `${h.commitsSeen} ${L.commits}` : L.noCommits, `React ${h.reactVersion}`];
   if (h.strictMode) parts.push(L.strictMode);
+  else if (h.strictMode === null) parts.push(`${L.strictMode} ?`);
   return parts.join(', ');
 };
 

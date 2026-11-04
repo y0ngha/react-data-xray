@@ -8,6 +8,7 @@ import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
 import { buildReport, type RdxReport } from './buildReport.js';
 import { buildDiagnostics, type RdxDiagnostics } from '../diagnostics/diagnostics.js';
+import { MESSAGES } from '../diagnostics/messages.js';
 import { setReportPluginState } from './endpointState.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
@@ -164,9 +165,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
   const send = getNativeFetch();
   const state = send ? await endpoint : 'missing';
   if (state === 'forbidden-host') {
-    throw new Error(
-      `[react-data-xray] The dev server blocked a report from ${location.host}. Allow it with rdx({ allowedHosts: ['${location.hostname}'] }).`,
-    );
+    throw new Error(`[react-data-xray] ${MESSAGES.forbiddenHost(location.host, location.hostname)}`);
   }
   if (!send || state === 'missing') {
     throw new Error(NO_PLUGIN_MESSAGE);
@@ -215,12 +214,23 @@ const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
   const res = (await ask()) ?? (await new Promise((resolve) => window.setTimeout(resolve, HANDSHAKE_RETRY_MS)).then(ask));
   const mark = res?.headers.get(REPORT_HEADER);
   if (mark === 'forbidden-host') {
-    console.warn(
-      `[react-data-xray] The dev server blocked a report from ${location.host}. Allow it with rdx({ allowedHosts: ['${location.hostname}'] }).`,
-    );
+    console.warn(`[react-data-xray] ${MESSAGES.forbiddenHost(location.host, location.hostname)}`);
   }
   return mark === '1' ? 'ready' : mark === 'forbidden-host' ? 'forbidden-host' : 'missing';
 };
+
+/**
+ * 주기 업로드가 "바뀌었나" 를 볼 때 쓰는 값. 받은 commit 수는 패널 자신의 commit 에도 늘어, 그대로 비교하면
+ * 앱이 멈춰 있어도 5초마다 전체를 보낸다. 0 인지(연결 여부)만 남긴다. 보내는 본문에는 그대로 둔다.
+ */
+export const changeKeyOf = (content: Omit<RdxReport, 'generatedAt'>): string =>
+  JSON.stringify({
+    ...content,
+    diagnostics: {
+      ...content.diagnostics,
+      renderHook: { ...content.diagnostics.renderHook, commitsSeen: content.diagnostics.renderHook.commitsSeen > 0 },
+    },
+  });
 
 /**
  * 5초마다 보고서가 바뀌었으면 dev 서버로 보내 `.rdx/report.json` 에 쓰게 한다.
@@ -241,7 +251,7 @@ const startUpload = async (): Promise<void> => {
   let timer = 0;
   const upload = async () => {
     const { generatedAt, ...content } = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
-    const key = JSON.stringify(content);
+    const key = changeKeyOf(content);
     const idle = key === last;
     // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
     if (idle && Date.now() - lastSent < TAB_HEARTBEAT_MS) return;
