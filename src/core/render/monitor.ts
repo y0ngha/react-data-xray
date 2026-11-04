@@ -106,7 +106,7 @@ const recordRender = (p: Pending, now: number, seq: number, inherited: Inherited
   };
   entry.fiber = fiber;
   // 중복 요청이 다시 나간 이유(requests/repeatCause)를 이 commit 의 사본으로 정해 둔다. 뒤 렌더가 fiber 를 덮어도 그대로다.
-  noteCommitCause(entry.name, seq, p.alt ? { deps: changedEffectDep(snap) } : { remount: remountAt(entry.name, now) });
+  noteCommitCause(entry.name, seq, p.alt ? { deps: changedEffectDep(snap) } : { mounted: true, remount: remountAt(entry.name, now) });
   entry.events.push(event);
   if (entry.events.length > MAX_EVENTS_PER_COMPONENT) entry.events.shift();
   active.add(entry);

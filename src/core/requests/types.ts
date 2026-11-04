@@ -34,6 +34,8 @@ export interface RequestRecord {
   strictModeReplay?: boolean;
   /** 요청을 만들 때의 마지막 React commit 순번. effect 가 보낸 요청이면 그 effect 를 돌린 commit 이다(다시 나간 이유 판정용). */
   commitSeq?: number;
+  /** 보낸 컴포넌트가 commitSeq 의 commit 에서 마운트됐다(중복 요청만, 유휴 큐가 렌더 기록으로 정한다). StrictMode 재실행 판정에 쓴다. */
+  sentOnMount?: boolean;
   /** 중복 요청이 다시 나간 이유(의존성 변경·재마운트·StrictMode). 알 수 없으면 없다. */
   repeatCause?: { kind: 'deps' | 'remount' | 'strict'; detail: string };
   status: number;

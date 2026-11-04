@@ -55,13 +55,21 @@ const repeatCauseOf = (record: RequestRecord, previousSeq: number | undefined): 
   return previousSeq === undefined ? undefined : causeOf(component, commitCausesBetween(component, previousSeq, at));
 };
 
+/** 보낸 컴포넌트가 요청 순번의 commit 에서 마운트됐는가. 렌더 기록은 이름마다 최근 몇 commit 만 남아 지금 정해 고정한다. 모르면 undefined. */
+const sentOnMountOf = (record: RequestRecord): boolean | undefined => {
+  const at = record.commitSeq;
+  if (!record.component || at === undefined) return undefined;
+  return commitCausesBetween(record.component, at - 1, at).some((c) => c.mounted) || undefined;
+};
+
 /**
- * record.repeatCause 를 채우는 큐 step. 끝나면 true. 앱 경로가 아니라 유휴 큐에서 부른다(보낸 컴포넌트를 채우는 step 뒤에 걸린다).
+ * record.repeatCause 와 sentOnMount 를 채우는 큐 step. 끝나면 true. 앱 경로가 아니라 유휴 큐에서 부른다(보낸 컴포넌트를 채우는 step 뒤에 걸린다).
  * previousSeq 는 앞선 같은 요청(duplicateOf)을 만들 때의 commit 순번이다.
  */
 export const repeatCauseStep =
   (record: RequestRecord, previousSeq?: number): (() => boolean) =>
   () => {
     record.repeatCause = repeatCauseOf(record, previousSeq);
+    record.sentOnMount = sentOnMountOf(record);
     return true;
   };

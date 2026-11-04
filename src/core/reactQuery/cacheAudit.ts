@@ -1,12 +1,12 @@
 import { findRootFibers, walkFibers } from '../fiber/tree.js';
 import { findDerivedOrigin, isIndexPending } from '../inspect/derivedMatch.js';
 import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
-import { isAborted, type RequestClass } from '../requests/classify.js';
+import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
 import { getRecords, lastRecordId, touchRecords } from '../requests/store.js';
 import type { Origin, RequestRecord } from '../requests/types.js';
-import { noteOverlapCancel, resetOverlapCancels } from './overlapCancel.js';
+import { cancelledBy, noteOverlap, resetOverlaps, type Overlap } from './overlapCancel.js';
 import { isPinned, pinnedRefetchReason, pinReason, type RefetchReason } from './refetchReason.js';
 
 export type { RefetchReason } from './refetchReason.js';
@@ -121,7 +121,8 @@ interface ClientHistory {
   fetched: Fetched[];
   /** 지금까지 만든 쿼리 키(queryHash → queryKey, 무효화 미스 판정용) */
   keys: Map<string, unknown>;
-  misses: Array<{ at: number; finding: CacheFinding }>;
+  /** overlap: double-invalidate 의 겹침(취소된 요청을 찾는 근거) */
+  misses: Array<{ at: number; finding: CacheFinding; overlap?: Overlap }>;
   /** 쿼리 성공 기록(재조회 원인 판정용). 같은 응답이면 structural sharing 이 앞 데이터를 그대로 써 출처 매칭 기록(fetched)에 남지 않아 따로 둔다. */
   successes: Array<{
     at: number;
@@ -181,7 +182,7 @@ let auditFrom = 0;
 /** 측정을 새로 시작한다(window.__RDX__.reset) */
 export const resetCacheAudit = (): void => {
   auditFrom = Date.now();
-  resetOverlapCancels();
+  resetOverlaps();
 };
 
 const describeRequest = (r: RequestRecord): string => `${r.method} ${r.url}`;
@@ -318,20 +319,27 @@ const recordOverlap = (
 ): void => {
   enqueue(() => {
     const live = client.getQueryCache().getAll();
-    const first = earlier.find((r) =>
-      live.some(
+    const both = (r: ClientHistory['invalidations'][number]) =>
+      live.filter(
         (q) =>
           partialMatch(r.key, q.queryKey) &&
           partialMatch(now.key, q.queryKey) &&
           refetches(r.refetchType, q) &&
           refetches(now.refetchType, q),
-      ),
-    );
+      );
+    const first = earlier.find((r) => both(r).length > 0);
     if (first) {
-      noteOverlapCancel(now.at); // 요청 분류가 이 겹침으로 취소된 요청을 StrictMode 로 보지 않게
+      // 두 무효화가 함께 덮은 쿼리가 그 사이에 시작한 fetch. 뒤 무효화가 취소한 재조회는 이 fetch 들이 보낸 요청뿐이다.
+      const hashes = new Set(both(first).map((q) => q.queryHash));
+      const overlap: Overlap = {
+        at: now.at,
+        fetchStarts: history.fetchStarts.filter((f) => hashes.has(f.queryHash) && f.at >= first.at && f.at <= now.at).map((f) => f.at),
+      };
+      noteOverlap(overlap); // 요청 분류가 이 겹침으로 취소된 요청을 StrictMode 로 보지 않게
       const stack = callerStack(now.error);
       pushBounded(history.misses, {
         at: now.at,
+        overlap,
         finding: {
           kind: 'double-invalidate',
           keys: [keyText(first.key), keyText(now.key)],
@@ -591,14 +599,12 @@ const staleFindings = (queries: readonly QueryLike[], sameResponse: ReadonlySet<
       : [];
   });
 
-// 뒤 무효화가 취소한 요청: 두 번째 무효화 시각에 아직 진행 중이다가 abort 로 끝난 요청
-const cancelledBy = (at: number, records: readonly RequestRecord[]): RequestRecord[] =>
-  records.filter((r) => isAborted(r) && r.startedAt <= at && r.startedAt + r.durationMs >= at);
-
-/** 취소된 요청이 있으면 requests 에 원인과 함께 남긴다 */
-const withCancelled = (m: { at: number; finding: CacheFinding }, records: readonly RequestRecord[]): CacheFinding =>
+/** 뒤 무효화가 취소한 요청이 있으면 requests 에 원인과 함께 남긴다(요청 분류와 같은 cancelledBy 로 찾는다) */
+const withCancelled = (m: ClientHistory['misses'][number], records: readonly RequestRecord[]): CacheFinding =>
   Object.assign({}, m.finding, {
-    requests: cancelledBy(m.at, records).map((r) => `${describeRequest(r)} (cancelled by overlapping invalidation)`),
+    requests: records
+      .filter((r) => !!m.overlap && cancelledBy(m.overlap, r))
+      .map((r) => `${describeRequest(r)} (cancelled by overlapping invalidation)`),
   });
 
 /** 지금 점검한다. classOf 는 같은 응답 재요청 판정에 쓴다. */
@@ -804,7 +810,7 @@ export const overlapCancelOf = (record: RequestRecord): string[] | undefined => 
     const client = ref.deref();
     const history = client && histories.get(client);
     const m = history?.misses.find(
-      (x) => x.at >= auditFrom && x.finding.kind === 'double-invalidate' && cancelledBy(x.at, [record]).length > 0,
+      (x) => x.at >= auditFrom && x.finding.kind === 'double-invalidate' && !!x.overlap && cancelledBy(x.overlap, record),
     );
     if (m?.finding.stacks) return m.finding.stacks;
   }

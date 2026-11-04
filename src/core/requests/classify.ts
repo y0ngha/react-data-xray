@@ -1,6 +1,7 @@
 import { groupBy } from '../../shared/collections.js';
-import { inFlightAtOverlap } from '../reactQuery/overlapCancel.js';
+import { cancelledByOverlap } from '../reactQuery/overlapCancel.js';
 import { pinnedRefetchReason } from '../reactQuery/refetchReason.js';
+import { isAborted } from './aborted.js';
 import { endpointOf, requestKeyOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
@@ -53,21 +54,11 @@ const PERIODIC_MIN_SHARE = 0.7;
 const median = (values: readonly number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
 /**
- * 같은 요청의 시작 시각 중 일정한 간격의 반복(대시보드 polling 같은 의도된 반복)에 든 것. 입력 순서대로 true/false 를 돌려준다.
- * 간격 중앙값을 주기로 보고, 시각 순으로 걸으며 직전 반복에서 한 주기(±25%) 뒤의 요청을 구간에 잇는다.
- * - 한 주기보다 훨씬 이른 요청은 사이에 끼어든 재조회라 건너뛴다(구간에 넣지 않고, 제 판정을 그대로 받는다).
+ * 정렬된 시각을 걸으며 직전 반복에서 한 주기(±25%) 뒤의 요청을 구간에 잇는다. 구간마다 정렬된 자리 목록.
+ * - 한 주기보다 훨씬 이른 요청은 사이에 끼어든 재조회라 건너뛴다(어느 구간에도 넣지 않는다).
  * - 한 주기보다 훨씬 늦은 요청(탭을 숨겨 polling 이 멈췄던 끊김)에서는 새 구간을 시작한다.
- * 3건 이상 이어진 구간이 있고, 2건 이상 이어진 구간에 든 요청이 기록의 70% 이상이면 그 구간의 요청이 주기다.
- * 간격이 불규칙하면 구간이 짧게 끊기고 건너뛴 요청이 많아 주기가 아니다.
  */
-export const periodicStarts = (starts: readonly number[]): boolean[] => {
-  const result = starts.map(() => false);
-  if (starts.length < PERIODIC_MIN_COUNT) return result;
-  const order = starts.map((_, i) => i).sort((a, b) => starts[a] - starts[b]);
-  const sorted = order.map((i) => starts[i]);
-  const period = median(sorted.slice(1).map((t, i) => t - sorted[i]));
-  if (period < PERIODIC_MIN_INTERVAL_MS) return result;
-  // 구간마다 정렬된 자리 목록
+const runsOf = (sorted: readonly number[], period: number): number[][] => {
   const runs: number[][] = [[0]];
   for (let i = 1; i < sorted.length; i++) {
     const run = runs[runs.length - 1];
@@ -75,17 +66,38 @@ export const periodicStarts = (starts: readonly number[]): boolean[] => {
     if (Math.abs(gap - period) <= period * PERIODIC_TOLERANCE) run.push(i);
     else if (gap > period) runs.push([i]);
   }
-  const periodic = runs.filter((run) => run.length >= 2);
-  const covered = periodic.reduce((n, run) => n + run.length, 0);
-  if (!periodic.some((run) => run.length >= PERIODIC_MIN_COUNT) || covered < sorted.length * PERIODIC_MIN_SHARE) return result;
-  periodic.forEach((run) => run.forEach((i) => (result[order[i]] = true)));
+  return runs;
+};
+
+const intervalsOf = (sorted: readonly number[]): number[] => sorted.slice(1).map((t, i) => t - sorted[i]);
+
+/**
+ * 같은 요청의 시작 시각 중 일정한 간격의 반복(대시보드 polling 같은 의도된 반복)에 든 것. 입력 순서대로 true/false 를 돌려준다.
+ * 간격 중앙값을 주기로 보고 구간을 잇는다(runsOf). 3건 이상 이어진 구간이 있고, 2건 이상 이어진 구간에 든 요청이 기록의 70% 이상이면
+ * 그 구간의 요청이 주기다. 간격이 불규칙하면 구간이 짧게 끊기고 건너뛴 요청이 많아 주기가 아니다.
+ * 구간 밖 요청끼리 또 3건 이상 일정하게 이어지면(10초 주기가 5초로 바뀜, 정리되지 않아 겹쳐 돈 interval) 박자가 바뀐 것이라 어느 것도 주기로 보지 않는다.
+ */
+export const periodicStarts = (starts: readonly number[]): boolean[] => {
+  const result = starts.map(() => false);
+  if (starts.length < PERIODIC_MIN_COUNT) return result;
+  const order = starts.map((_, i) => i).sort((a, b) => starts[a] - starts[b]);
+  const sorted = order.map((i) => starts[i]);
+  const period = median(intervalsOf(sorted));
+  if (period < PERIODIC_MIN_INTERVAL_MS) return result;
+  const periodic = runsOf(sorted, period).filter((run) => run.length >= 2);
+  const inRun = new Set(periodic.flat());
+  if (!periodic.some((run) => run.length >= PERIODIC_MIN_COUNT) || inRun.size < sorted.length * PERIODIC_MIN_SHARE) return result;
+  const rest = sorted.filter((_, i) => !inRun.has(i));
+  const restPeriod = rest.length >= PERIODIC_MIN_COUNT ? median(intervalsOf(rest)) : 0;
+  if (restPeriod >= PERIODIC_MIN_INTERVAL_MS && runsOf(rest, restPeriod).some((run) => run.length >= PERIODIC_MIN_COUNT)) return result;
+  inRun.forEach((i) => (result[order[i]] = true));
   return result;
 };
 
 /** 같은 요청이 일정한 간격으로 3번 이상 반복됐는지 */
 export const isPeriodic = (starts: readonly number[]): boolean => periodicStarts(starts).some(Boolean);
 
-export const isAborted = (record: RequestRecord | undefined): boolean => !!record?.error && /abort/i.test(record.error);
+export { isAborted };
 
 /** 주기 판정은 같은 페이지 로드 안에서만 한다. 새로고침 앞뒤를 한 줄로 보면 그 사이 간격 때문에 주기가 깨진다. */
 const periodicKeyOf = (r: RequestRecord): string => `${r.load ?? 0}|${requestKeyOf(r)}`;
@@ -109,18 +121,22 @@ const STRICT_ABORT_GAP_MS = 200;
 
 /**
  * 앞 요청이 취소된 중복이 StrictMode 재실행인가. 취소만으로는 확실하지 않다(React Query 는 마지막 관찰자가 빠지면 취소하고,
- * 겹친 무효화와 AbortController 를 쓰는 검색 입력도 앞 요청을 취소한다). 그래서 모두 맞을 때만 본다.
+ * 겹친 무효화, 이벤트 핸들러의 다시 받기(두 번 누름), AbortController 를 쓰는 검색 입력도 앞 요청을 취소한다). 그래서 모두 맞을 때만 본다.
  * - 두 요청의 시작 간격이 매우 짧다.
- * - 겹친 무효화가 앞 요청을 취소한 것이 아니다(React Query 점검의 double-invalidate 와 같은 요청을 가리킨다).
- * - 두 요청 사이에 다시 마운트되거나 의존성이 바뀌지 않았다. 같은 commit 이면 그 사이 언마운트가 있을 수 없다(재실행은 한 commit 의 effect 다).
- *   commit 이 다르면(await 뒤에 보내 그 사이 다른 commit 이 낌) 유휴 큐가 정한 반복 이유가 재마운트·의존성 변경이 아닐 때만 본다.
+ * - 이 요청을 취소한 겹친 무효화가 없다(React Query 점검의 double-invalidate 와 같은 cancelledBy 로 본다).
+ * - 두 요청이 같은 commit 순번에 속하고, 보낸 컴포넌트를 알고, 그 컴포넌트가 그 commit 에서 마운트됐다(유휴 큐가 sentOnMount 로 고정).
+ *   StrictMode 는 마운트할 때만 effect 를 두 번 돌린다. 핸들러가 연달아 보낸 두 요청도 같은 순번이라 순번만으로는 모자란다.
+ * 모르는 것(순번·컴포넌트·마운트 기록이 없음)은 근거가 아니다.
  */
-const abortedByStrictMode = (r: RequestRecord, prev: RequestRecord | undefined): boolean => {
-  if (!prev || !isAborted(prev) || inFlightAtOverlap(prev)) return false;
-  if (r.startedAt - prev.startedAt > STRICT_ABORT_GAP_MS) return false;
-  const sameCommit = r.commitSeq === undefined || prev.commitSeq === undefined || r.commitSeq === prev.commitSeq;
-  return sameCommit || (r.repeatCause?.kind !== 'remount' && r.repeatCause?.kind !== 'deps');
-};
+const abortedByStrictMode = (r: RequestRecord, prev: RequestRecord | undefined): boolean =>
+  !!prev &&
+  isAborted(prev) &&
+  !cancelledByOverlap(prev) &&
+  r.startedAt - prev.startedAt <= STRICT_ABORT_GAP_MS &&
+  r.commitSeq !== undefined &&
+  r.commitSeq === prev.commitSeq &&
+  !!r.component &&
+  r.sentOnMount === true;
 
 interface ClassifyContext {
   byId: ReadonlyMap<number, RequestRecord>;

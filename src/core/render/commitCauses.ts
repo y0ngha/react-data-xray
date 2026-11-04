@@ -4,6 +4,8 @@
 /** 한 commit 에서 한 컴포넌트 이름이 렌더된 기록. 같은 이름의 인스턴스가 여럿이면 합친다. */
 export interface CommitCause {
   seq: number;
+  /** 이 commit 에서 마운트됐다(이전 렌더 없음). StrictMode 는 마운트할 때만 effect 를 두 번 돌린다 */
+  mounted?: boolean;
   /** 이 commit 에서 다시 마운트됐다(언마운트 뒤 곧 다시 생김). parent 는 서브트리를 갈아 끼운 부모 */
   remount?: { parent: string; typeChanged: boolean };
   /** 이 commit 에서 처음 바뀐 effect 의존성. 마운트(이전 렌더 없음)는 없다 */
@@ -31,6 +33,7 @@ export const noteCommitCause = (name: string, at: number, change: Omit<CommitCau
   }
   const last = list.at(-1);
   if (last?.seq === at) {
+    last.mounted ||= change.mounted;
     last.remount ??= change.remount;
     last.deps ??= change.deps;
     return;
