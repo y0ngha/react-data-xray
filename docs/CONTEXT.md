@@ -225,6 +225,8 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 - StrictMode 재실행 확인은 effect 안에서 바로(await 전에) 요청을 보낼 때만 됩니다. await 뒤에 보내면 호출 스택에 React 함수가 남지 않아 중복으로 잡힙니다.
 - React Query의 structural sharing 때문에 다시 받아 온 데이터라도 바뀌지 않은 객체는 처음 요청이 출처로 표시됩니다.
 - 응답 경로가 `$`(응답 전체)인 매칭은 "이 API 어딘가"라는 뜻입니다. 요소를 누르면 누른 글자로 필드까지 좁히지만, 같은 값이 여러 곳에 있으면 좁히지 않습니다.
+- ESM 전용 패키지라 CJS 모드 Jest(babel-jest 기본 설정)는 불러오지 못합니다. `exports` 에 `default` 조건을 둬 해석은 되지만, `import.meta.url` 이 있어 `transformIgnorePatterns` 로 변환해도 CJS 로 실행되지 않습니다. README 에 `moduleNameMapper` 로 빈 모듈을 쓰는 방법을 적었습니다. CJS 빌드를 함께 내지 않는 것은 두 벌이 함께 로드되면 가로채기가 두 번 설치되기 때문입니다. `import.meta.url` 을 호출 스택에서 구한 값으로 바꾸면 변환은 되지만, 스택 형식이 엔진·번들러마다 달라(Firefox·Safari 는 첫 줄이 프레임, Node CJS 는 URL 이 아닌 경로, webpack eval 은 `webpack-internal://`, 앱이 `Error.stackTraceLimit = 0` 으로 두면 프레임 없음) rdx 자신의 프레임을 빼는 규칙이 틀어질 수 있어 두었습니다.
+- ESM 전용이라 `"type": "module"` 이 아닌 TypeScript CJS 프로젝트(`module: node16`)는 타입도 가져오지 못합니다(TS1479). 바꾸지 않았습니다.
 
 ## 7. 코드 구조
 
@@ -254,6 +256,8 @@ skills/rdx-perf/           AI 스킬(측정·결과 읽기·처방)
 ```
 
 품질 도구: oxlint(정적 검사), oxfmt(포맷), react-doctor(React 진단), vitest 커버리지(80% 이상). `pnpm check` 가 모두 돌립니다.
+
+`package.json` 의 `sideEffects` 는 `false` 가 아니라 모듈 최상위에서 설치하는 파일(`dist/index.js`, `dist/core/render/monitor.js`)의 목록입니다. `false` 면 Next.js `instrumentation-client.ts` 처럼 이름 없이 `import 'react-data-xray'` 만 둔 곳을 번들러가 지워, 요청 가로채기·렌더 감시가 조용히 꺼집니다(#61). production 은 설치 코드가 `NODE_ENV` 분기 안에 있어 목록과 상관없이 비워집니다. `pnpm check:side-effects`(CI)가 dist 의 최상위 문장을 읽어 목록과 맞는지, 단독 import 를 rolldown 으로 묶어 dev 에 남고 production 이 비는지 봅니다.
 
 ## 8. 개발 기록
 
