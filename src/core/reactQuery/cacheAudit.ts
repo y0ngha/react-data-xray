@@ -6,6 +6,7 @@ import { getOrigin } from '../requests/origins.js';
 import { requestKeyOf } from '../requests/requestKey.js';
 import { getRecords, lastRecordId, touchRecords } from '../requests/store.js';
 import type { Origin, RequestRecord } from '../requests/types.js';
+import { noteOverlapCancel, resetOverlapCancels } from './overlapCancel.js';
 import { isPinned, pinnedRefetchReason, pinReason, type RefetchReason } from './refetchReason.js';
 
 export type { RefetchReason } from './refetchReason.js';
@@ -180,6 +181,7 @@ let auditFrom = 0;
 /** 측정을 새로 시작한다(window.__RDX__.reset) */
 export const resetCacheAudit = (): void => {
   auditFrom = Date.now();
+  resetOverlapCancels();
 };
 
 const describeRequest = (r: RequestRecord): string => `${r.method} ${r.url}`;
@@ -326,6 +328,7 @@ const recordOverlap = (
       ),
     );
     if (first) {
+      noteOverlapCancel(now.at); // 요청 분류가 이 겹침으로 취소된 요청을 StrictMode 로 보지 않게
       const stack = callerStack(now.error);
       pushBounded(history.misses, {
         at: now.at,
