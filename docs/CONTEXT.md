@@ -113,6 +113,7 @@ React Query의 `QueryObserver`는 모양(`getCurrentResult`, `options.queryKey`)
 React DevTools와 같은 `__REACT_DEVTOOLS_GLOBAL_HOOK__`의 commit 이벤트로 컴포넌트별 렌더 횟수와 commit 시각을 셉니다.
 
 - react-dom은 로드될 때 이 훅에 등록하므로 rdx의 렌더 감시 모듈을 **react-dom보다 먼저** 평가합니다. React DevTools 확장이 없으면 최소한의 훅을 직접 만듭니다.
+- 순서가 틀리면 오류 없이 렌더 탭이 비고 앞선 요청이 빠지므로, 훅은 렌더 감시가 꺼져 있어도 받은 commit 을 셉니다. 진입 모듈을 평가하고(패널 없이 보고서만 쓰는 설정도) 또는 `<RdxDevtools>` 가 마운트되고 2초 뒤 유휴 큐에서, 앱이 그려졌는데 commit 이 0 건이거나 설치 전에 시작한 fetch·XHR(resource timing)이 있으면 콘솔에 한 번 고치는 방법(엔트리 맨 위, Next.js 는 `instrumentation-client.ts`)과 함께 알립니다(#75). 2초를 기다리는 것은 rdx 보다 먼저 나간 요청이 끝나야 resource 항목이 생기기 때문입니다. 앱이 아직 그려지지 않았으면 몇 번 더 보고, 문제마다 한 번만 경고합니다. 주기 업로드는 commit 수가 바뀐 것만으로는 다시 보내지 않습니다(패널 자신의 commit 에도 늘어서).
 - 부모가 bailout하면 자식 fiber는 지난 commit의 객체와 플래그가 그대로 남습니다. 같은 fiber 객체면 렌더하지 않은 것으로 봅니다.
 - 렌더 감시는 RDX 버튼이 붙어 있는 동안 켭니다. 패널을 닫아도 버튼이 렌더 폭주를 알려야 하기 때문입니다. commit 훅의 비용은 프로젝트 목록 화면에서 8초에 58ms 정도였습니다.
 - rdx 패널 자신의 렌더는 셈에서 뺍니다. 다만 패널의 메인 스레드 시간은 앱과 공유하므로, 렌더 탭은 요약을 유휴 큐에서 캐시해 계산하고 보이지 않을 때(패널 접힘, 다른 탭, 요청 상세가 덮을 때) 멈춥니다. 패널을 열어 둔 채 잰 체감 시간에는 rdx 몫이 섞일 수 있습니다.
@@ -176,6 +177,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 - **전후 비교.** `compare(전, 후)` 와 패널의 Compare 는 이 탭에서 저장한 두 보고서의 증감을 보여 주고 `.rdx/compare-<전>-<후>.json` 에도 남깁니다. 스냅샷은 최근 6개까지 탭에 둡니다. 측정 구간이 다르거나, 한쪽만 reset 뒤에 쟀거나, 한쪽에서 렌더 감시가 꺼져 있었으면 증감을 믿기 어려우므로 경고합니다. 플러그인이 없는 dev 서버에서는 파일 없이 탭에만 남깁니다.
 - **보내기 전 확인.** 플러그인이 없는 dev 서버는 `/__rdx/report` 를 원격 백엔드로 프록시할 수 있습니다(whatap-front 가 그렇습니다). 그래서 본문 없는 GET 으로 미들웨어 표시 헤더를 확인한 뒤에만 보냅니다. 미들웨어는 Host 를 로컬 이름·IP·`allowedHosts` 로 제한하고(DNS 리바인딩), Origin 을 포트까지 비교하며, 임시 파일에 쓴 뒤 이름을 바꿉니다.
 - **원본 위치.** 호출 스택의 http 프레임을 모듈의 `sourceMappingURL` 로 원본 위치(`src/api/client.ts:42`)로 바꿉니다. 세 모델 감사에서 "줄 번호가 원본과 다르다"가 공통 지적이었습니다.
+- **자가 점검.** `window.__RDX__.doctor()`, 패널 도구 막대의 Status, 보고서의 `diagnostics` 가 같은 값입니다: commit 수·React 버전·StrictMode, 가로채기 설치와 설치 전 요청 수, 기록한 요청과 출처를 등록한 JSON 응답 수, 보고서 플러그인 상태, 소스맵 실패 수, 같은 응답 판정 메모리, 찾은 문제와 고치는 방법. 이미 있는 카운터와 import 순서 판정 결과만 읽고 큐를 비우지 않습니다(resource timing·DOM 을 다시 훑지 않고, StrictMode 는 기록한 앱 렌더의 fiber 모드 비트로 봅니다). 도구 막대 버튼의 문제 수는 렌더마다 싼 값만 셉니다. 빈 상태 문구(연결된 응답 없음, 렌더 없음)도 이 값으로 이유를 붙입니다. 문구는 `core/diagnostics/messages.ts` 한곳에 두어 언어 선택(#45) 때 바꿉니다(#76).
 - **브라우저 없이 부르기(#69).** 브라우저 도구가 없는 에이전트도 reset → 시나리오 → snapshot → compare 를 혼자 돌리도록 `react-data-xray` CLI(`reset`·`snapshot`·`compare`·`report`·`tabs`, 앱 안에서는 별칭 `rdx`)와 같은 도구를 내는 stdio MCP 서버(`react-data-xray mcp`)를 둡니다. 주 실행 파일 이름을 패키지 이름으로 둔 것은 npm 의 `rdx` 가 다른 패키지라 앱 폴더 밖의 `npx rdx` 가 그것을 받아 실행하기 때문입니다. CLI 가 `POST /__rdx/command` 로 명령을 맡기면 dev 서버가 탭별로 메모리에 두고(받아 가지 않으면 CLI 의 `--timeout` + 10초 뒤 버림. 받아 간 명령은 그 탭이 계속 알리는 동안 버리지 않음), 탭은 업로드·받아 가기의 응답으로 받아 `window.__RDX__` 의 reset·snapshot 을 그대로 부른 뒤 `POST /__rdx/report?command=<id>` 로 결과를 알립니다. CLI 는 `GET /__rdx/command/<id>` 로 기다립니다.
   - 받는 쪽은 업로드 주기를 그대로 씁니다. 보고서가 그대로라 올리지 않는 주기에는 본문 없는 `GET /__rdx/report?tab=` 로 받아 가며, 명령이 없으면 204 라 아무것도 읽지 않습니다. CLI·MCP 를 쓰지 않을 때는 1분에 한 번만 받아 가고, 명령 경로에 요청이 오면 dev 서버가 10분 동안 응답에 `x-rdx-cli` 를 붙여 5초마다 받아 가게 합니다. 쓰지 않는 사용자의 dev 서버로 5초마다 요청이 나가지 않게 하려는 것이고, 대신 첫 명령은 최대 1분 늦습니다. 앱 경로 비용은 없습니다. Vite 의 `server.ws` 로 바로 보내는 안은 webpack·Next 에 없는 길이라 두지 않았고, 오래 걸어 두는 요청(long-poll)은 HTTP/1 의 호스트당 연결 6개 중 하나를 계속 차지해 뺐습니다. 오래 가려진 탭은 브라우저가 타이머를 1분에 한 번으로 늦추므로 TTL 과 CLI 대기 기본값을 1분보다 길게(90초) 둡니다.
   - 탭이 받아 가는 길을 보고서 경로에 둔 것은 Next 가 route 파일마다 따로 붙기 때문입니다. 명령 route 를 두지 않은 앱도 탭은 404 페이지를 5초마다 그리지 않습니다. CLI 쪽만 `app/%5F_rdx/command/[[...id]]/route.ts` 가 필요하고, Next dev 는 route 마다 모듈을 따로 평가하므로 큐는 `globalThis` 에 둡니다.
@@ -218,6 +220,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 | 관점: 렌더 | 최근 10초(reset 했으면 그 뒤 최대 2분) 렌더를 컴포넌트 이름별로 묶어 횟수, 자기 렌더 시간, 이유별 횟수와 고치는 방법, 렌더를 시작한 조상, 그리는 JSX 위치, 네트워크 원인(같은 응답으로 일어난 렌더 포함), 쓰는 API 의 낭비 지표. 대상이 있으면 그 안만 |
 | 요청 상세 | rdx 가 보여 주는 모든 요청을 클릭하면 열립니다. Query, Request/Response Headers, Body(정렬, 복사), 요청을 보낸 코드(소스맵으로 원본 위치), 이 요청의 데이터를 쓰는 컴포넌트 |
 | 측정: `Measure` | 평소에는 접어 두고, 누르면 둘째 줄에 Clear records → Save → Compare → Copy report path 를 측정 순서대로 펼칩니다. 접혀 있어도 마지막 reset 시각은 `Measure` 옆에 보입니다. 저장·복사 성공 문구는 4초 뒤 사라지고 실패 문구는 남습니다. |
+| `Status` | rdx 가 제대로 붙었는지(`window.__RDX__.doctor()` 와 같은 값)를 셋째 줄에 펼칩니다. 접혀 있어도 찾은 문제가 있으면 버튼에 수를 답니다(4.9). |
 | 창: 표시 방식 | Chrome DevTools 도킹처럼 작게 보기, 하단 도킹, 오른쪽 도킹, 별도 창 중에서 고르고 기억합니다. 도킹을 직접 고른 적이 없으면 앱 모달이 열릴 때 패널을 모달과 겹치지 않는 자리로 옮기고, 이 자동 이동은 사용자 선택으로 저장하지 않습니다. |
 | 탭 단위 유지 | 새로고침이나 앱 코드 수정으로 페이지가 다시 열려도 같은 탭이면 패널 열림·박스·관점과 요청 기록이 이어집니다(4.9). |
 
@@ -257,6 +260,7 @@ src/
   core/inspect/            정확·파생·글자 매칭, 요소 검사, 전체 표시 박스, 요청을 쓰는 컴포넌트 찾기
   core/render/             DevTools 훅, 렌더 이유, 네트워크 원인, 렌더를 시작한 조상, 렌더 감시, 마운트 이력, 요약·그룹·조언
   core/reactQuery/         React Query 캐시키 점검(QueryCache 구독, 무효화 감시), 재조회·fetch 원인
+  core/diagnostics/        자가 점검(doctor·import 순서 경고·빈 상태 이유)과 그 문구
   core/report/             AI 용 보고서 만들기, window.__RDX__(report·reset·snapshot·compare), 보고서 비교, dev 서버로 보내기
   server/                  dev 서버 쪽: 보고서 미들웨어, Vite 플러그인, Next route, 명령 큐
   cli/                     rdx CLI 와 stdio MCP 서버(라이브러리에서 import 하지 않는다)
