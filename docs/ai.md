@@ -35,7 +35,12 @@ export default {
 };
 ```
 
-There is currently no way to attach the plugin to a Next.js dev server; use `window.__RDX__` instead.
+```ts
+// Next.js App Router: app/%5F_rdx/report/route.ts (src/app/... if you use a src folder)
+export { GET, POST } from 'react-data-xray/next';
+```
+
+Next.js treats folders starting with `_` as private and leaves them out of routing, so the first `_` of `__rdx` is written as `%5F` (`%5F_rdx`); the route still answers at `/__rdx/report`. It only answers under `next dev` and returns 404 in `next build`/`next start`. Apps with a `basePath` are not supported yet (the browser sends to `/__rdx/report`).
 
 Add one line to your AI instruction file (`CLAUDE.md`, etc.): `Before fixing a performance or request problem, read .rdx/report.json.`
 
@@ -61,6 +66,6 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 
 - `snapshot(name)`: name may contain letters, digits, and `. _ -`, up to 64 characters; `report` is reserved. Rejected if the plugin is not running.
 - Security: to prevent other sites from injecting fake reports, the plugin accepts requests only from `localhost`, `*.localhost`, and IP addresses. For other hostnames use `rdx({ allowedHosts: ['my-app.local'] })`. Vite reuses `server.allowedHosts` automatically.
-- Options: `rdx({ dir: '.rdx', allowedHosts: [...] })`, `rdxReportMiddleware(root, { dir, allowedHosts })`.
+- Options: `rdx({ dir: '.rdx', allowedHosts: [...] })`, `rdxReportMiddleware(root, { dir, allowedHosts })`, `export const { GET, POST } = createRdxReportRoute(root, { dir, allowedHosts })` from `react-data-xray/next`.
 
 </details>

@@ -110,6 +110,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
+AI 에이전트가 `.rdx/report.json` 을 읽게 하려면([AI 에이전트와 함께 쓰기](./docs/ai.md)) route 파일 하나를 더합니다. Next.js 는 `_` 로 시작하는 폴더를 라우팅에서 빼므로 첫 `_` 를 `%5F` 로 씁니다. 주소는 그대로 `/__rdx/report` 이고 `next dev` 에서만 답합니다.
+
+```ts
+// src/app/%5F_rdx/report/route.ts
+export { GET, POST } from 'react-data-xray/next';
+```
+
 </details>
 
 ### 3. 써 보기
