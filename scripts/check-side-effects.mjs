@@ -39,6 +39,8 @@ const PURE_CALLS = new Set([
   'memo',
   'lazy',
 ]);
+// 템플릿 태그로 써도 순수한 함수(PURE_CALLS 중 태그로 쓰는 것)
+const PURE_TAGS = new Set(['String.raw']);
 // 받는 값이 배열이면 새 배열을 만들 뿐인 메서드. 받는 값의 종류는 모르므로 이름으로만 본다.
 const PURE_ARRAY_METHODS = new Set(['map', 'flatMap', 'filter', 'slice', 'concat', 'join']);
 const PURE_NEW = new Set(['Map', 'Set', 'WeakMap', 'WeakSet', 'Error', 'RegExp']);
@@ -73,7 +75,9 @@ const effectsIn = (node, out = []) => {
   if (typeof node.type !== 'string') return out;
   if (FUNCTIONS.has(node.type)) return out;
   if (node.type === 'ClassExpression' || node.type === 'ClassDeclaration') return effectsIn(node.superClass, out);
-  if (EFFECTS.has(node.type)) out.push(node.type);
+  // String.raw`…` 는 String.raw(…) 호출과 같다. 태그만 보고, 템플릿 안의 식은 아래에서 따로 본다.
+  const pureTag = node.type === 'TaggedTemplateExpression' && PURE_TAGS.has(calleeName(node.tag));
+  if (EFFECTS.has(node.type) && !pureTag) out.push(node.type);
   else if (node.type === 'UnaryExpression' && node.operator === 'delete') out.push('delete');
   else if (node.type === 'CallExpression' && !isPureCall(node.callee)) out.push(`${calleeName(node.callee) ?? '(식)'}() 호출`);
   else if (node.type === 'NewExpression' && !PURE_NEW.has(calleeName(node.callee))) out.push(`new ${calleeName(node.callee) ?? '(식)'}`);
@@ -124,10 +128,13 @@ const SELF_TEST = [
   ['export default (a, b);', true],
   ['class A extends mixin() {}', true],
   ['if (dev) install();', true],
+  ['const r = tag`a${1}`;', true],
+  ['const r = String.raw`a${install()}`;', true],
   ["'use client';\n'use strict';", false],
   ["const K = Symbol.for('k'); const m = new Map(); const s = new Set(['a']);", false],
   ['export const f = () => install(); export default function g() { install(); }', false],
   ['export default f;', false],
+  ["const S = String.raw`\\s`; const R = new RegExp(String.raw`a${S}b`, 'g');", false],
   ["const D = new Map([...'ab'].map((c, i) => [c, i]));", false],
   ['const C = createContext(null); export const P = memo(function P() { return install(); });', false],
 ];

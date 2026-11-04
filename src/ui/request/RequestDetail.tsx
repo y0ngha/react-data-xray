@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 
 import { queryContextOf } from '../../core/capture/queryContext.js';
 import { followUps } from '../../core/requests/followUps.js';
+import { cacheBusterParams } from '../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { prettyText, queryParamsOf, truncate, valueAt } from '../../shared/format.js';
 import { Button } from '../components/Button.js';
@@ -104,6 +105,14 @@ const FollowUps = ({ record }: { record: RequestRecord }) => {
   );
 };
 
+// 같은 요청 판정에서 뺀 파라미터를 밝힌다. 빼지 않았다면 중복·같은 응답이 하나도 잡히지 않았을 것이다.
+const CacheBusterNote = ({ record }: { record: RequestRecord }) => {
+  const names = cacheBusterParams(record);
+  return names.length ? (
+    <Muted>Ignored when matching identical requests (value is the request time, cache-buster): {names.join(', ')}</Muted>
+  ) : null;
+};
+
 /** 요청 상세: 컴포넌트가 쓰는 데이터, 쓰는 컴포넌트, 보낸 코드, Query, 헤더, 본문 */
 export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord; focus?: Focus; onBack: () => void }) => (
   <div>
@@ -126,6 +135,7 @@ export const RequestDetail = ({ record, focus, onBack }: { record: RequestRecord
     {record.stack && <StackSection stack={record.sourceStack ?? record.stack} />}
     <Section title="Query">
       <KeyValues values={queryParamsOf(record.url)} />
+      <CacheBusterNote record={record} />
     </Section>
     <Section title="Request Headers">
       <KeyValues values={record.requestHeaders} />
