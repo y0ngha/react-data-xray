@@ -18,8 +18,20 @@ const lastStartByRequest = new Map<string, { id: number; startedAt: number; comm
 // 응답 원문 대신 길이·해시만 남긴다(#65). 원문을 두면 큰 응답 × 500키가 그대로 힙에 남는다.
 const lastResponseByRequest = new Map<string, { id: number; digest: ResponseDigest }>();
 
-/** 테스트용: 판정을 위해 남긴 값 */
-export const responseMemoryForTest = (): ReadonlyMap<string, { id: number; digest: ResponseDigest }> => lastResponseByRequest;
+const charsIn = (value: unknown): number => {
+  if (typeof value === 'string') return value.length;
+  if (typeof value !== 'object' || value === null) return 0;
+  return Object.values(value).reduce((n: number, v) => n + charsIn(v), 0);
+};
+
+/**
+ * 같은 응답 판정이 붙들고 있는 메모리 진단: 요청 키 수와, 남긴 값 안의 문자열 글자 수(원문을 남기지 않으므로 0 이어야 한다).
+ * 자가 점검(#76 doctor)이 판정용 메모리가 키 수에 비례하는 작은 크기인지 확인할 때 쓴다.
+ */
+export const sameResponseMemory = (): { keys: number; retainedChars: number } => ({
+  keys: lastResponseByRequest.size,
+  retainedChars: [...lastResponseByRequest.values()].reduce((n, entry) => n + charsIn(entry), 0),
+});
 
 /** 2초 안에 같은 요청이 다시 나갔으면 앞선 요청(id 와 그 요청을 만들 때의 commit 순번). payload 를 모르면 판정하지 않는다. */
 export const detectDuplicate = (record: RequestRecord): { id: number; commitSeq?: number } | undefined => {

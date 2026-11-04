@@ -3,7 +3,7 @@ import { registerOrigins } from './origins.js';
 import { currentCommitSeq } from '../render/commitCauses.js';
 import { repeatCauseStep } from './repeatCause.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
-import { createResponseHasher } from './responseHash.js';
+import { createResponseHasher, digestOf, HASH_CHUNK } from './responseHash.js';
 import type { RequestRecord } from './types.js';
 
 const MAX_RECORDS = 200;
@@ -113,14 +113,18 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
 
 /** 응답 원문을 상세 화면용으로 보관하고, 같은 요청의 직전 응답과 비교한다. */
 export const keepResponseText = (record: RequestRecord, text: string, { compare }: { compare: boolean }): void => {
+  // payload 를 모르는 요청은 detectSameResponse 가 판정하지 않으므로 해시도 하지 않는다.
+  const judge = compare && !record.bodyUnreadable;
+  const short = text.length <= HASH_CHUNK;
   enqueue(() => {
     if (isStale(record)) return true;
     record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (truncated after 100KB)` : text;
+    if (judge && short) record.sameResponseAs = detectSameResponse(record, digestOf(text));
     notify();
     return true;
   });
-  if (!compare) return;
-  // 큰 응답은 해시를 여러 조각에 나눠 계산한다. 큐는 앞 step 이 끝나야 다음으로 넘어가므로 판정 순서는 그대로다.
+  if (!judge || short) return;
+  // 큰 응답은 해시를 여러 조각에 나눠 계산한다. 큐는 앞 step 이 끝나야 다음으로 넘어가므로, 그동안 뒤의 일은 기다리고 판정 순서는 그대로다.
   const hasher = createResponseHasher(text);
   enqueue(() => {
     if (isStale(record)) return true;
