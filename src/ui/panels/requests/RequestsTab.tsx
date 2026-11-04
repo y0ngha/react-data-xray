@@ -4,6 +4,7 @@ import { getEndpointStats, type EndpointStat } from '../../../core/requests/endp
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Button } from '../../components/Button.js';
+import { Muted } from '../../components/Muted.js';
 import { useRequestActions } from '../../contexts.js';
 import { useFocusedItem } from '../../viewState.js';
 import { color } from '../../theme.js';
@@ -19,6 +20,34 @@ interface RequestsTabProps {
   ignored: ReadonlySet<string>;
   onToggleIgnore: (endpoint: string) => void;
 }
+
+/**
+ * 무시로 저장했지만 지금 기록의 어느 엔드포인트와도 맞지 않는 키. 엔드포인트 이름 규칙이 바뀐 옛 키(`POST /graphql` 처럼
+ * 지금은 연산별로 나뉜 것)는 줄이 없어 풀 수 없으므로 여기서 지운다. 비교는 지금처럼 정확히 같은 이름끼리다.
+ */
+const UnseenIgnored = ({ ignored, stats, onToggleIgnore }: Pick<RequestsTabProps, 'ignored' | 'stats' | 'onToggleIgnore'>) => {
+  const seen = new Set(stats.map((s) => s.endpoint));
+  const unseen = [...ignored].filter((e) => !seen.has(e));
+  if (!unseen.length) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <Muted>Ignored but not seen in current requests</Muted>
+      {unseen.map((endpoint) => (
+        <div key={endpoint} style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
+          <span
+            title={endpoint}
+            style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: color.muted }}
+          >
+            {endpoint}
+          </span>
+          <Button subtle onClick={() => onToggleIgnore(endpoint)} title="Remove from the ignore list">
+            Remove
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 /** 네트워크 › 요청: 엔드포인트별 지표와 전체 기록. 엔드포인트를 누르면 그 요청만 기록에 보여 준다. */
 export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: RequestsTabProps) => {
@@ -84,6 +113,7 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
             onToggleIgnore={onToggleIgnore}
           />
         ))}
+      {view === 'endpoints' && <UnseenIgnored ignored={ignored} stats={stats} onToggleIgnore={onToggleIgnore} />}
       {view === 'log' && logs.map((record) => <RequestLogRow key={record.id} record={record} />)}
     </div>
   );
