@@ -5,9 +5,8 @@ import type { Box } from '../../core/inspect/types.js';
 import { getRenderInfo, subscribeCommits } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
 import type { RequestRecord } from '../../core/requests/types.js';
-import { isWaste } from '../../core/requests/classify.js';
 import { pathOf, requestKeyOf } from '../../core/requests/requestKey.js';
-import { getEndpointStats, statSummary, type EndpointStat } from '../../core/requests/endpointStats.js';
+import { getEndpointStats, isWastefulStat, statSummary, type EndpointStat } from '../../core/requests/endpointStats.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import { FixedRect } from '../components/FixedRect.js';
 import { useRequestActions } from '../contexts.js';
@@ -182,7 +181,7 @@ interface SourceBoxProps {
 
 /** 박스 하나. 처음 모양만 React 로 그리고, 위치·렌더 표시는 useBoxPainter 가 고친다. */
 const SourceBox = memo(function SourceBox({ box, waste, onOpen, register }: SourceBoxProps) {
-  // 같은 엔드포인트의 다른 호출이 아니라, 이 데이터를 준 요청 자체가 낭비였을 때만 빨갛게 그린다.
+  // 라벨 지표와 같은 근거(같은 요청의 기록 중 낭비가 있는지)로 빨갛게 그린다.
   const boxColor = waste ? color.warn : MATCH_COLOR[box.hit.match];
   const ref = useCallback((el: HTMLDivElement | null) => register(box, el), [box, register]);
   return (
@@ -231,14 +230,16 @@ export const SourceOverlay = ({
   classes: ReadonlyMap<number, RequestClass>;
 }) => {
   // 박스 하나는 쿼리·본문까지 같은 요청 하나를 가리키므로, 지표도 같은 요청별로 센다(page=1 과 page=2 를 섞지 않게).
+  // 색도 이 지표로 정한다. structural sharing 은 응답이 같으면 첫 객체를 두므로 출처는 늘 첫 요청(ok)이라,
+  // 출처 하나의 분류만 보면 같은 응답 재요청이 쌓여도 초록으로 남는다(#64).
   const stats = useMemo(() => new Map(getEndpointStats(records, classes, requestKeyOf).map((s) => [s.endpoint, s])), [records, classes]);
   const statOf = useCallback((record: RequestRecord) => stats.get(requestKeyOf(record)), [stats]);
   const register = useBoxPainter(statOf);
-  const { open, classOf } = useRequestActions();
+  const { open } = useRequestActions();
   return (
     <>
       {boxes.map((box) => (
-        <SourceBox key={box.id} box={box} waste={isWaste(classOf(box.hit.record))} onOpen={open} register={register} />
+        <SourceBox key={box.id} box={box} waste={isWastefulStat(statOf(box.hit.record))} onOpen={open} register={register} />
       ))}
     </>
   );
