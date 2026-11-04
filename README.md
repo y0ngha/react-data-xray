@@ -202,6 +202,14 @@ If you use Claude Code, copy the [`rdx-perf`](./skills/rdx-perf/SKILL.md) skill 
 - If a response is transformed with `map` or similar before being put into state, RDX cannot match the same object, so it attributes a state change that happens right after a response to that response. An unrelated render that coincides may be attached.
 - Caller code file locations are shown only with dev servers that serve files individually, like Vite. With webpack or Turbopack, search by function name instead.
 - The JSX location that caused a render is available only in dev builds. In React 19, the dev server transforms source and then maps lines back via source maps, so the transformed line may appear briefly before the source map arrives.
+- The package is ESM only. Vitest and Jest in ESM mode load it as is. Jest in its default CommonJS mode (babel-jest) cannot load it, so a component test that renders `<RdxDevtools />` fails. Since tests don't need RDX, map it to an empty module:
+
+  ```js
+  // jest.config.js
+  moduleNameMapper: { '^react-data-xray$': '<rootDir>/test/rdx-mock.js' },
+  // test/rdx-mock.js
+  module.exports = { RdxDevtools: () => null };
+  ```
 
 ## Contributing
 

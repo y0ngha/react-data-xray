@@ -224,6 +224,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 - StrictMode 재실행 확인은 effect 안에서 바로(await 전에) 요청을 보낼 때만 됩니다. await 뒤에 보내면 호출 스택에 React 함수가 남지 않아 중복으로 잡힙니다.
 - React Query의 structural sharing 때문에 다시 받아 온 데이터라도 바뀌지 않은 객체는 처음 요청이 출처로 표시됩니다.
 - 응답 경로가 `$`(응답 전체)인 매칭은 "이 API 어딘가"라는 뜻입니다. 요소를 누르면 누른 글자로 필드까지 좁히지만, 같은 값이 여러 곳에 있으면 좁히지 않습니다.
+- ESM 전용 패키지라 CJS 모드 Jest(babel-jest 기본 설정)는 불러오지 못합니다. `exports` 에 `default` 조건을 둬 해석은 되지만, `import.meta.url` 이 있어 `transformIgnorePatterns` 로 변환해도 CJS 로 실행되지 않습니다. README 에 `moduleNameMapper` 로 빈 모듈을 쓰는 방법을 적었습니다. CJS 빌드를 함께 내지 않는 것은 두 벌이 함께 로드되면 가로채기가 두 번 설치되기 때문입니다.
 
 ## 7. 코드 구조
 
