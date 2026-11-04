@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { isWastefulStat } from '../core/requests/endpointStats.js';
 import type { RequestRecord } from '../core/requests/types.js';
 import { RequestActionsProvider, type Focus, type RequestActions } from './contexts.js';
 import { BUTTON_SIZE, FloatingButton } from './FloatingButton.js';
@@ -53,8 +52,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
-  const wasteNames = useMemo(() => analysis.stats.filter(isWastefulStat).map((s) => s.endpoint), [analysis.stats]);
-  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.wasteCount, wasteNames);
+  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.stats);
   const { open, show, hide, popup, settings, updateDock, saveDock, changeDock } = usePanelVisibility();
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
   const portal = useOwnLayerPortal();

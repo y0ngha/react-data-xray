@@ -136,7 +136,8 @@ const depthOf = (fiber: unknown): number => {
 };
 
 // 시작한 컴포넌트는 그룹 키(이름 + 위치)로 모은다. 기록이 없으면 이름만으로 본다.
-const keyOfOrigin = (o: NonNullable<RenderEvent['origin']>): string => (o.from ? keyOf(o.from as RenderEntry) : locationKey(o.name));
+const keyOfOrigin = (o: NonNullable<RenderEvent['origin']>): string =>
+  o.from ? renderGroupKey(o.from as RenderEntry) : locationKey(o.name);
 
 /**
  * 렌더를 시작한 컴포넌트별로, 하위가 얼마나 따라 렌더됐고 그중 값이 실제로 바뀐 props 는 무엇인지 모은다.
@@ -205,15 +206,17 @@ export const originImpacts = (renders: ReadonlyArray<RenderEntry>, since: number
 
 const locationKey = (name: string, location?: string): string => `${name}|${location ?? ''}`;
 
-/** 앱 컴포넌트는 이름 + 그리는 위치, 라이브러리 컴포넌트는 패키지 + 이름 + 그린 앱 컴포넌트로 나눈다. */
-const keyOf = (e: RenderEntry): string =>
+/** 앱 컴포넌트는 이름 + 그리는 위치, 라이브러리 컴포넌트는 패키지 + 이름 + 그린 앱 컴포넌트로 나눈다. 렌더 폭주도 이 키로 센다(`core/problems.ts`). */
+export const renderGroupKey = (e: Pick<RenderEntry, 'name' | 'location' | 'package' | 'owner'>): string =>
   e.package
     ? `${e.package}|${locationKey(e.name)}|${locationKey(e.owner?.name ?? '', e.owner?.location)}`
     : locationKey(e.name, e.location);
 
 /** 라이브러리 그룹을 그린 앱 컴포넌트 그룹 아래로 접는다. 그 앱 그룹이 없으면 그대로 둔다. */
 const foldLibraries = (groups: Map<string, RenderGroup>, renders: ReadonlyArray<RenderEntry>): RenderGroup[] => {
-  const ownerKeys = new Map(renders.filter((e) => e.package).map((e) => [keyOf(e), locationKey(e.owner?.name ?? '', e.owner?.location)]));
+  const ownerKeys = new Map(
+    renders.filter((e) => e.package).map((e) => [renderGroupKey(e), locationKey(e.owner?.name ?? '', e.owner?.location)]),
+  );
   return Array.from(groups.entries())
     .filter(([key, g]) => {
       const owner = g.package && groups.get(ownerKeys.get(key) ?? '');
@@ -238,7 +241,7 @@ export function* groupRendersSteps(renders: ReadonlyArray<RenderEntry & RenderSu
   const grouped = new Map<string, RenderGroup>();
   for (let i = 0; i < renders.length; i++) {
     const e = renders[i];
-    const key = keyOf(e);
+    const key = renderGroupKey(e);
     const g = grouped.get(key);
     grouped.set(key, g ? merge(g, e) : { ...e, key, instances: 1 });
     if ((i + 1) % GROUP_CHUNK === 0) yield;

@@ -85,6 +85,26 @@ const diffBy = <T, K extends string, N extends string>(
   return out;
 };
 
+/**
+ * 한 보고서는 `POST /graphql` 한 줄인데 다른 보고서는 `POST /graphql (GetUser)` 처럼 나뉘어 있으면 엔드포인트 이름 규칙이
+ * 바뀐 것이다(rdx 버전 차이). 그대로 두면 removed·added 로만 보여 줄어든 것처럼 읽힌다.
+ */
+const endpointNames = (r: ComparableReport): Set<string> => new Set(r.requests.endpoints.map((e) => e.endpoint));
+
+const hasVariant = (names: Set<string>, endpoint: string): boolean => [...names].some((n) => n.startsWith(`${endpoint} (`));
+
+/**
+ * bare 에만 있는 엔드포인트 중 other 에서는 괄호 접미사로 나뉜 것. bare 쪽에도 나뉜 줄이 있으면 같은 규칙으로 잰 것이다
+ * (이름 없는 연산만 접미사 없이 남는다).
+ */
+const splitIn = (bare: Set<string>, other: Set<string>): string[] =>
+  [...bare].filter((e) => !other.has(e) && !hasVariant(bare, e) && hasVariant(other, e));
+
+const splitEndpoints = (a: ComparableReport, b: ComparableReport): string[] => {
+  const [x, y] = [endpointNames(a), endpointNames(b)];
+  return [...new Set([...splitIn(x, y), ...splitIn(y, x)])];
+};
+
 const findingId = (f: ComparableReport['reactQuery']['findings'][number]): string => `${f.kind} ${f.keys.join(', ')}`;
 
 /** 저장한 두 보고서(a: 전, b: 후)의 차이. 양수는 b 에서 늘어난 것이다. */
@@ -103,6 +123,9 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
     const afterStr = rb !== null ? formatTime(rb) : 'none';
     warnings.push(`only one report was measured after a reset (before: ${beforeStr}, after: ${afterStr})`);
   }
+  splitEndpoints(a, b).forEach((e) =>
+    warnings.push(`endpoint naming changed for ${e} (one report splits it into "${e} (…)" rows; likely different rdx versions)`),
+  );
   const before = new Set(a.reactQuery.findings.map(findingId));
   const after = new Set(b.reactQuery.findings.map(findingId));
   return {

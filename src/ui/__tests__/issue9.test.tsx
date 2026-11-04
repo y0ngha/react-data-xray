@@ -60,8 +60,15 @@ it('문제가 없으면 내역을 열지 않는다', () => {
 
 it('useProblemSignal 이 낭비 엔드포인트 이름을 개수와 함께 돌려준다', () => {
   vi.useFakeTimers();
-  const { result } = renderHook(() => useProblemSignal([], () => 'ok', 2, ['GET /a', 'GET /b']));
+  const { result } = renderHook(() =>
+    useProblemSignal([], () => 'ok', [
+      { endpoint: 'GET /a', duplicates: 1, sameResponses: 0 },
+      { endpoint: 'GET /b', duplicates: 0, sameResponses: 2 },
+      { endpoint: 'GET /ok', duplicates: 0, sameResponses: 0 },
+    ]),
+  );
   expect(result.current.wasteEndpoints).toEqual(['GET /a', 'GET /b']);
+  expect(result.current.issues).toBe(2);
   expect(result.current.stormingNames).toEqual([]);
   act(() => void vi.advanceTimersByTime(1000));
 });

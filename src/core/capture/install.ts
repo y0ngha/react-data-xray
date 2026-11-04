@@ -2,6 +2,7 @@ import { interceptFetch } from './fetchInterceptor.js';
 import { keepNativeFetch } from './nativeFetch.js';
 import { interceptJsonParse } from './jsonParseInterceptor.js';
 import { trackRefetchTriggers } from './requestContext.js';
+import { trackNavigation } from './navigation.js';
 import { interceptRequestOrigins } from './requestOrigins.js';
 import { interceptXhr } from './xhrInterceptor.js';
 import { onActionNames } from '../requests/serverActionNames.js';
@@ -14,6 +15,7 @@ export const installCapture = (): void => {
   if (installed || typeof window === 'undefined') return;
   installed = true;
   trackRefetchTriggers();
+  trackNavigation();
   // fetch·XHR 이 없는 환경(Jest + jsdom 등)에서도 import 만으로 깨지지 않게, 있는 것만 감싼다.
   if (typeof window.fetch === 'function' && typeof Response !== 'undefined') {
     keepNativeFetch(window.fetch.bind(window));
