@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { findQueryClients } from '../../core/reactQuery/cacheAudit.js';
 import { getTopRenders } from '../../core/render/monitor.js';
 import { RENDER_STORM } from '../../core/render/types.js';
-import { classifyBursts } from '../../core/requests/bursts.js';
+import { analyzeBursts, BURST_WINDOW_MS, type BurstWindow } from '../../core/requests/bursts.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { useInterval } from './useInterval.js';
@@ -14,7 +14,7 @@ const TICK_MS = 1000;
 const FIND_CLIENTS_EVERY = 5;
 // 버튼을 깜빡이게 할 "방금" 의 범위
 const RECENT_MS = 2000;
-// 몰림이 끝나고 이만큼 지난 뒤에 판정한다(몰림 뒤에 오는 화면 이동을 기다린다, 화면 진입의 1초 앞 창과 같다).
+// 응답이 끝나고 이만큼 지난 뒤에 판정한다(응답 뒤에 오는 화면 이동을 기다린다, 화면 진입의 응답 뒤 1초 창과 같다).
 const SETTLE_MS = 1000;
 
 /** 지금 렌더 폭주(최근 10초에 RENDER_STORM 번 이상) 중인 컴포넌트 이름 */
@@ -25,18 +25,43 @@ const stormingNames = (now: number): Set<string> =>
       .map((e) => e.name),
   );
 
+/** 최근 판정에 쓸 기록. 판정할 창의 요청이 빠지지 않게, 최근에 끝난 요청의 가장 이른 시작보다 창 하나만큼 앞부터 둔다. */
+const recentRecords = (records: readonly RequestRecord[], now: number): RequestRecord[] => {
+  const horizon = now - RECENT_MS - SETTLE_MS - BURST_WINDOW_MS;
+  let cutoff = Infinity;
+  for (const r of records) if (r.startedAt + r.durationMs >= horizon) cutoff = Math.min(cutoff, r.startedAt);
+  return records.filter((r) => r.startedAt >= cutoff - BURST_WINDOW_MS);
+};
+
 /**
- * 방금 끝난 요청 몰림의 끝 시각. 화면 진입(페이지 첫 로딩·화면 이동) 몰림과, 이유가 확실한 반복(무시·StrictMode)은 뺀다.
- * 몰림이 끝나고 1초가 지난 뒤에 판정한다. 주소를 바꾸기 전에 데이터를 받는 라우터는 몰림 뒤에 이동하므로,
- * 바로 판정하면 진입 몰림에 버튼이 깜빡인다. 그래서 낭비 몰림 알림은 최대 1초 늦다.
+ * 지금 알릴 낭비 창. 화면 진입 창과 이유가 확실한 반복(무시·StrictMode)은 빼고 500ms 창 단위로 본다.
+ * - 창의 응답이 모두 끝나고 1초가 지났다. 응답을 받은 뒤 주소를 바꾸는 데이터 라우터의 이동을 기다린다(알림은 최대 1초 늦다).
+ * - 또는 창이 시작하고 1초가 지났고 몰림이 1초 넘게 이어진다. 끝나지 않는 반복도 1~2초 안에 알린다.
  */
-const latestBurstEnd = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass, now: number): number =>
-  Math.max(
-    0,
-    ...classifyBursts(records, classOf)
-      .filter((b) => !b.entry && now - b.to >= SETTLE_MS && now - b.to <= SETTLE_MS + RECENT_MS)
-      .map((b) => b.to),
-  );
+const wasteWindowsToAlert = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass, now: number): BurstWindow[] =>
+  analyzeBursts(recentRecords(records, now), classOf)
+    .filter((seg) => !seg.entry)
+    .flatMap((seg) =>
+      seg.windows.filter(
+        (w) =>
+          (now - w.end >= SETTLE_MS && now - w.end <= SETTLE_MS + RECENT_MS) ||
+          (seg.runTo - w.to >= SETTLE_MS && now - w.from >= SETTLE_MS && now - w.from <= SETTLE_MS + RECENT_MS),
+      ),
+    );
+
+/**
+ * 이미 알린 창(마지막 요청 시각 last 까지)에서 겹쳐 이어지는 창은 같은 몰림이라 다시 알리지 않는다.
+ * 끝나지 않는 반복은 창이 계속 이어지므로 한 번만 알리고, 끊겼다 다시 생긴 몰림은 새로 알린다.
+ */
+const followBursts = (windows: readonly BurstWindow[], lastBurst: number): { last: number; fresh: boolean } => {
+  let last = lastBurst;
+  let fresh = false;
+  for (const w of [...windows].sort((a, b) => a.from - b.from)) {
+    if (w.from > last) fresh = true;
+    last = Math.max(last, w.to);
+  }
+  return { last, fresh };
+};
 
 interface Signal {
   storming: ReadonlySet<string>;
@@ -65,11 +90,11 @@ export const useProblemSignal = (
     if (ticks.current++ % FIND_CLIENTS_EVERY === 0) findQueryClients();
     const storming = stormingNames(now);
     // useInterval 이 최신 콜백을 쓰므로 records 는 늘 지금 기록이다.
-    const burstEnd = latestBurstEnd(records, classOf, now);
+    const waste = wasteWindowsToAlert(records, classOf, now);
     setSignal((prev) => {
       const newStorm = [...storming].some((name) => !prev.storming.has(name));
-      const newBurst = burstEnd > prev.lastBurst;
-      return { storming, lastBurst: Math.max(prev.lastBurst, burstEnd), alert: newStorm || newBurst };
+      const { last, fresh } = followBursts(waste, prev.lastBurst);
+      return { storming, lastBurst: last, alert: newStorm || fresh };
     });
   }, TICK_MS);
   // 배지 내역에 보일 이름. 폭주 이름은 시간 창 기준이라 시간이 지나면 빠진다.

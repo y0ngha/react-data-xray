@@ -48,7 +48,7 @@ const wrapHistory = (name: 'pushState' | 'replaceState'): void => {
 };
 
 /**
- * SPA 화면 이동 시각을 기록한다. 이동 직후의 요청 몰림은 낭비가 아니라 화면 진입이다(`classifyBursts`).
+ * SPA 화면 이동 시각을 기록한다. 이동 직후의 요청 몰림은 낭비가 아니라 화면 진입이다(`analyzeBursts`).
  * pushState·replaceState 를 감싸고 popstate·hashchange 를 듣는다. Navigation API 의 navigate 는 이동이 확정되기
  * 전에 오므로(취소·다운로드도 온다) 쓰지 않는다.
  */

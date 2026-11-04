@@ -7,6 +7,7 @@ import { Muted } from '../../components/Muted.js';
 import { useRequestActions } from '../../contexts.js';
 import { useElementWidth } from '../../hooks/useElementWidth.js';
 import { useNow } from '../../hooks/useNow.js';
+import { useRecords } from '../../hooks/useRecords.js';
 import { useRenderMonitoring } from '../../hooks/useRenderMonitoring.js';
 import { color } from '../../theme.js';
 import { TimelineChart } from './TimelineChart.js';
@@ -28,7 +29,9 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
   const boxRef = useRef<HTMLDivElement>(null);
   const width = Math.max(MIN_WIDTH, useElementWidth(boxRef, DEFAULT_WIDTH));
   const now = useNow(TICK_MS, paused);
-  const layout = layoutTimeline(records, getCommits(), now, width, classOf);
+  // 몰림은 버튼과 같게 전체 기록으로 판정한다(대상으로 좁혀도 어긋나지 않게).
+  const all = useRecords();
+  const layout = layoutTimeline(records, getCommits(), now, width, classOf, all);
   const onHover = (bar: BarLayout | null) => {
     setHovered(bar);
     hover(bar?.record ?? null);
