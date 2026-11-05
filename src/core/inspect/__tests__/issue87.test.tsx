@@ -140,6 +140,15 @@ describe('쓰지 않는 응답 (#87)', () => {
     expect([...skipped, text].filter((r) => r.unused !== undefined).map((r) => r.url)).toEqual([]);
   });
 
+  it('empty_nested: 키만 있고 값이 모두 빈 배열·객체인 응답은 판정하지 않고, 원시값이 하나라도 있으면 판정한다 (#123)', () => {
+    const empty = [received('/api/disabled-models', { disabledModels: [] }), received('/api/nested-empty', { a: {}, b: [], c: { d: [] } })];
+    const judged = [received('/api/one', { a: [1] }), received('/api/zero', { total: 0 }), received('/api/nil', { a: [null] })];
+    render(<p>nothing</p>);
+    settle();
+    expect(empty.map((r) => r.unused)).toEqual([undefined, undefined]);
+    expect(judged.map((r) => r.unused)).toEqual([true, true, true]);
+  });
+
   it('judged_once: 한 번 정한 판정은 다시 하지 않는다(나중에 그려도 그대로)', () => {
     const body = { items: items() };
     const record = received('/api/once', body);
