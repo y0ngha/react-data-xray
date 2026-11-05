@@ -1,8 +1,10 @@
+import { resolveSourceStackLater } from '../capture/requestContext.js';
 import { findRootFibers, walkFibers } from '../fiber/tree.js';
 import { findDerivedOrigin, isIndexPending } from '../inspect/derivedMatch.js';
 import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
+import { appFramesOf } from '../requests/callerFrames.js';
 import { paramKeyOf, requestKeyOf } from '../requests/requestKey.js';
 import { getRecords, lastRecordId, touchRecords } from '../requests/store.js';
 import type { Origin, RequestRecord } from '../requests/types.js';
@@ -37,10 +39,13 @@ export interface CacheFinding {
   keys: string[];
   /** 관련 요청(메서드 URL) */
   requests: string[];
-  /** invalidate-miss: invalidateQueries 를 부른 코드 위치 */
+  /** invalidate-miss: invalidateQueries 를 부른 코드 위치(기록한 그대로의 앱 프레임 3줄. 같은 호출 위치를 묶는 키라 바꾸지 않는다) */
   stack?: string;
-  /** double-invalidate: 겹친 두 무효화의 호출 위치(앞, 뒤) */
+  /** double-invalidate: 겹친 두 무효화의 호출 위치(앞, 뒤). stack 과 같이 기록한 그대로다 */
   stacks?: string[];
+  /** stack·stacks 를 소스맵으로 원본 위치로 바꾼 것. 바뀐 것만 있고, 보여 줄 때는 shownStacks 로 이것을 먼저 쓴다 */
+  resolvedStack?: string;
+  resolvedStacks?: string[];
   /** 같은 호출 위치에서 묶인 수. invalidate-*: 무효화 키 수(keys 는 앞의 몇 개만 남긴다), double-invalidate: 겹친 횟수 */
   count?: number;
 }
@@ -275,17 +280,41 @@ const resolvePending = (history: ClientHistory): void => {
   history.pending = isQueuePending() ? unresolved : [];
 };
 
-/** 앱에서 invalidateQueries 를 부른 위치. rdx 가 감싼 invalidateQueries 와 그 안쪽 프레임은 뺀다(앱 코드가 첫 줄에 오게). */
+/**
+ * 앱에서 invalidateQueries 를 부른 위치. rdx 가 감싼 invalidateQueries 와 그 안쪽 프레임은 빼고, 앱 코드 프레임 앞쪽 3줄만 남긴다
+ * (앱 코드가 첫 줄에 오게). 유휴 큐 step 안에서 부른다.
+ */
 const callerStack = (error: Error): string | undefined => {
   const lines = (error.stack ?? '').split('\n').map((line) => line.trim());
   const wrapper = lines.findIndex((line) => line.includes('invalidateQueries'));
-  return (
-    lines
-      .slice(wrapper + 1)
-      .filter((line) => line && line !== 'Error')
-      .join('\n') || undefined
-  );
+  return appFramesOf(lines.slice(wrapper + 1).join('\n'));
 };
+
+/**
+ * finding 의 호출 위치를 요청 callers 와 같은 길(소스맵)로 원본 위치로 바꿔 resolvedStack·resolvedStacks 에 둔다. 기록한 stack 은
+ * 묶기 키라 그대로 둔다(바꾸면 같은 호출 위치의 finding 이 변환 전·후로 갈린다). 보고서 저장 전 소스맵 대기가 이 변환도 기다리고,
+ * 바뀌면 패널이 다시 그리도록 알린다.
+ */
+const resolveFindingStacks = (finding: CacheFinding): void => {
+  if (finding.stack)
+    resolveSourceStackLater(finding.stack, (resolved) => {
+      finding.resolvedStack = resolved;
+      touchRecords();
+    });
+  finding.stacks?.forEach((stack, i) => {
+    if (!stack) return;
+    resolveSourceStackLater(stack, (resolved) => {
+      (finding.resolvedStacks ??= [...(finding.stacks ?? [])])[i] = resolved;
+      touchRecords();
+    });
+  });
+};
+
+/** 보여 줄 호출 위치: 원본 위치로 바뀐 것이 있으면 그것, 없으면 기록한 그대로 */
+export const shownStacks = (f: CacheFinding): { stack?: string; stacks?: string[] } => ({
+  ...((f.resolvedStack ?? f.stack) !== undefined && { stack: f.resolvedStack ?? f.stack }),
+  ...((f.resolvedStacks ?? f.stacks) && { stacks: f.resolvedStacks ?? f.stacks }),
+});
 
 // 키 모양이 같다: 앞 두 요소가 같은 문자열이고, 그 뒤는 겹치는 자리끼리 타입이 같다(객체는 무효화 쪽 필드가 있다).
 // 그래서 ['todo','detail',1] 과 ['todo','detail',{id:1}] 처럼 타입이 어긋난 오타는 모양이 같다고 보지 않는다.
@@ -341,17 +370,15 @@ const recordOverlap = (
       // 요청 분류가 이 겹침으로 취소된 요청을 StrictMode 로 보지 않게 기록에 표시한다
       if (noteOverlap(overlap, getRecords())) touchRecords();
       const stack = callerStack(now.error);
-      pushBounded(history.misses, {
-        at: now.at,
-        overlap,
-        finding: {
-          kind: 'double-invalidate',
-          keys: [keyText(first.key), keyText(now.key)],
-          requests: [],
-          stack,
-          stacks: [callerStack(first.error) ?? '', stack ?? ''],
-        },
-      });
+      const finding: CacheFinding = {
+        kind: 'double-invalidate',
+        keys: [keyText(first.key), keyText(now.key)],
+        requests: [],
+        stack,
+        stacks: [callerStack(first.error) ?? '', stack ?? ''],
+      };
+      resolveFindingStacks(finding);
+      pushBounded(history.misses, { at: now.at, overlap, finding });
     }
     return true;
   });
@@ -372,15 +399,9 @@ const recordInvalidate = (history: ClientHistory, client: QueryClientLike, args:
   enqueue(() => {
     if (seen.some((k) => partialMatch(key, k))) return true;
     const kind = seen.some((k) => sameShape(key, k)) ? 'invalidate-unloaded' : 'invalidate-miss';
-    pushBounded(history.misses, {
-      at,
-      finding: {
-        kind,
-        keys: [keyText(key)],
-        requests: [],
-        stack: callerStack(error),
-      },
-    });
+    const finding: CacheFinding = { kind, keys: [keyText(key)], requests: [], stack: callerStack(error) };
+    resolveFindingStacks(finding);
+    pushBounded(history.misses, { at, finding });
     return true;
   });
 };
@@ -808,7 +829,7 @@ export const overlapCancelOf = (record: RequestRecord): string[] | undefined => 
     const m = history?.misses.find(
       (x) => x.at >= auditFrom && x.finding.kind === 'double-invalidate' && !!x.overlap && cancelledBy(x.overlap, record),
     );
-    if (m?.finding.stacks) return m.finding.stacks;
+    if (m?.finding.stacks) return shownStacks(m.finding).stacks;
   }
   return undefined;
 };

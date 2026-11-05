@@ -2,14 +2,29 @@ import { renderAdvice } from '../render/advice.js';
 import { sortRenderGroups, type RenderGroup } from '../render/groups.js';
 import { getCommits, getRenderGroups, MAX_GROUPED_INSTANCES, reportWindowMs } from '../render/monitor.js';
 import { withHookPathsSync } from '../render/summary.js';
-import { RENDER_REASONS } from '../render/types.js';
+import { RENDER_REASONS, type ComponentSite } from '../render/types.js';
 import { endpointOf } from '../requests/requestKey.js';
+import { componentIdOf, endpointId } from '../../shared/ids.js';
 import { round1 } from '../../shared/format.js';
 
 export const MAX_RENDER_GROUPS = 30;
 /** compare 용으로 남기는 렌더 행의 상한(보고서 행 포함). 스냅샷 6개를 sessionStorage 에 두므로 행 수를 묶는다 */
 export const MAX_COMPARABLE_RENDER_ROWS = 200;
 const MAX_HEAVIEST_COMMITS = 3;
+
+/** 다른 컴포넌트를 가리키는 칸. renderedAt 은 그 컴포넌트를 그리는 JSX 위치(소스맵으로 바꾼 것, 모르면 없다) */
+export interface ComponentRef {
+  id: string;
+  name: string;
+  renderedAt?: string;
+}
+
+/** 행 칸(ComponentSite)이 가리키는 행. id 는 renders.components[].id 와 같은 함수로 만든다. 라이브러리 컴포넌트는 위치를 싣지 않는다 */
+const refOf = (site: ComponentSite): ComponentRef => ({
+  id: componentIdOf(site),
+  name: site.name,
+  ...(!site.package && site.location && { renderedAt: site.location }),
+});
 
 export interface RenderSection {
   monitoring: boolean;
@@ -23,9 +38,11 @@ export interface RenderSection {
    * 빠진 행이 없으면 모두 0 이다. compare 는 이 값으로 합계를 맞추고, 상한 때문에 빠진 행을 사라진 것으로 보지 않는다
    */
   omitted: { components: number; renders: number; avoidable: number; totalMs?: number };
-  /** 구간 안에서 렌더 시간이 가장 큰 commit 몇 개(시간 기록이 있을 때만) */
-  heaviestCommits?: Array<{ ms: number; components: number; startedBy?: string; secondsAgo: number }>;
+  /** 구간 안에서 렌더 시간이 가장 큰 commit 몇 개(시간 기록이 있을 때만). startedBy 는 그 commit 을 시작한 컴포넌트와 그리는 JSX 위치 */
+  heaviestCommits?: Array<{ ms: number; components: number; startedBy?: ComponentRef; secondsAgo: number }>;
   components: Array<{
+    /** 섹션 공통 id(`c:Name@renderedAt`, 위치를 모르면 `c:Name`) */
+    id: string;
     name: string;
     instances: number;
     renders: number;
@@ -49,8 +66,8 @@ export interface RenderSection {
     package?: string;
     /** 이 컴포넌트가 그려서 안쪽에서 렌더된 라이브러리 컴포넌트(패키지별) */
     libraries?: Array<{ package: string; name: string; instances: number; renders: number; avoidable: number }>;
-    /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상(이름·이유). 고칠 곳은 대개 이 조상이다 */
-    causedBy: Array<{ name: string; reason: string; count: number }>;
+    /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상(이름·이유·그리는 JSX 위치). 고칠 곳은 대개 이 조상이다 */
+    causedBy: Array<ComponentRef & { reason: string; count: number }>;
     stateChanges: Array<{
       label: string;
       count: number;
@@ -68,6 +85,7 @@ export interface RenderSection {
     };
     networkCauses: Array<{
       endpoint: string;
+      endpointId: string;
       direct: number;
       byTiming: number;
       viaParent: number;
@@ -100,6 +118,8 @@ const nonZero = (reasons: Record<string, number>): Record<string, number> =>
 
 /** compare 가 행을 맞춰 보는 데 쓰는 값만 담은 렌더 행 */
 export interface RenderRowTally {
+  /** renders.components[].id. 이 필드 전에 저장한 스냅샷에는 없다 */
+  id?: string;
   name: string;
   renders: number;
   avoidable: number;
@@ -115,12 +135,13 @@ const timeOf = (g: RenderGroup): RenderTime | undefined =>
   (g.timed ?? 0) > 0 ? { totalMs: round1(g.ms), avgMs: round1(g.ms / g.timed!), avoidableMs: round1(g.avoidableMs ?? 0) } : undefined;
 
 /** tallyOf 가 읽는 행의 모양. 보고서 행(파일에서 읽은 것 포함)도 이 모양이다 */
-export type TallySource = Pick<RenderSection['components'][number], 'name' | 'renders' | 'avoidable' | 'renderedAt' | 'package'> & {
+export type TallySource = Pick<RenderSection['components'][number], 'id' | 'name' | 'renders' | 'avoidable' | 'renderedAt' | 'package'> & {
   time?: Pick<RenderTime, 'totalMs'>;
 };
 
 /** 보고서 행과 상한 밖 행을 compare 용 행으로 줄인다(두 행이 같은 함수를 거친다). */
 export const tallyOf = (c: TallySource): RenderRowTally => ({
+  id: c.id,
   name: c.name,
   renders: c.renders,
   avoidable: c.avoidable,
@@ -129,7 +150,11 @@ export const tallyOf = (c: TallySource): RenderRowTally => ({
   totalMs: c.time?.totalMs,
 });
 
+/** 렌더 그룹(행)의 id. 그룹 키와 같은 값(이름·위치, 라이브러리는 패키지·그린 앱 컴포넌트)으로 만든다 */
+const rowIdOf = (g: RenderGroup): string => componentIdOf({ name: g.name, location: g.location, package: g.package, owner: g.owner });
+
 const sourceOf = (g: RenderGroup): TallySource => ({
+  id: rowIdOf(g),
   name: g.name,
   renders: g.recent,
   avoidable: g.avoidable,
@@ -176,11 +201,12 @@ export const buildRenderSectionParts = (monitoring: boolean, now: number, withBe
       heaviestCommits: heaviest.map((c) => ({
         ms: round1(c.ms!),
         components: c.count,
-        startedBy: c.startedBy,
+        startedBy: c.startedBy === undefined ? undefined : refOf(c.startedFrom ?? { name: c.startedBy }),
         secondsAgo: Math.round((now - c.time) / 1000),
       })),
     }),
     components: groups.map((g) => ({
+      id: rowIdOf(g),
       name: g.name,
       instances: g.instances,
       renders: g.recent,
@@ -198,7 +224,13 @@ export const buildRenderSectionParts = (monitoring: boolean, now: number, withBe
       renderedAt: g.location,
       package: g.package,
       libraries: g.libraries,
-      causedBy: g.origins,
+      causedBy: g.origins.map((o) => ({
+        id: o.id,
+        name: o.name,
+        ...(o.location && { renderedAt: o.location }),
+        reason: o.reason,
+        count: o.count,
+      })),
       // hookIndex 는 label 을 만드는 내부 값이라 보고서에 싣지 않는다.
       stateChanges: withHookPathsSync(g.stateHooks, g.fiber).map(({ label, count, intervalMs, last }) => ({
         label,
@@ -212,6 +244,7 @@ export const buildRenderSectionParts = (monitoring: boolean, now: number, withBe
       },
       networkCauses: g.causes.map((c) => ({
         endpoint: endpointOf(c.record),
+        endpointId: endpointId(endpointOf(c.record)),
         direct: c.direct,
         byTiming: c.timing,
         viaParent: c.parent,
@@ -233,6 +266,7 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
 
 // 새 howToRead 줄은 여기에 더한다.
 export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [
+  'causedBy[].renderedAt is the JSX location that renders that ancestor (source-mapped like renderedAt; absent when unknown or for a library component), and causedBy[].id is its renders.components id. The same name at different locations is listed separately, so renderedAt tells you which one to open.',
   `When renders.truncated is true, the number of rendered instances exceeded ${MAX_GROUPED_INSTANCES} and the instances with fewer renders (droppedInstances of them) were excluded. This is separate from the per-component limit of 200 renders.`,
   "stateChanges.label: in a dev build, the custom hook path that called the hook is prepended (e.g., useCart › useState #2); if a source map is resolved, the call location is appended (src/x.ts:12). Without either, only 'type #index' is shown.",
   'components[].memo: skipped is the number of times a React.memo component skipped a parent render; rendered is the count where it did not skip (parent renders only — mounts, own state, and context renders are excluded). When skipped is 0 and neverSkippedProps is non-empty, those props are a new reference on every render so memo has no effect (see first line of advice).',

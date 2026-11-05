@@ -58,8 +58,8 @@ describe('requests.bursts (#74)', () => {
         wasted: 0,
         route: '/list',
         topEndpoints: [
-          { endpoint: 'GET /api/items/:id', count: 4 },
-          { endpoint: 'GET /api/user', count: 1 },
+          { endpoint: 'GET /api/items/:id', endpointId: 'ep:GET /api/items/:id', count: 4 },
+          { endpoint: 'GET /api/user', endpointId: 'ep:GET /api/user', count: 1 },
         ],
       },
       expect.objectContaining({ count: 5, kind: 'entry', reason: 'initial-load' }),
@@ -137,9 +137,33 @@ describe('requests.followUps (#74)', () => {
     ];
     const list = section(records).followUps;
     expect(list).toEqual([
-      { mutation: 'POST /api/todos', refetched: 'GET /api/todos', mutations: 2, count: 3, sameResponse: 2 },
-      { mutation: 'POST /api/todos', refetched: 'GET /api/user', mutations: 1, count: 1, sameResponse: 0 },
-      { mutation: 'DELETE /api/todos/:id', refetched: 'GET /api/todos', mutations: 1, count: 1, sameResponse: 0 },
+      {
+        mutation: 'POST /api/todos',
+        mutationId: 'ep:POST /api/todos',
+        refetched: 'GET /api/todos',
+        refetchedId: 'ep:GET /api/todos',
+        mutations: 2,
+        count: 3,
+        sameResponse: 2,
+      },
+      {
+        mutation: 'POST /api/todos',
+        mutationId: 'ep:POST /api/todos',
+        refetched: 'GET /api/user',
+        refetchedId: 'ep:GET /api/user',
+        mutations: 1,
+        count: 1,
+        sameResponse: 0,
+      },
+      {
+        mutation: 'DELETE /api/todos/:id',
+        mutationId: 'ep:DELETE /api/todos/:id',
+        refetched: 'GET /api/todos',
+        refetchedId: 'ep:GET /api/todos',
+        mutations: 1,
+        count: 1,
+        sameResponse: 0,
+      },
     ]);
     // 패널(요청 상세)이 보여 주는 수와 같다
     const panel = [save1, save2].flatMap((m) => followUps(m, records)).filter((f) => f.endpoint === 'GET /api/todos');
@@ -155,8 +179,24 @@ describe('requests.followUps (#74)', () => {
     const after = rec('GET', '/api/todos', at + 400, { sameResponseAs: between.id }); // 둘 다의 창이지만 save2 몫
     const records = [save1, between, save2, after];
     expect(section(records).followUps).toEqual([
-      { mutation: 'PUT /api/todos/:id', refetched: 'GET /api/todos', mutations: 1, count: 1, sameResponse: 1 },
-      { mutation: 'POST /api/todos', refetched: 'GET /api/todos', mutations: 1, count: 1, sameResponse: 0 },
+      {
+        mutation: 'PUT /api/todos/:id',
+        mutationId: 'ep:PUT /api/todos/:id',
+        refetched: 'GET /api/todos',
+        refetchedId: 'ep:GET /api/todos',
+        mutations: 1,
+        count: 1,
+        sameResponse: 1,
+      },
+      {
+        mutation: 'POST /api/todos',
+        mutationId: 'ep:POST /api/todos',
+        refetched: 'GET /api/todos',
+        refetchedId: 'ep:GET /api/todos',
+        mutations: 1,
+        count: 1,
+        sameResponse: 0,
+      },
     ]);
     // 요청 상세도 같다: 합이 조회 수(2)를 넘지 않는다
     expect(followUps(save1, records).map((f) => f.count)).toEqual([1]);
@@ -172,7 +212,15 @@ describe('requests.followUps (#74)', () => {
     const restoredGet = rec('GET', '/api/old', at - 19_950, { load: 0, restored: true, sameResponseAs: before.id });
     const records = [before, restoredSave, restoredGet, save, crossLoad];
     expect(section(records).followUps).toEqual([
-      { mutation: 'POST /api/todos', refetched: 'GET /api/todos', mutations: 1, count: 1, sameResponse: 0 },
+      {
+        mutation: 'POST /api/todos',
+        mutationId: 'ep:POST /api/todos',
+        refetched: 'GET /api/todos',
+        refetchedId: 'ep:GET /api/todos',
+        mutations: 1,
+        count: 1,
+        sameResponse: 0,
+      },
     ]);
     expect(followUps(restoredSave, records)).toEqual([]);
   });
@@ -224,7 +272,7 @@ describe('summary 의 몰림·변경 뒤 재조회 (#74)', () => {
       expect.objectContaining({
         kind: 'refetch-after-mutation',
         severity: 'medium',
-        target: { endpoint: 'GET /api/todos' },
+        target: { id: 'ep:GET /api/todos', endpoint: 'GET /api/todos' },
         evidence: { mutations: 1, count: 1, sameResponse: 1 },
         savings: { requests: 1 },
         detail: 'requests.followUps[0]',
@@ -232,7 +280,7 @@ describe('summary 의 몰림·변경 뒤 재조회 (#74)', () => {
       expect.objectContaining({
         kind: 'request-burst',
         severity: 'medium',
-        target: { endpoint: 'GET /api/items/:id' },
+        target: { id: 'ep:GET /api/items/:id', endpoint: 'GET /api/items/:id' },
         evidence: { count: 5, spanMs: 400, wasted: 0, endpoints: 1 },
         savings: { requests: 4 },
         detail: 'requests.bursts[0]',

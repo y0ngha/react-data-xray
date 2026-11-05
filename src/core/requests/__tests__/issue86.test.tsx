@@ -331,8 +331,8 @@ describe('이슈 86: 고리 묶기 (기록 단위)', () => {
     const waterfalls = [
       {
         chain: [
-          { endpoint: 'GET /a', ms: 300 },
-          { endpoint: 'GET /b', component: 'B', location: 'at B (src/B.tsx:3:1)', ms: 200 },
+          { endpoint: 'GET /a', endpointId: 'ep:GET /a', ms: 300 },
+          { endpoint: 'GET /b', endpointId: 'ep:GET /b', component: 'B', componentId: 'c:B', location: 'at B (src/B.tsx:3:1)', ms: 200 },
         ],
         depth: 2,
         latencyMs: 500,
@@ -350,7 +350,7 @@ describe('이슈 86: 고리 묶기 (기록 단위)', () => {
     expect(s.topFindings).toEqual([
       expect.objectContaining({
         kind: 'waterfall',
-        target: { endpoint: 'GET /b', component: 'B', location: 'at B (src/B.tsx:3:1)' },
+        target: { id: 'ep:GET /b', endpoint: 'GET /b', component: 'B', componentId: 'c:B', location: 'at B (src/B.tsx:3:1)' },
         savings: { ms: 200 },
       }),
     ]);

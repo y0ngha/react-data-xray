@@ -319,9 +319,9 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
     const renders = { monitoring: true, windowSeconds: 10, truncated: false, droppedInstances: 0, components: [] };
     const card = { value: 0.2, secondsAgo: 1, component: 'Card', renderedAt: 'src/Card.tsx:3' };
     const rows = [
-      { ...card, cause: { endpoint: 'GET /a', component: 'List' } },
-      { ...card, cause: { endpoint: 'GET /b', component: 'List' } },
-      { value: 0.3, secondsAgo: 1, cause: { endpoint: 'GET /c', component: 'Feed' } },
+      { ...card, cause: { endpoint: 'GET /a', endpointId: 'ep:GET /a', component: 'List', componentId: 'c:List' } },
+      { ...card, cause: { endpoint: 'GET /b', endpointId: 'ep:GET /b', component: 'List', componentId: 'c:List' } },
+      { value: 0.3, secondsAgo: 1, cause: { endpoint: 'GET /c', endpointId: 'ep:GET /c', component: 'Feed', componentId: 'c:Feed' } },
     ];
     const summary = buildSummary(empty, { findings: [] } as never, renders as never, new Map(), rows);
     expect(summary.topFindings.filter((f) => f.kind === 'layout-shift')).toHaveLength(3);

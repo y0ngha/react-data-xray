@@ -1,4 +1,11 @@
-import { auditQueryCache, CACHE_FINDING_TEXT, findingId, findQueryClients } from '../../../core/reactQuery/cacheAudit.js';
+import {
+  auditQueryCache,
+  CACHE_FINDING_TEXT,
+  findingId,
+  findQueryClients,
+  shownStacks,
+  type CacheFinding,
+} from '../../../core/reactQuery/cacheAudit.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Muted } from '../../components/Muted.js';
 import { useRequestActions } from '../../contexts.js';
@@ -6,6 +13,14 @@ import { useNow } from '../../hooks/useNow.js';
 import { color, rowStyle } from '../../theme.js';
 
 const REFRESH_MS = 1000;
+
+/** 무효화 호출 위치. 원본 위치로 바뀐 것이 있으면 그것을 보인다 */
+const FindingStacks = ({ finding }: { finding: CacheFinding }) => {
+  const { stack, stacks } = shownStacks(finding);
+  if (stacks)
+    return stacks.map((st, i) => <Muted key={`${i ? 'after' : 'before'}${st}`}>{`${i ? 'after' : 'before'}: ${st.split('\n')[0]}`}</Muted>);
+  return stack ? <Muted>{stack.split('\n').slice(0, 2).join(' ')}</Muted> : null;
+};
 
 /** 네트워크 › 요청 › React Query: queryKey 설계 문제(중복 캐시, 키에 빠진 파라미터, 빗나간 무효화, staleTime 0) */
 export const CacheAuditView = ({ records }: { records: readonly RequestRecord[] }) => {
@@ -31,11 +46,7 @@ export const CacheAuditView = ({ records }: { records: readonly RequestRecord[] 
           </Muted>
           {f.requests.length > 0 && <Muted>requests: {f.requests.join(' · ')}</Muted>}
           <div>{CACHE_FINDING_TEXT[f.kind].fix}</div>
-          {f.stacks
-            ? f.stacks.map((st, i) => (
-                <Muted key={`${i ? 'after' : 'before'}${st}`}>{`${i ? 'after' : 'before'}: ${st.split('\n')[0]}`}</Muted>
-              ))
-            : f.stack && <Muted>{f.stack.split('\n').slice(1, 3).join(' ')}</Muted>}
+          <FindingStacks finding={f} />
         </div>
       ))}
     </div>

@@ -1,5 +1,6 @@
 import { getLayoutShifts, layoutShiftSupported, type LayoutShift } from '../render/layoutShifts.js';
 import { round3 } from '../../shared/format.js';
+import { componentId, endpointId } from '../../shared/ids.js';
 
 // 큰 이동부터 이만큼만 싣는다.
 export const MAX_LAYOUT_SHIFT_ROWS = 20;
@@ -13,11 +14,13 @@ export interface LayoutShiftRow {
   /** 밀린 노드를 그린 앱 컴포넌트와 그 JSX 위치. 노드가 React 밖이거나 이미 지워졌으면 없다 */
   component?: string;
   renderedAt?: string;
+  /** 밀린 컴포넌트의 섹션 공통 id(`c:Name@renderedAt`). component 가 있을 때만 */
+  componentId?: string;
   /**
    * 이동 직전 commit 에서 이 컴포넌트(또는 조상)를 렌더한 네트워크 응답. inferred 는 이 컴포넌트 쪽에서는 못 찾아,
    * 이동 직전에 응답으로 렌더된 commit 으로 짐작한 것이다(형제가 커져 밀린 경우). 네트워크와 무관하면 없다
    */
-  cause?: { endpoint: string; component: string; renderedAt?: string; inferred?: true };
+  cause?: { endpoint: string; endpointId: string; component: string; componentId: string; renderedAt?: string; inferred?: true };
   /** 이동이 일어났을 때 렌더 감시가 꺼져 있어 원인을 찾을 수 없었다 */
   causeUnavailable?: 'render-monitoring-off';
 }
@@ -25,11 +28,17 @@ export interface LayoutShiftRow {
 const rowOf = (s: LayoutShift, now: number): LayoutShiftRow => ({
   value: round3(s.value),
   secondsAgo: Math.max(0, Math.round((now - s.time) / 1000)),
-  ...(s.component && { component: s.component.name, ...(s.component.location && { renderedAt: s.component.location }) }),
+  ...(s.component && {
+    component: s.component.name,
+    ...(s.component.location && { renderedAt: s.component.location }),
+    componentId: componentId(s.component.name, s.component.location),
+  }),
   ...(s.cause && {
     cause: {
       endpoint: s.cause.endpoint,
+      endpointId: endpointId(s.cause.endpoint),
       component: s.cause.component,
+      componentId: componentId(s.cause.component, s.cause.location),
       ...(s.cause.location && { renderedAt: s.cause.location }),
       ...(s.cause.inferred && { inferred: true as const }),
     },

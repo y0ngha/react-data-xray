@@ -127,12 +127,22 @@ export const annotateRequest = (record: RequestRecord, fallback?: Error): Reques
 /** dev 서버가 변환한 위치를 원본 위치로 바꿔 둔다(보고서·요청 상세가 원본 줄 번호를 보이게). 실패하면 그대로 둔다. */
 const resolveSourceStack = (record: RequestRecord): void => {
   const stack = record.stack;
-  if (!stack || typeof window === 'undefined') return;
+  if (!stack) return;
+  resolveSourceStackLater(stack, (resolved) => {
+    record.sourceStack = resolved;
+    touchRecords();
+  });
+};
+
+/**
+ * 스택을 소스맵으로 원본 위치로 바꾸고, 바뀌었으면 apply 로 넘긴다. 요청 callers 와 같은 진행 중 목록에 넣어
+ * areSourcesResolved·whenSourcesResolved(보고서 저장 전 소스맵 대기)가 함께 기다린다. 유휴 큐 step 안에서 부른다.
+ */
+export const resolveSourceStackLater = (stack: string, apply: (resolved: string) => void): void => {
+  if (typeof window === 'undefined') return;
   const job = resolveStack(stack)
     .then((resolved) => {
-      if (resolved === stack) return;
-      record.sourceStack = resolved;
-      touchRecords();
+      if (resolved !== stack) apply(resolved);
     })
     .catch(() => undefined)
     .finally(() => resolving.delete(job));

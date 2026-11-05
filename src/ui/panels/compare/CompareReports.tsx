@@ -6,9 +6,9 @@ import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { SNAPSHOT_SAVED_EVENT } from './SnapshotButton.js';
 
-// 행 머리에 따로 보이는 값과, 증감이 아닌 값(unknown 행의 아는 쪽 값)은 증감 목록에서 뺀다.
-const REQUEST_LABELS: ReadonlySet<string> = new Set(['endpoint', 'status', 'verdict', 'before', 'after']);
-const RENDER_LABELS: ReadonlySet<string> = new Set(['name', 'status', 'verdict', 'renderedAt', 'package', 'before', 'after']);
+// 행 머리에 따로 보이는 값과, 증감이 아닌 값(unknown 행의 아는 쪽 값, 행 key 로만 쓰는 id)은 증감 목록에서 뺀다.
+const REQUEST_LABELS: ReadonlySet<string> = new Set(['endpoint', 'id', 'status', 'verdict', 'before', 'after']);
+const RENDER_LABELS: ReadonlySet<string> = new Set(['name', 'id', 'status', 'verdict', 'renderedAt', 'package', 'before', 'after']);
 const FETCH_LABELS: ReadonlySet<string> = new Set(['queryKey', 'observer', 'cause', 'wasteful', 'status', 'verdict', 'before', 'after']);
 
 const signed = (v: number): string => `${v > 0 ? '+' : ''}${v}`;
@@ -97,7 +97,7 @@ export const CompareReports = () => {
                 </div>
               ))}
               {result.renders.map((r) => (
-                <div key={`${r.name}|${r.renderedAt ?? ''}|${r.package ?? ''}`}>
+                <div key={r.id}>
                   &lt;{r.name}&gt; {r.renderedAt ?? r.package ?? ''} {r.status ?? ''} [{r.verdict}] {fmt(r, RENDER_LABELS)} {known(r)}
                 </div>
               ))}

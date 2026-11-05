@@ -11,9 +11,10 @@ import { endpointOf, pathOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
-import { findWaterfalls, type Waterfall } from '../requests/waterfall.js';
+import { findWaterfalls, type Waterfall, type WaterfallStep } from '../requests/waterfall.js';
 import { queryContextOf, type QueryContext } from '../capture/queryContext.js';
 import { groupBy } from '../../shared/collections.js';
+import { componentId, endpointId } from '../../shared/ids.js';
 import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 
 const MAX_CALLERS = 3;
@@ -43,6 +44,8 @@ export interface RequestSection {
   /** 기록 상한(200건)을 넘어 빠진 요청 수(reset 뒤부터) */
   dropped: number;
   endpoints: Array<{
+    /** 섹션 공통 id(`ep:<endpoint>`) */
+    id: string;
     endpoint: string;
     /** 사용자가 의도된 반복으로 지정해 낭비로 세지 않은 엔드포인트 */
     ignored: boolean;
@@ -81,10 +84,29 @@ export interface RequestSection {
   /** 변경 요청 응답 뒤 1초 안에 다시 나간 조회(요청 상세와 같은 followUps)를 변경·재조회 엔드포인트 쌍으로 모은 것 */
   followUps: FollowUpEntry[];
   /** 응답 → 마운트 → 요청으로 이어진 직렬 고리(워터폴). 지연이 큰 순으로 최대 5개, 없으면 빈 배열 */
-  waterfalls: Waterfall[];
+  waterfalls: ReportWaterfall[];
   /** 목록의 항목마다 보낸 요청(N+1) 묶음. 요청이 많은 순. 무시한 엔드포인트는 뺀다 */
   nPlusOne: NPlusOneEntry[];
 }
+
+/** 보고서의 워터폴 고리. 단계마다 섹션 공통 id 를 붙인다 */
+export interface ReportWaterfall extends Omit<Waterfall, 'chain'> {
+  chain: Array<WaterfallStep & IdRefs>;
+}
+
+/**
+ * 다른 섹션의 행을 가리키는 id. componentId 는 보낸 컴포넌트의 이름만으로 만든다(`c:Name`, 그리는 위치를 모른다):
+ * renders.components[].id 가 `c:Name@` 로 시작하는 행이 그 컴포넌트다.
+ */
+interface IdRefs {
+  endpointId: string;
+  componentId?: string;
+}
+
+const idRefsOf = (endpoint: string, component: string | undefined): IdRefs => ({
+  endpointId: endpointId(endpoint),
+  ...(component && { componentId: componentId(component) }),
+});
 
 export interface BurstEntry {
   /** 첫·마지막 요청의 시작 시각(ms epoch) */
@@ -101,7 +123,7 @@ export interface BurstEntry {
   /** 첫 요청을 보낸 때의 경로. 모르면 없다 */
   route?: string;
   /** 구간에 많이 든 엔드포인트(상위 3) */
-  topEndpoints: Array<{ endpoint: string; count: number }>;
+  topEndpoints: Array<{ endpoint: string; endpointId: string; count: number }>;
   /**
    * 이 구간의 요청 가운데 다른 항목이 이미 센 것: 낭비(중복·같은 응답)는 그 엔드포인트 행, N+1 은 그 묶음.
    * detail 은 그 항목의 경로, requests 는 겹친 요청 수. 한 요청은 한 항목에만 센다(낭비 먼저). 없으면 두지 않는다
@@ -112,8 +134,12 @@ export interface BurstEntry {
 export interface FollowUpEntry {
   /** 변경 요청(메서드 + 엔드포인트) */
   mutation: string;
+  /** mutation 의 섹션 공통 id(`ep:<mutation>`) */
+  mutationId: string;
   /** 그 뒤 1초 안에 다시 받은 조회 엔드포인트 */
   refetched: string;
+  /** refetched 의 섹션 공통 id. requests.endpoints[].id 와 같다 */
+  refetchedId: string;
   /** 이 쌍이 나온 변경 요청 수 */
   mutations: number;
   /** 다시 받은 조회 수 */
@@ -128,7 +154,7 @@ export interface FollowUpEntry {
   ignored?: true;
 }
 
-export interface NPlusOneEntry {
+export interface NPlusOneEntry extends IdRefs {
   endpoint: string;
   /** 보낸 컴포넌트. 모르면 없고, 그때 묶은 기준은 location 이다 */
   component?: string;
@@ -214,7 +240,11 @@ const repeatCausesOf = (own: readonly RequestRecord[]) => {
 };
 
 const topEndpointsOf = (records: readonly RequestRecord[]) =>
-  Array.from(groupBy(records, endpointOf), ([endpoint, list]) => ({ endpoint, count: list.length }))
+  Array.from(groupBy(records, endpointOf), ([endpoint, list]) => ({
+    endpoint,
+    endpointId: endpointId(endpoint),
+    count: list.length,
+  }))
     .sort((a, b) => b.count - a.count)
     .slice(0, MAX_BURST_ENDPOINTS);
 
@@ -276,7 +306,9 @@ const followUpsOf = (
       const queryKey = prev?.queryKey ?? f.queryKey;
       pairs.set(key, {
         mutation,
+        mutationId: endpointId(mutation),
         refetched: f.endpoint,
+        refetchedId: endpointId(f.endpoint),
         mutations: (prev?.mutations ?? 0) + 1,
         count: (prev?.count ?? 0) + f.count,
         sameResponse: (prev?.sameResponse ?? 0) + f.sameResponse,
@@ -304,6 +336,7 @@ const nPlusOneEntryOf = (run: NPlusOneRun): NPlusOneEntry => {
   const location = callerOf(first.sourceStack ?? first.stack);
   return {
     endpoint: run.endpoint,
+    ...idRefsOf(run.endpoint, run.component),
     ...(run.component && { component: run.component }),
     ...(location && { location }),
     count: run.distinct,
@@ -345,6 +378,7 @@ export const buildRequestSection = (
       const own = byEndpoint.get(s.endpoint) ?? [];
       return Object.assign(
         {
+          id: endpointId(s.endpoint),
           endpoint: s.endpoint,
           ignored: !!matcher.sourceOf(s.endpoint),
           count: s.count,
@@ -369,7 +403,9 @@ export const buildRequestSection = (
     ...burstsOf(records, classes, matcher, claimOf),
     followUps: followUpsOf(records, matcher, queryOf),
     nPlusOne: runs.map(nPlusOneEntryOf),
-    waterfalls: findWaterfalls(records, (r) => callerOf(r.sourceStack ?? r.stack)).slice(0, MAX_WATERFALLS),
+    waterfalls: findWaterfalls(records, (r) => callerOf(r.sourceStack ?? r.stack))
+      .slice(0, MAX_WATERFALLS)
+      .map((w) => Object.assign({}, w, { chain: w.chain.map((step) => Object.assign({}, step, idRefsOf(step.endpoint, step.component))) })),
   };
 };
 

@@ -55,9 +55,8 @@ let epoch = 0;
 const appOwnerOf = (fiber: Fiber): RenderEntry['owner'] => {
   for (let f = fiber.return; f; f = f.return) {
     if (!isComposite(f) || libraryPackageOf(f)) continue;
-    return (
-      entries.get(f) ?? (f.alternate ? entries.get(f.alternate) : undefined) ?? { name: getComponentName(f), location: jsxLocationOf(f) }
-    );
+    const entry = entries.get(f) ?? (f.alternate ? entries.get(f.alternate) : undefined);
+    return entry ? (entry.site ?? entry) : { name: getComponentName(f), location: jsxLocationOf(f) };
   }
   return undefined;
 };
@@ -77,10 +76,18 @@ const entryOf = (fiber: Fiber, alt: Fiber | null, memoized: boolean, compiled: b
     owner: pkg ? appOwnerOf(fiber) : undefined,
   };
   if (!existing) {
-    // React 19 의 위치는 변환된 코드 기준이라, 소스맵을 받는 대로 원본 줄로 바꾼다.
+    entry.site = {
+      name: entry.name,
+      ...(entry.location && { location: entry.location }),
+      ...(pkg && { package: pkg }),
+      ...(entry.owner && { owner: entry.owner }),
+    };
+    // React 19 의 위치는 변환된 코드 기준이라, 소스맵을 받는 대로 원본 줄로 바꾼다(행 칸도 같이).
     void resolveJsxLocation(fiber)
       .then((location) => {
-        if (location) entry.location = location;
+        if (!location) return;
+        entry.location = location;
+        if (entry.site) entry.site.location = location;
       })
       .catch(() => undefined);
   }
@@ -256,6 +263,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   let at = 0;
   let totalMs: number | undefined;
   let startedBy: string | undefined;
+  let startedFrom: Commit['startedFrom'];
   // 이 commit 에서 응답을 직접 받아 렌더된 첫(가장 위) 컴포넌트. 형제가 밀린 레이아웃 이동의 원인을 짐작하는 데 쓴다.
   let networkCause: Commit['networkCause'];
   const mine = epoch;
@@ -268,14 +276,17 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       try {
         const event = recordRender(p, now, seq, p.parent < 0 ? {} : inheritedBy[p.parent]);
         if (event.ms !== undefined) totalMs = (totalMs ?? 0) + event.ms;
-        if (startedBy === undefined && STARTS_RENDER.has(event.reason)) startedBy = getComponentName(p.fiber);
+        if (startedBy === undefined && STARTS_RENDER.has(event.reason)) {
+          startedBy = getComponentName(p.fiber);
+          startedFrom = entries.get(p.fiber)?.site;
+        }
         if (!networkCause && event.cause && event.cause.via !== 'parent') {
           const entry = entries.get(p.fiber);
           networkCause = { cause: event.cause, component: getComponentName(p.fiber), location: entry?.location };
         }
         inheritedBy[at] = {
           cause: event.cause,
-          origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason, from: entries.get(p.fiber) },
+          origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason, from: entries.get(p.fiber)?.site },
         };
       } catch {
         /* 이 fiber 만 건너뛴다 */
@@ -289,7 +300,15 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       if (entry.skips.length > MAX_EVENTS_PER_COMPONENT) entry.skips.shift();
       active.add(entry);
     });
-    commits.push({ id: ++commitSeq, time: now, count: pending.length, ms: totalMs, startedBy, ...(networkCause && { networkCause }) });
+    commits.push({
+      id: ++commitSeq,
+      time: now,
+      count: pending.length,
+      ms: totalMs,
+      startedBy,
+      ...(startedFrom && { startedFrom }),
+      ...(networkCause && { networkCause }),
+    });
     if (commits.length > MAX_COMMITS) commits.shift();
     commitListeners.forEach((listener) => listener());
     return true;

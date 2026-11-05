@@ -1,3 +1,4 @@
+import { componentId, componentIdOf } from '../../shared/ids.js';
 import { cachedHookSites, hookSitesOf, requestHookSites, resolvedLocation, type HookSite } from '../fiber/hookPaths.js';
 import type { Fiber } from '../fiber/types.js';
 import type { RequestRecord } from '../requests/types.js';
@@ -43,9 +44,15 @@ const countOrigins = (events: RenderEntry['events']): OriginCount[] => {
   const byOrigin = new Map<string, OriginCount>();
   events.forEach(({ origin }) => {
     if (!origin) return;
-    const key = `${origin.name}|${origin.reason}`;
+    // 행 id·위치는 행 칸(from)에서 지금 읽는다. 한 보고서 안에서는 같은 조상이 늘 같은 id 라, 소스맵이 그사이 풀려도 한 칸에 센다.
+    const id = origin.from ? componentIdOf(origin.from) : componentId(origin.name);
+    const location = origin.from && !origin.from.package ? origin.from.location : undefined;
+    const key = `${id}|${origin.reason}`;
     const prev = byOrigin.get(key);
-    byOrigin.set(key, prev ? { ...prev, count: prev.count + 1 } : { name: origin.name, reason: origin.reason, count: 1 });
+    byOrigin.set(
+      key,
+      prev ? { ...prev, count: prev.count + 1 } : { name: origin.name, reason: origin.reason, count: 1, id, ...(location && { location }) },
+    );
   });
   return [...byOrigin.values()].sort((a, b) => b.count - a.count).slice(0, MAX_ORIGINS);
 };

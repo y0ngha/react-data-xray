@@ -1,6 +1,7 @@
 import { formatTime, round1 } from '../../shared/format.js';
 import type { EffectiveConfig } from '../config.js';
 import type { RdxReport } from './buildReport.js';
+import { componentIdOf, endpointId } from '../../shared/ids.js';
 import { MAX_FETCH_CAUSES } from './reactQuerySection.js';
 import { MAX_RENDER_GROUPS, tallyOf, type RenderRowTally, type RenderSection } from './renderSection.js';
 
@@ -153,9 +154,13 @@ export interface ReportComparison {
     avoidable: Total;
     renderMs?: Omit<Total, 'verdict'>;
   };
-  requests: Array<Delta<'endpoint', 'count' | 'duplicates' | 'sameResponses' | 'failedDuplicates' | 'review'>>;
-  /** 같은 이름이라도 renderedAt·package 가 다르면 다른 행이다. totalMs 증감은 렌더 수가 달라진 행에만 싣는다 */
-  renders: Array<Delta<'name', 'renders' | 'avoidable' | 'totalMs'> & { renderedAt?: string; package?: string }>;
+  /** id 는 보고서의 requests.endpoints[].id 와 같다(옛 스냅샷에는 없어 비교할 때 만든다) */
+  requests: Array<Delta<'endpoint', 'count' | 'duplicates' | 'sameResponses' | 'failedDuplicates' | 'review'> & { id: string }>;
+  /**
+   * 같은 이름이라도 renderedAt·package(와 그린 앱 컴포넌트)가 다르면 다른 행이다. id 는 renders.components[].id 와 같다.
+   * totalMs 증감은 렌더 수가 달라진 행에만 싣는다
+   */
+  renders: Array<Delta<'name', 'renders' | 'avoidable' | 'totalMs'> & { id: string; renderedAt?: string; package?: string }>;
   reactQuery: {
     added: string[];
     resolved: string[];
@@ -357,6 +362,9 @@ const fetchCauseDiff = (a: ComparableReport, b: ComparableReport): ReportCompari
   });
 };
 
+/** 렌더 행의 id. 보고서 행의 id(renders.components[].id)를 쓰고, 그 필드 전에 저장한 스냅샷은 같은 함수로 만든다 */
+const rowIdOf = (c: RenderRowTally): string => c.id ?? componentIdOf({ name: c.name, location: c.renderedAt, package: c.package });
+
 const sidesOf = (a: boolean, b: boolean): string => (a && b ? 'both reports' : a ? 'before' : 'after');
 
 /** 저장한 두 보고서(a: 전, b: 후)의 차이. 양수는 b 에서 늘어난 것이다. */
@@ -404,14 +412,14 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
     );
   const renders = diffBy(a.renders.components, b.renders.components, {
     keyName: 'name',
-    // 같은 이름의 위치별·패키지별 행을 한 행으로 합치지 않는다.
-    idOf: (c) => JSON.stringify([c.name, c.renderedAt, c.package]),
+    // 같은 이름의 위치별·패키지별(그린 앱 컴포넌트별) 행을 한 행으로 합치지 않는다. id 를 남기기 전 스냅샷은 이름·위치·패키지로 만든다.
+    idOf: rowIdOf,
     nameOf: (c) => c.name,
     numbers: ['renders', 'avoidable'],
     info: ['totalMs'],
     valueOf: (c, n) => c[n],
     rankOf: (c) => [c.avoidable, c.renders],
-    extraOf: (c) => ({ renderedAt: c.renderedAt, package: c.package }),
+    extraOf: (c) => ({ id: rowIdOf(c), renderedAt: c.renderedAt, package: c.package }),
     mayHide: [rendersMayHide(a), rendersMayHide(b)],
   });
   const fetchCauses = fetchCauseDiff(a, b);
@@ -431,10 +439,11 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
       numbers: ['count', 'duplicates', 'sameResponses', 'failedDuplicates', 'review'],
       valueOf: (e, n) => e[n],
       rankOf: (e) => [wasteOf(e), e.count],
+      extraOf: (e) => ({ id: endpointId(e.endpoint) }),
       // 요청 행은 상한 없이 다 싣는다.
       mayHide: [false, false],
-    }),
-    renders,
+    }) as ReportComparison['requests'],
+    renders: renders as ReportComparison['renders'],
     reactQuery: {
       added: [...after].filter((id) => !before.has(id)),
       resolved: [...before].filter((id) => !after.has(id)),

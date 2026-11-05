@@ -36,6 +36,7 @@ describe('상한 밖 행 (#72)', () => {
     const r = compare(before, after);
     expect(r.renders.find((c) => c.name === 'C29')).toEqual({
       name: 'C29',
+      id: 'c:C29',
       status: 'unknown',
       verdict: 'unknown',
       before: { renders: 72, avoidable: 71 },
@@ -49,7 +50,7 @@ describe('상한 밖 행 (#72)', () => {
 
   it('cap_removed: 상대 쪽이 모든 행을 담았으면 한쪽에만 있는 행은 정말 사라진 것이다', () => {
     const r = compare(side([row('Gone', 3)]), side([]));
-    expect(r.renders).toEqual([{ name: 'Gone', status: 'removed', verdict: 'improved', renders: -4, avoidable: -3 }]);
+    expect(r.renders).toEqual([{ name: 'Gone', id: 'c:Gone', status: 'removed', verdict: 'improved', renders: -4, avoidable: -3 }]);
   });
 
   it('old_snapshot_cap: omitted 가 없는 옛 스냅샷은 상한만큼 찼으면 빠진 행이 있었을 수 있다고 본다', () => {
@@ -69,15 +70,15 @@ describe('행 판정과 합계 (#72)', () => {
       side([row('Less', 1, 10), row('More', 4, 5), row('Busier', 0, 7), row('Same', 2, 4, { totalMs: 9 })]),
     );
     expect(r.renders).toEqual([
-      { name: 'Less', verdict: 'improved', avoidable: -4 },
-      { name: 'More', verdict: 'regressed', renders: 3, avoidable: 3 },
-      { name: 'Busier', verdict: 'regressed', renders: 4 },
+      { name: 'Less', id: 'c:Less', verdict: 'improved', avoidable: -4 },
+      { name: 'More', id: 'c:More', verdict: 'regressed', renders: 3, avoidable: 3 },
+      { name: 'Busier', id: 'c:Busier', verdict: 'regressed', renders: 4 },
     ]);
   });
 
   it('render_time: 렌더 수가 달라진 행에는 totalMs 증감을 싣고, 합계에 renderMs 를 둔다', () => {
     const r = compare(side([row('A', 2, 4, { totalMs: 3.2 })]), side([row('A', 1, 3, { totalMs: 1.1 })]));
-    expect(r.renders).toEqual([{ name: 'A', verdict: 'improved', renders: -1, avoidable: -1, totalMs: -2.1 }]);
+    expect(r.renders).toEqual([{ name: 'A', id: 'c:A', verdict: 'improved', renders: -1, avoidable: -1, totalMs: -2.1 }]);
     expect(r.totals.renderMs).toEqual({ before: 3.2, after: 1.1, delta: -2.1 });
     expect(compare(side([row('A', 2)]), side([row('A', 1)])).totals.renderMs).toBeUndefined();
   });
@@ -96,9 +97,9 @@ describe('행 판정과 합계 (#72)', () => {
       side([], {}, { requests: { endpoints: [ep('GET /a', 12, 1, 0, 1, 0), ep('GET /b', 3, 1, 0), ep('GET /poll', 5, 0, 0, 1)] } }),
     );
     expect(r.requests).toEqual([
-      { endpoint: 'GET /a', verdict: 'improved', count: 2, duplicates: -3, sameResponses: -2, failedDuplicates: -2 },
-      { endpoint: 'GET /b', verdict: 'regressed', duplicates: 1 },
-      { endpoint: 'GET /poll', verdict: 'unchanged', review: -3 },
+      { endpoint: 'GET /a', id: 'ep:GET /a', verdict: 'improved', count: 2, duplicates: -3, sameResponses: -2, failedDuplicates: -2 },
+      { endpoint: 'GET /b', id: 'ep:GET /b', verdict: 'regressed', duplicates: 1 },
+      { endpoint: 'GET /poll', id: 'ep:GET /poll', verdict: 'unchanged', review: -3 },
     ]);
     expect(r.totals.requests).toEqual({ before: 18, after: 20, delta: 2, verdict: 'regressed' });
     expect(r.totals.wastedRequests).toEqual({ before: 6, after: 2, delta: -4, verdict: 'improved' });
@@ -215,7 +216,7 @@ describe('리뷰 반영 (#72)', () => {
 
   it('old_fields: 한쪽에 failedDuplicates·review 가 없으면(옛 스냅샷) 그 증감을 만들지 않는다', () => {
     const r = compare(withEndpoints([ep('GET /a', 5, 2)]), withEndpoints([ep('GET /a', 5, 1, { review: 3, failedDuplicates: 1 })]));
-    expect(r.requests).toEqual([{ endpoint: 'GET /a', verdict: 'improved', duplicates: -1 }]);
+    expect(r.requests).toEqual([{ endpoint: 'GET /a', id: 'ep:GET /a', verdict: 'improved', duplicates: -1 }]);
     // 그것만 다른 행은 싣지 않는다.
     expect(compare(withEndpoints([ep('GET /a', 5, 1)]), withEndpoints([ep('GET /a', 5, 1, { review: 3 })])).requests).toEqual([]);
   });

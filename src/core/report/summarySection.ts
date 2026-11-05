@@ -9,6 +9,8 @@ import { LARGE_LAYOUT_SHIFT, MAX_LAYOUT_SHIFT_ROWS, type LayoutShiftRow } from '
 import type { ReactQuerySection } from './reactQuerySection.js';
 import { MAX_RENDER_GROUPS, type RenderSection } from './renderSection.js';
 import type { RequestSection } from './requestSection.js';
+import { componentId, componentIdOf, endpointId } from '../../shared/ids.js';
+import { callerOf } from '../requests/callerFrames.js';
 
 const MAX_TOP_FINDINGS = 10;
 
@@ -26,6 +28,29 @@ export type FindingKind =
   | 'layout-shift'
   | 'remount';
 
+/**
+ * 고칠 대상. id 는 고칠 행의 섹션 공통 id(요청 finding 은 엔드포인트 `ep:…`, 렌더·재마운트·레이아웃 이동은 컴포넌트 `c:…`),
+ * endpointId·componentId 는 그 밖에 함께 가리키는 엔드포인트·컴포넌트의 id 다. React Query finding 은 queryKeys 로 가리켜 id 가 없다
+ */
+interface Target {
+  id?: string;
+  endpoint?: string;
+  endpointId?: string;
+  component?: string;
+  componentId?: string;
+  library?: string;
+  queryKeys?: string[];
+  location?: string;
+}
+
+/** 요청을 고칠 곳: 엔드포인트 id 와, 보낸 컴포넌트(이름만 안다)의 id */
+const requestTarget = (endpoint: string, component: string | undefined, location: string | undefined): Target => ({
+  id: endpointId(endpoint),
+  endpoint,
+  ...(component && { component, componentId: componentId(component) }),
+  ...(location && { location }),
+});
+
 export interface TopFinding {
   kind: FindingKind;
   /** high: RDX 버튼 배지가 세는 문제(낭비 요청 엔드포인트, 렌더 폭주 컴포넌트 그룹). medium: 배지는 세지 않지만 줄일 수 있는 것 */
@@ -36,7 +61,7 @@ export interface TopFinding {
    * 고칠 대상. location 은 낭비를 가장 많이 낸 보낸 코드 위치(callers)·그리는 JSX 위치(renderedAt)·호출 위치(stack) 중 아는 것.
    * library 는 앱 컴포넌트 행의 libraries 에 접힌 라이브러리 컴포넌트("패키지 이름")이고, 그때 component 는 그것을 그린 앱 컴포넌트다.
    */
-  target: { endpoint?: string; component?: string; library?: string; queryKeys?: string[]; location?: string };
+  target: Target;
   /** 판단 근거 수치 */
   evidence: Record<string, number>;
   /**
@@ -111,7 +136,7 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
       {
         kind: e.duplicates >= e.sameResponses ? 'duplicate' : 'same-response',
         severity: 'high',
-        target: { endpoint: e.endpoint, ...(component && { component }), ...(caller?.frame && { location: caller.frame }) },
+        target: requestTarget(e.endpoint, component, caller?.frame || undefined),
         evidence: {
           count: e.count,
           duplicates: e.duplicates,
@@ -163,7 +188,7 @@ const burstFindings = (bursts: readonly Burst[], specific: readonly Ranked[]): R
       {
         kind: 'request-burst',
         severity: 'medium',
-        target: { endpoint: top.endpoint },
+        target: { id: top.endpointId, endpoint: top.endpoint },
         evidence: {
           count: b.count,
           spanMs: b.to - b.from,
@@ -192,7 +217,7 @@ const followUpFindings = (list: readonly FollowUp[]): Ranked[] =>
           {
             kind: 'refetch-after-mutation',
             severity: 'medium',
-            target: { endpoint: f.refetched, ...(f.queryKey && { queryKeys: [f.queryKey] }) },
+            target: { id: f.refetchedId, endpoint: f.refetched, ...(f.queryKey && { queryKeys: [f.queryKey] }) },
             evidence: { mutations: f.mutations, count: f.count, sameResponse: f.sameResponse },
             savings: { requests: f.sameResponse },
             fix: followUpFix(f),
@@ -207,7 +232,7 @@ const nPlusOneFindings = (entries: RequestSection['nPlusOne']): Ranked[] =>
   entries.map((n, i) => ({
     kind: 'n-plus-one',
     severity: 'medium',
-    target: { endpoint: n.endpoint, ...(n.component && { component: n.component }), ...(n.location && { location: n.location }) },
+    target: requestTarget(n.endpoint, n.component, n.location),
     evidence: { count: n.count, windowMs: n.windowMs },
     savings: { requests: n.count - 1 },
     fix: N_PLUS_ONE_FIX,
@@ -228,7 +253,7 @@ const unusedFindings = (endpoints: readonly Endpoint[]): Ranked[] =>
       {
         kind: 'unused-response',
         severity: 'medium',
-        target: { endpoint: e.endpoint, ...(component && { component }), ...(caller?.frame && { location: caller.frame }) },
+        target: requestTarget(e.endpoint, component, caller?.frame || undefined),
         evidence: { count: e.count, unused: e.unused },
         savings: { requests: e.unused, ms },
         fix: 'No component holds this response. Confirm in code that nothing reads it (effects, event handlers, transformed copies), then remove the request or fetch it only when needed.',
@@ -250,11 +275,7 @@ const waterfallFindings = (waterfalls: RequestSection['waterfalls']): Ranked[] =
     return {
       kind: 'waterfall',
       severity: 'medium',
-      target: {
-        endpoint: last.endpoint,
-        ...(last.component && { component: last.component }),
-        ...(last.location && { location: last.location }),
-      },
+      target: requestTarget(last.endpoint, last.component, last.location),
       evidence: { depth: w.depth, latencyMs: w.latencyMs, count: w.count },
       savings: { ms },
       fix: `${w.chain.map((s) => s.endpoint).join(' -> ')} runs in series: ${by} mounts only after the previous response and then requests ${last.endpoint}. If it does not need that data, start it in parallel or prefetch it; if it does, join on the server or move it into a route loader.`,
@@ -266,7 +287,8 @@ const waterfallFindings = (waterfalls: RequestSection['waterfalls']): Ranked[] =
 const reactQueryFindings = (reactQuery: ReactQuerySection): Ranked[] =>
   reactQuery.findings.flatMap((f, i): Ranked[] => {
     if (NOTHING_TO_FIX.has(f.kind)) return [];
-    const location = f.stack ?? f.stacks?.[0];
+    // 요청 callers 와 같은 꼴(앞쪽 프레임을 ' <- ' 로 이은 한 줄)로 싣는다
+    const location = callerOf(f.stack ?? f.stacks?.[0]);
     return [
       {
         kind: 'react-query',
@@ -332,8 +354,13 @@ const renderFinding = (
 
 const stormTarget = (s: RenderStorm): TopFinding['target'] =>
   s.package && s.owner
-    ? { component: s.owner.name, library: `${s.package} ${s.name}`, ...(s.owner.location && { location: s.owner.location }) }
-    : { component: s.name, ...(s.location && { location: s.location }) };
+    ? {
+        id: componentId(s.owner.name, s.owner.location),
+        component: s.owner.name,
+        library: `${s.package} ${s.name}`,
+        ...(s.owner.location && { location: s.owner.location }),
+      }
+    : { id: componentIdOf(s), component: s.name, ...(s.location && { location: s.location }) };
 
 const remountFinding = (c: Component, i: number, target: TopFinding['target']): Ranked[] => {
   const remounts = c.mounts?.remounts ?? [];
@@ -363,7 +390,7 @@ const renderFindings = (renders: RenderSection, storms: ReadonlyMap<string, Rend
     else missing.push(s);
   });
   const rows = renders.components.flatMap((c, i): Ranked[] => {
-    const target = { component: c.name, ...(c.renderedAt && { location: c.renderedAt }) };
+    const target = { id: c.id, component: c.name, ...(c.renderedAt && { location: c.renderedAt }) };
     const storm = stormAt.get(`${i}|`);
     const own =
       storm || c.avoidable > 0
@@ -422,7 +449,7 @@ const layoutShiftFindings = (rows: readonly LayoutShiftRow[]): { findings: Ranke
   const moved = new Set<string>();
   const findings = Array.from(groups.values()).flatMap(({ first, rows: list }): Ranked[] => {
     const score = round3(list.reduce((n, r) => n + r.value, 0));
-    const { component, renderedAt, cause } = list[0];
+    const { component, renderedAt, cause, componentId: movedId } = list[0];
     if (score < LARGE_LAYOUT_SHIFT || (!component && !cause)) return [];
     if (component) moved.add(`${component}|${renderedAt ?? ''}`);
     // 고칠 곳은 대개 응답을 받아 그리는 컴포넌트다(자리를 예약할 곳).
@@ -432,8 +459,11 @@ const layoutShiftFindings = (rows: readonly LayoutShiftRow[]): { findings: Ranke
         kind: 'layout-shift',
         severity: 'medium',
         target: {
-          ...(cause && { endpoint: cause.endpoint }),
+          ...((cause?.componentId ?? movedId) && { id: cause?.componentId ?? movedId }),
+          ...(cause && { endpoint: cause.endpoint, endpointId: cause.endpointId }),
           ...((cause?.component ?? component) && { component: cause?.component ?? component }),
+          // 고칠 곳(id)이 원인 컴포넌트일 때, 밀린 컴포넌트는 componentId 로 남긴다
+          ...(cause && movedId && movedId !== cause.componentId && { componentId: movedId }),
           ...(location && { location }),
         },
         evidence: { shifts: list.length, score, ...(cause?.inferred && { inferredCause: 1 }) },
@@ -511,4 +541,6 @@ export const SUMMARY_HOW_TO_READ: readonly string[] = [
   'Read summary first. summary.verdict is a one-line count of the problems (a + after a number means the render rows hit their limit and there may be more); summary.topFindings lists up to 10 things to fix, in the order to fix them, and summary.omitted is how many more were left out.',
   `topFindings[].severity high means the RDX button badge counts it (an endpoint with wasted requests, or a component group — name and JSX location — with an instance rendering ${RENDER_STORM}+ times within the last ${WINDOW_MS / 1000}s; the same rule and count as summary.badge); medium means it can be reduced but the badge does not count it. Within a severity, requests come first (request bursts after the other request findings), then React Query, renders, layout shifts (a component whose shifts add up to a score of ${LARGE_LAYOUT_SHIFT}+, largest evidence.score first), and remounts; within each, the largest estimated savings (requests or renders saved, then ms) comes first.`,
   'topFindings[].detail is the path of the full entry in this report (e.g. requests.endpoints[0], or renders.components[2].libraries[0] for a library component folded into the app component that renders it); read it and confirm in code before fixing. target.location is the listed caller that sent the most wasted requests, the JSX location (renderedAt), or the call site (stack); it is absent when unknown. savings is an estimate (ms values are dev-build sums).',
+  // 섹션 공통 id(report/ids.ts). topFindings 의 target.id 로 상세 행을 찾아가는 법이라 summary 줄에 둔다.
+  "id fields link the same endpoint or component across sections, summary and compare. They are strings built from names and locations (not numbers), so they stay the same across runs: an endpoint is ep:<endpoint> (e.g. ep:GET /items/:id), a component is c:<name>@<renderedAt> (c:<name> when the JSX location is unknown); a library component row (package present) is c:<name>(<package>), followed by <<owner name>@<owner location> when the app component that rendered it is known. requests.endpoints[].id and renders.components[].id name the rows; endpointId and componentId (and causedBy[].id, heaviestCommits[].startedBy.id) refer to them from networkCauses, requests.nPlusOne, requests.waterfalls[].chain, requests.bursts[].topEndpoints, requests.followUps (mutationId, refetchedId) and layoutShifts. causedBy[].id and startedBy.id use the same rule as renders.components[].id, but that row may be missing from renders.components when it is beyond the row limit (renders.omitted) or did not render itself in the window. componentId in requests.nPlusOne, requests.waterfalls[].chain and request findings is name-only because the sending component's JSX location is not known: it matches the renders.components rows whose id is c:<name> or starts with c:<name>@. summary.topFindings[].target.id is the row to fix (ep: for request findings, c: for render, remount and layout-shift findings; absent for React Query findings, which use queryKeys), and target.endpointId / componentId is the other endpoint or component the finding involves (for a layout-shift finding whose fix is in the cause component, componentId is the component that moved). compare rows carry the same id. A location still being source-mapped can change the id, so compare snapshots (complete true), not periodic files.",
 ];
