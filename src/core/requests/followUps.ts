@@ -1,12 +1,12 @@
 import { groupBy } from '../../shared/collections.js';
 import { periodicRequestIds } from './classify.js';
+import { isMutating } from './methods.js';
 import { endpointOf } from './requestKey.js';
 import { getRecords } from './store.js';
 import type { RequestRecord } from './types.js';
 
 // 변경 요청 응답이 도착한 뒤 이만큼 안에 나간 조회를 그 요청 때문으로 본다.
 const FOLLOW_UP_WINDOW_MS = 1000;
-const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export interface FollowUp {
   endpoint: string;
@@ -25,7 +25,7 @@ export const followUps = (
   records: readonly RequestRecord[] = getRecords(),
   queryKeyOf: (r: RequestRecord) => string | undefined = () => undefined,
 ): FollowUp[] => {
-  if (!MUTATING.has(mutation.method.toUpperCase())) return [];
+  if (!isMutating(mutation.method)) return [];
   const from = mutation.startedAt + mutation.durationMs;
   const load = mutation.load ?? 0;
   const sameLoad = records.filter((r) => (r.load ?? 0) === load);

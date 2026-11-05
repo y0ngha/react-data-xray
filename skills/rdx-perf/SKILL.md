@@ -67,6 +67,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 | Request waterfall (`requests.waterfalls`: a response mounts the component that sends the next request) | Open the later request's `location` and check whether it uses the earlier response. If it does not, start it in parallel (lift it next to the first request) or prefetch it. If it does, join the data on the server (one endpoint) or move both requests into a route loader. rdx does not check the data dependency — confirm it in code |
 | React Query key problem | Follow `reactQuery.findings[].fix` |
 | Layout shift after a response (`layoutShifts[].cause`) | Reserve the space before the data arrives: make the loading skeleton the final size, set `min-height` on the container, and give images `width`/`height` (or `aspect-ratio`). Re-measure that the shift score drops |
+| Unused response (`requests.endpoints[].unused`, summary kind `unused-response`) | Confirm in code that nothing reads the data — not in effects, event handlers, refs, or transformed copies. If truly unused, remove the request or fetch it only when needed (`enabled` condition, on interaction). Otherwise leave it: this flag is a review hint, not proof of waste |
 
 ## 6. Constraints
 

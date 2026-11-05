@@ -17,6 +17,7 @@ export type FindingKind =
   | 'same-response'
   | 'n-plus-one'
   | 'waterfall'
+  | 'unused-response'
   | 'react-query'
   | 'render-storm'
   | 'avoidable-renders'
@@ -63,6 +64,7 @@ const KIND_ORDER: Record<FindingKind, number> = {
   'same-response': 0,
   'n-plus-one': 0,
   waterfall: 0,
+  'unused-response': 0,
   'react-query': 1,
   'render-storm': 2,
   'avoidable-renders': 2,
@@ -130,6 +132,30 @@ const nPlusOneFindings = (entries: RequestSection['nPlusOne']): Ranked[] =>
     detail: `requests.nPlusOne[${i}]`,
     rank: [n.count - 1, 0, n.count],
   }));
+/**
+ * 응답을 쓰는 컴포넌트를 못 찾은 엔드포인트(무시한 것은 뺀다). 배지는 세지 않는다(medium): effect·핸들러에서만 쓰거나 가공한 데이터도 이렇게 보인다.
+ * 보낸 위치는 가장 많이 보낸 caller 다(쓰지 않는 요청만 따로 세지 않는다).
+ */
+const unusedFindings = (endpoints: readonly Endpoint[]): Ranked[] =>
+  endpoints.flatMap((e, i): Ranked[] => {
+    if (e.ignored || !e.unused) return [];
+    const caller = e.callers[0];
+    const component = caller?.component ?? caller?.observer;
+    const ms = Math.round(e.unused * e.avgMs);
+    return [
+      {
+        kind: 'unused-response',
+        severity: 'medium',
+        target: { endpoint: e.endpoint, ...(component && { component }), ...(caller?.frame && { location: caller.frame }) },
+        evidence: { count: e.count, unused: e.unused },
+        savings: { requests: e.unused, ms },
+        fix: 'No component holds this response. Confirm in code that nothing reads it (effects, event handlers, transformed copies), then remove the request or fetch it only when needed.',
+        detail: `requests.endpoints[${i}]`,
+        rank: [e.unused, ms, e.count],
+      },
+    ];
+  });
+
 /**
  * 워터폴마다 하나. 고칠 곳은 마지막 요청을 보낸 컴포넌트(앞 응답이 와야 마운트돼 요청한다)다.
  * savings.ms 는 모두 병렬로 보냈을 때 줄어들 지연의 어림(응답 시간 합 − 가장 긴 응답 시간)이다.
@@ -365,6 +391,7 @@ export const buildSummary = (
     ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
     ...nPlusOneFindings(requests.nPlusOne),
     ...waterfallFindings(requests.waterfalls),
+    ...unusedFindings(requests.endpoints),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),
     ...shifts.findings,

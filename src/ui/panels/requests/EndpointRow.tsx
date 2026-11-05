@@ -8,6 +8,7 @@ import type { IgnoreSource } from '../../../shared/ignoredEndpoints.js';
 import type { FocusRequest } from '../../viewState.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
+import { UNUSED_TITLE } from '../../request/ClassBadge.js';
 import { color, plainButtonStyle, rowStyle } from '../../theme.js';
 
 interface EndpointRowProps {
@@ -80,6 +81,7 @@ const segments = (stat: EndpointStat, ignored: boolean, renders: EndpointRenders
       ? { text: `failed: ${stat.failedCodes.join('·')}`, title: 'Status codes of failed requests regardless of waste' }
       : null,
     stat.review > 0 ? { text: `review: ${stat.review}`, color: color.review } : null,
+    stat.unused ? { text: `unused: ${stat.unused}`, color: color.review, title: UNUSED_TITLE } : null,
     // 무시한 엔드포인트는 보고서처럼 N+1 로 보이지 않는다
     ...(ignored ? [] : (stat.nPlusOne ?? [])).map((sender) => ({
       text: `N+1: ${senderLabel(sender)}×${sender.count}`,
