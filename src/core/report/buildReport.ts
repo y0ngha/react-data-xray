@@ -16,6 +16,7 @@ import { buildRequestSection, REQUEST_HOW_TO_READ, REQUEST_HOW_TO_READ_EXTRA, ty
 import { getResetAt } from './resetAt.js';
 import { buildSummary, SUMMARY_HOW_TO_READ, type ReportSummary } from './summarySection.js';
 import { findRenderStorms } from '../problems.js';
+import { getEndpointRenders, reportWindowMs } from '../render/monitor.js';
 
 /** AI·사람이 읽는 rdx 결과 요약. 응답 본문과 헤더는 넣지 않는다(인증 정보가 섞일 수 있다). */
 export interface RdxReport {
@@ -41,8 +42,8 @@ export interface ReportOptions {
   howToRead?: boolean;
 }
 
-/** HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침). */
-export const HOW_TO_READ_VERSION = 3;
+/** HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침, 4: requests.endpoints[].renders #84). */
+export const HOW_TO_READ_VERSION = 4;
 
 // 섹션별 줄을 읽는 순서로 잇는다.
 export const HOW_TO_READ: readonly string[] = [
@@ -80,7 +81,9 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true,
   // 패널에서 "의도된 반복"으로 지정한 엔드포인트는 보고서에서도 낭비로 세지 않는다.
   const ignored = readIgnoredEndpoints();
   const classes = classifyRecords(records, ignored);
-  const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf);
+  // 엔드포인트별 렌더 비용은 렌더 섹션과 같은 구간에서, 이미 기록된 렌더를 세기만 한다(#84).
+  const endpointRenders = getEndpointRenders(now, reportWindowMs(now));
+  const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf, endpointRenders);
   const reactQuery = buildReactQuerySection(records, classes);
   const renders = buildRenderSection(monitoring, now);
   return {

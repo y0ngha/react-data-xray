@@ -71,7 +71,13 @@ export const PanelContent = ({
         </>
       )}
       {tab === 'requests' && (
-        <RequestsTab records={analysis.records} stats={analysis.stats} ignored={ignored} onToggleIgnore={onToggleIgnore} />
+        <RequestsTab
+          records={analysis.records}
+          stats={analysis.stats}
+          ignored={ignored}
+          onToggleIgnore={onToggleIgnore}
+          scope={scope?.fiber ?? null}
+        />
       )}
       {tab === 'timeline' && <TimelineTab records={analysis.records} />}
       {tab === 'renders' && <RendersTab statsByEndpoint={analysis.statsByEndpoint} scope={scope?.fiber ?? null} />}

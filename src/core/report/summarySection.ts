@@ -24,8 +24,11 @@ export interface TopFinding {
   target: { endpoint?: string; component?: string; library?: string; queryKeys?: string[]; location?: string };
   /** 판단 근거 수치 */
   evidence: Record<string, number>;
-  /** 고치면 줄어들 것으로 보는 양. ms 는 dev 빌드에서 잰 값이다 */
-  savings?: { requests?: number; renders?: number; ms?: number };
+  /**
+   * 고치면 줄어들 것으로 보는 양. 요청 finding 의 ms 는 요청 시간, renders·renderMs 는 그 엔드포인트의 같은 응답이 일으킨 렌더다
+   * (requests.endpoints[].renders.fromSameResponse). 렌더 finding 의 ms 와 renderMs 는 dev 빌드에서 잰 값이다
+   */
+  savings?: { requests?: number; renders?: number; ms?: number; renderMs?: number };
   fix?: string;
   /** 상세 항목의 경로(예: requests.endpoints[0]). 보고서 범위 밖이라 상세 행이 없으면 두지 않는다 */
   detail?: string;
@@ -74,6 +77,9 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
     const caller = wastefulCaller(e);
     const component = caller?.component ?? caller?.observer;
     const ms = Math.round(wasted * e.avgMs);
+    // 같은 응답 재요청을 없애면 그 응답이 일으킨 렌더(부모를 따라 렌더된 자손까지)도 사라진다(#84).
+    const same = e.renders?.fromSameResponse;
+    const renders = same && same.count > 0 ? same : undefined;
     return [
       {
         kind: e.duplicates >= e.sameResponses ? 'duplicate' : 'same-response',
@@ -84,8 +90,13 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
           duplicates: e.duplicates,
           sameResponses: e.sameResponses,
           ...(e.failedDuplicates > 0 && { failedDuplicates: e.failedDuplicates }),
+          ...(renders && { sameResponseRenders: renders.count }),
         },
-        savings: { requests: wasted, ms },
+        savings: {
+          requests: wasted,
+          ms,
+          ...(renders && { renders: renders.count, ...(renders.ms !== undefined && { renderMs: renders.ms }) }),
+        },
         detail: `requests.endpoints[${i}]`,
         rank: [wasted, ms, e.count],
       },

@@ -1,3 +1,4 @@
+import type { EndpointRenders } from '../render/endpointRenders.js';
 import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
@@ -44,6 +45,12 @@ export interface RequestSection {
     /** 같은 응답 재조회의 React Query 원인별 수(staleTime 경과·staleTime 0·무효화 후). 알 수 있는 것만 있다 */
     refetchReasons?: Partial<Record<RefetchReason, number>>;
     review: number;
+    /**
+     * 이 엔드포인트의 응답이 렌더 구간(renders.windowSeconds) 안에 일으킨 렌더 수·자기 렌더 시간 합(ms, dev 빌드의 selfBaseDuration).
+     * 직접 렌더와 부모를 따라 렌더된 자손을 모두 세고, viaParent 는 그중 부모를 따라 렌더된 것, fromSameResponse 는 직전과 똑같은 응답으로 일어난 것이다.
+     * 원인으로 이어진 렌더가 없으면 없다. ms 는 시간 기록이 없으면 없다
+     */
+    renders?: EndpointRenders;
     /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수. route·component 는 알 때만 있다 */
     callers: Caller[];
     /** 중복 요청이 다시 나간 이유별 수(의존성 변경·재마운트·StrictMode). 알 수 있는 것만 있다 */
@@ -148,6 +155,8 @@ export const buildRequestSection = (
   classes: ReadonlyMap<number, RequestClass>,
   ignored: ReadonlySet<string>,
   queryOf: (record: RequestRecord) => QueryContext | undefined = queryContextOf,
+  /** 엔드포인트별 렌더 비용(render/monitor 의 getEndpointRenders). 렌더 감시가 꺼져 있었으면 비어 있다 */
+  renders: ReadonlyMap<string, EndpointRenders> = new Map(),
 ): RequestSection => {
   const byEndpoint = groupBy(records, endpointOf);
   return {
@@ -166,6 +175,7 @@ export const buildRequestSection = (
         failedDuplicates: s.failedDuplicates ?? 0,
         refetchReasons: refetchReasonsOf(own, classes),
         review: s.review,
+        renders: renders.get(s.endpoint),
         callers: callersOf(own, queryOf, (r) => isWaste(classes.get(r.id))),
         repeatCauses: repeatCausesOf(own),
         wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
@@ -185,4 +195,5 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
+  'requests.endpoints[].renders is what responses from this endpoint caused on screen during renders.windowSeconds: count renders and ms self render time, including both components that received the response (direct, or own state changed right after it arrived) and descendants that rendered along with them; viaParent is the portion that rendered only because an ancestor did (fix that ancestor, or memoize the children). fromSameResponse is the portion caused by a response identical to the previous one — pure waste that disappears when the refetch is removed or setState is skipped for an unchanged response; summary.topFindings[].savings.renders and renderMs for that endpoint come from it. ms is a selfBaseDuration sum from a dev build: compare it across endpoints or before vs. after a fix rather than reading it as production time. Absent when no render was linked to the endpoint.',
 ];

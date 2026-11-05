@@ -1,24 +1,32 @@
 import { useMemo, useState } from 'react';
 
+import type { Fiber } from '../../../core/fiber/types.js';
 import { getEndpointStats, type EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { useRequestActions } from '../../contexts.js';
+import { useNow } from '../../hooks/useNow.js';
+import { useRenderMonitoring } from '../../hooks/useRenderMonitoring.js';
 import { useFocusedItem } from '../../viewState.js';
 import { color } from '../../theme.js';
 import { CacheAuditView } from './CacheAuditView.js';
 import { EndpointRow } from './EndpointRow.js';
 import { RequestLogRow } from './RequestLogRow.js';
+import { useEndpointRenders } from './useEndpointRenders.js';
 
 type View = 'endpoints' | 'log' | 'cache';
+
+const REFRESH_MS = 1000;
 
 interface RequestsTabProps {
   records: readonly RequestRecord[];
   stats: readonly EndpointStat[];
   ignored: ReadonlySet<string>;
   onToggleIgnore: (endpoint: string) => void;
+  /** 분석 대상 컴포넌트. 있으면 엔드포인트별 렌더도 그 아래 것만 센다 */
+  scope?: Fiber | null;
 }
 
 /**
@@ -50,7 +58,11 @@ const UnseenIgnored = ({ ignored, stats, onToggleIgnore }: Pick<RequestsTabProps
 };
 
 /** 네트워크 › 요청: 엔드포인트별 지표와 전체 기록. 엔드포인트를 누르면 그 요청만 기록에 보여 준다. */
-export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: RequestsTabProps) => {
+export const RequestsTab = ({ records, stats, ignored, onToggleIgnore, scope = null }: RequestsTabProps) => {
+  // 엔드포인트마다 그 응답이 일으킨 렌더를 보이려면 렌더 감시가 켜져 있어야 한다(#84). 세기는 유휴 큐에서 한다.
+  useRenderMonitoring();
+  const now = useNow(REFRESH_MS);
+  const renders = useEndpointRenders(now, scope);
   const [view, setView] = useState<View>('endpoints');
   const [filter, setFilter] = useState<string | null>(null);
   const [currentOnly, setCurrentOnly] = useState(false);
@@ -106,6 +118,7 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
           <EndpointRow
             key={stat.endpoint}
             stat={stat}
+            renders={renders?.get(stat.endpoint)}
             ignored={ignored.has(stat.endpoint)}
             route={route}
             focus={focus?.key === stat.endpoint ? focus : undefined}
