@@ -286,7 +286,7 @@ react-query 를 import 하지 않고, fiber 에서 `QueryClientProvider` 의 `cl
 - 파생 매칭은 필드 값 겹침으로 판단해서, 같은 값을 가진 다른 응답을 가리킬 수 있습니다.
 - context 는 값과 바로 아래 한 단계까지만 봅니다. 그보다 깊이 품은 응답은 출처로 잡지 않습니다.
 - 박스는 응답 객체를 props 로 받는 컴포넌트에만 그립니다. state 로만 들고 있는 컴포넌트는 요소 선택과 "이 요청의 데이터를 쓰는 컴포넌트"로 찾습니다.
-- 소스맵은 http 로 받을 수 있는 모듈에만 적용합니다(Vite dev). webpack 의 eval 소스맵(`webpack-internal://`)은 바꾸지 않습니다.
+- 소스맵은 http 로 받을 수 있는 모듈(Vite dev, Next.js Turbopack 의 index map 포함)과 Next.js 서버 컴포넌트 프레임(`about://React/Server/…`, dev 서버의 `/__nextjs_source-map`)에만 적용합니다. webpack 의 eval 소스맵(`webpack-internal://`)은 바꾸지 않습니다.
 - 큰 소스맵의 `JSON.parse` 한 번은 조각으로 나눌 수 없어 메인 스레드에 남습니다.
 - 최근 요청 200건(`configure` 의 `maxRecords`)만 기억합니다.
 - 화면 이동은 rdx 가 감싼 `history.pushState`·`replaceState` 로 압니다. rdx 보다 먼저 실행된 코드가 원래 메서드를 따로 잡아 두고 부르면 그 이동은 보지 못합니다. rdx 는 앱 코드보다 먼저 import 해야 하므로 실제로는 드뭅니다.

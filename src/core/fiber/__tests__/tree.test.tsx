@@ -218,6 +218,14 @@ describe('React 19 의 JSX 위치(_debugStack)', () => {
     expect(libraryPackageOf(fiber)).toBeUndefined();
   });
 
+  it('서버 컴포넌트 프레임은 소스맵이 오기 전에도 홈 폴더 경로 없이 .next/ 부터 보인다 (#120)', () => {
+    const fiber = fiberWithStack([
+      `at fakeJSXCallSite (${TURBOPACK}/node_modules_next_dist_compiled_react-server-dom-turbopack_164kp-67asdr9._.js:2093:21)`,
+      'at SymbolPage (about://React/Server/file:///Users/me/app/.next/dev/server/chunks/ssr/%5Broot-of-the-server%5D__0magscunfp0sa._.js?227:388:294)',
+    ]);
+    expect(jsxLocationOf(fiber)).toBe('.next/dev/server/chunks/ssr/%5Broot-of-the-server%5D__0magscunfp0sa._.js:388');
+  });
+
   it('Firefox·Safari 형식(fn@url:줄:열)도 읽는다', () => {
     const fiber = fiberWithStack([
       'jsxDEV@http://localhost:5173/node_modules/.vite/deps/react.js:1:1',
