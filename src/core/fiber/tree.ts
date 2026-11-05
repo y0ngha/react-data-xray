@@ -194,7 +194,3 @@ export const unionRect = (els: readonly Element[]): DOMRect | null => {
   const bottom = Math.max(...rects.map((r) => r.bottom));
   return new DOMRect(left, top, right - left, bottom - top);
 };
-
-/** 컴포넌트가 화면에서 차지하는 영역. rdx 자신의 UI 는 뺀다. */
-export const componentRect = (fiber: Fiber, isOwnUi: (el: Element) => boolean): DOMRect | null =>
-  unionRect(hostNodesOf(fiber).filter((n) => !isOwnUi(n)));

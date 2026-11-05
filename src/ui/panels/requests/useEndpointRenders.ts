@@ -52,7 +52,7 @@ export const useEndpointRenders = (
         mine.done = done;
       }
       return done;
-    });
+    }, 'ui'); // 패널만 쓰는 목록이다. 보고서는 buildReport 가 그 자리에서 센다
   }, [now, scope, records, filterKey, host]);
   useEffect(
     () => () => {

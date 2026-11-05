@@ -23,7 +23,7 @@ import { installReportApi } from '../reportApi.js';
 import { buildSummary } from '../summarySection.js';
 
 // howToRead 문구(와 문구에 들어가는 RENDER_STORM·WINDOW_MS)가 바뀌면 이 두 값을 함께 고친다. 판은 하나 올린다.
-const EXPECTED_HOW_TO_READ = { version: 5, hash: '9f594a30335f' };
+const EXPECTED_HOW_TO_READ = { version: 6, hash: 'b3752707a0a9' };
 
 type Endpoint = RequestSection['endpoints'][number];
 type Component = RenderSection['components'][number];
@@ -285,6 +285,6 @@ describe('howToRead 판과 빼기 (#70)', () => {
 
   it('compare_ignores_summary: 비교용 보고서에는 summary·howToRead 가 들어가지 않는다', () => {
     const c = toComparable(buildReport(false, 0, false));
-    expect(Object.keys(c).sort()).toEqual(['config', 'reactQuery', 'renders', 'requests', 'resetAt']);
+    expect(Object.keys(c).sort()).toEqual(['complete', 'config', 'incompleteReasons', 'reactQuery', 'renders', 'requests', 'resetAt']);
   });
 });
