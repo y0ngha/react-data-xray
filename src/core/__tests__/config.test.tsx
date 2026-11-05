@@ -42,6 +42,7 @@ describe('configure 값 검사 (#78)', () => {
       keyHeaders: [],
       dedupeWindowMs: 2000,
       burst: { windowMs: 500, count: 5 },
+      nPlusOne: { windowMs: 1000, count: 5 },
       maxRecords: 200,
       reportPath: '/__rdx/report',
     });
@@ -63,6 +64,7 @@ describe('configure 값 검사 (#78)', () => {
       keyHeaders: ['x-tenant'],
       dedupeWindowMs: 2000,
       burst: { windowMs: 500, count: 3 },
+      nPlusOne: { windowMs: 1000, count: 5 },
       maxRecords: 200,
       reportPath: '/__rdx/report',
     });

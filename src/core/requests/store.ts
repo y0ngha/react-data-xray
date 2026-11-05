@@ -6,6 +6,7 @@ import { currentCommitSeq, hasCommitRecords } from '../render/commitCauses.js';
 import { isAborted } from './aborted.js';
 import { repeatCauseStep } from './repeatCause.js';
 import { waterfallParentOf } from './waterfall.js';
+import { noteNPlusOneStage, resetNPlusOne } from './nPlusOne.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import { createByteCounter } from './byteLength.js';
 import { createResponseHasher, digestOf, HASH_CHUNK } from './responseHash.js';
@@ -88,6 +89,7 @@ export const createRecord = (
     if (isStale(record)) return true;
     const duplicate = detectDuplicate(record);
     record.duplicateOf = duplicate?.id;
+    if (noteNPlusOneStage(record, 'deduped')) notify();
     // 반복 이유와 워터폴(앞 요청을 기다렸는지)은 보낸 컴포넌트를 채우는 annotate step 뒤에, useLayoutEffect 가 보낸 요청이면
     // 다음 commit 의 렌더 기록 step 뒤에 정해야 하므로 한 step 으로 묶어 한 번 더 미룬다. 렌더 기록이 없으면(감시 꺼짐) 워터폴은 볼 것이 없다.
     const repeat = duplicate && repeatCauseStep(record, duplicate.commitSeq);
@@ -129,6 +131,11 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
     });
   records.push(record);
   trimRecords();
+  // 항목마다 보낸 요청(N+1)인지는 유휴 큐에서 그 요청이 든 창만 본다. 보낸 곳(annotate)·중복 판정 step 과 이 step 중 마지막 것이 판정한다.
+  enqueue(() => {
+    if (!isStale(record) && noteNPlusOneStage(record, 'finished')) notify();
+    return true;
+  });
   notify();
 };
 
@@ -217,5 +224,6 @@ export const clearRecords = (): void => {
   firstLiveId = nextId;
   dropped = 0;
   resetRepeatDetection();
+  resetNPlusOne();
   notify();
 };

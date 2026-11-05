@@ -341,7 +341,7 @@ describe('이슈 86: 고리 묶기 (기록 단위)', () => {
     ];
     const noQuery = { findings: [] } as unknown as Parameters<typeof buildSummary>[1];
     const noRenders = { monitoring: true, components: [] } as unknown as Parameters<typeof buildSummary>[2];
-    const s = buildSummary({ total: 2, dropped: 0, endpoints: [], waterfalls }, noQuery, noRenders, new Map());
+    const s = buildSummary({ total: 2, dropped: 0, endpoints: [], nPlusOne: [], waterfalls }, noQuery, noRenders, new Map());
     expect(s.topFindings).toEqual([
       expect.objectContaining({
         kind: 'waterfall',
