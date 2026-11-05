@@ -13,6 +13,7 @@ import {
   isFrameworkDevtoolsRoot,
   isMemoized,
   jsxLocationOf,
+  libraryPackageOf,
   resolveJsxLocation,
   toCurrent,
   unionRect,
@@ -161,6 +162,60 @@ describe('React 19 의 JSX 위치(_debugStack)', () => {
       'at App (http://localhost:5173/src/App.tsx:5:3)',
     ]);
     expect(jsxLocationOf(fiber)).toBe('src/components/Middle.tsx:12');
+  });
+
+  // Next.js Turbopack dev 는 경로의 / 를 _ 로 바꾼 청크 이름을 쓴다(#116)
+  const TURBOPACK = 'http://localhost:4200/_next/static/chunks';
+
+  it('Turbopack 이 번들한 JSX 런타임(node_modules_… 청크)을 건너뛰고 앱 프레임을 고른다 (#116)', () => {
+    const fiber = fiberWithStack([
+      `at exports.jsxDEV (${TURBOPACK}/node_modules_next_0xwmtz0bm-kxf._.js:1508:33)`,
+      `at SymbolPageClient (${TURBOPACK}/src_07-h1l2e_fir4._.js:8446:242)`,
+    ]);
+    expect(jsxLocationOf(fiber)).toBe(`${TURBOPACK}/src_07-h1l2e_fir4._.js:8446`);
+  });
+
+  it('JSX 런타임이 해시만 있는 청크에 들어가도 함수 이름(jsxDEV)으로 건너뛴다 (#116)', () => {
+    const fiber = fiberWithStack([
+      `at exports.jsxDEV (${TURBOPACK}/_0w60gtwn3b3v_._.js:233:33)`,
+      `at SymbolPageClient (${TURBOPACK}/src_15a7htwpb9fxi._.js:8446:242)`,
+    ]);
+    expect(jsxLocationOf(fiber)).toBe(`${TURBOPACK}/src_15a7htwpb9fxi._.js:8446`);
+    expect(libraryPackageOf(fiber)).toBeUndefined();
+  });
+
+  it('앱 폴더 이름이 react 여도 그 프레임을 JSX 위치로 고른다', () => {
+    const fiber = fiberWithStack([
+      'at exports.jsxDEV (http://l/node_modules/.vite/deps/react_jsx-dev-runtime.js:1:1)',
+      'at Card (http://l/src/react/Card.tsx:4:2)',
+    ]);
+    expect(jsxLocationOf(fiber)).toBe('src/react/Card.tsx:4');
+  });
+
+  it('Turbopack 청크의 앱 컴포넌트는 라이브러리가 아니고, 라이브러리 청크에서는 패키지 이름을 읽는다 (#116)', () => {
+    const app = fiberWithStack([
+      `at exports.jsxDEV (${TURBOPACK}/node_modules_next_0xwmtz0bm-kxf._.js:1508:33)`,
+      `at SymbolPageClient (${TURBOPACK}/src_07-h1l2e_fir4._.js:8446:242)`,
+    ]);
+    expect(libraryPackageOf(app)).toBeUndefined();
+    const lib = (chunk: string) =>
+      libraryPackageOf(
+        fiberWithStack([
+          `at exports.jsxDEV (${TURBOPACK}/node_modules_next_0xwmtz0bm-kxf._.js:1508:33)`,
+          `at Ie (${TURBOPACK}/${chunk}:3:4)`,
+        ]),
+      );
+    expect(lib('node_modules_next_dist_client_1wygxx0abcd._.js')).toBe('next');
+    expect(lib('node_modules_%40tanstack_react-query_build_modern_0wwbsqz2qputj._.js')).toBe('@tanstack/react-query');
+    expect(lib('node_modules_1zc0mrxbcobfw._.js')).toBe('(bundle)');
+  });
+
+  it('서버 컴포넌트가 그린 클라이언트 컴포넌트(맨 위가 RSC 의 fakeJSXCallSite)도 라이브러리로 보지 않는다 (#116)', () => {
+    const fiber = fiberWithStack([
+      `at fakeJSXCallSite (${TURBOPACK}/node_modules_next_dist_compiled_react-server-dom-turbopack_164kp-67asdr9._.js:2093:21)`,
+      'at SymbolPage (about://React/Server/file:///p/.next/dev/server/chunks/ssr/%5Broot-of-the-server%5D__0magscunfp0sa._.js?227:388:294)',
+    ]);
+    expect(libraryPackageOf(fiber)).toBeUndefined();
   });
 
   it('Firefox·Safari 형식(fn@url:줄:열)도 읽는다', () => {
