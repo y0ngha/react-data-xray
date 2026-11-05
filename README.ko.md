@@ -240,6 +240,8 @@ window.__RDX__.reset();                  // 기록을 지우고 측정 새로 �
 await window.__RDX__.snapshot('before'); // .rdx/before.json 으로 저장
 ```
 
+브라우저 도구가 없어도 됩니다. dev 서버 플러그인을 붙이고 앱을 탭에 열어 두면 같은 단계를 터미널에서 부릅니다: `npx react-data-xray reset`, `npx react-data-xray snapshot before`, `npx react-data-xray compare before after`. `npx react-data-xray mcp` 는 같은 동작을 MCP 도구로 냅니다(`claude mcp add rdx -- npx react-data-xray mcp`).
+
 Claude Code 를 쓴다면 패키지의 스킬 [`rdx-perf`](./skills/rdx-perf/SKILL.md) 를 복사해 두세요. "이 화면 느려" 같은 요청에 위 순서로 자동으로 일합니다. 자세한 내용은 [AI 에이전트와 함께 쓰기](./docs/ai.md) (영어)를 보세요.
 
 ## 문서

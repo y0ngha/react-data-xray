@@ -66,5 +66,5 @@ export const causeOf = (result: ReasonResult, inherited: NetworkCause | undefine
     return arrived ? { record: arrived, via: 'timing' } : undefined;
   }
   if (!inherited) return undefined;
-  return { record: inherited.record, via: 'parent' };
+  return { record: inherited.record, via: 'parent', ...((inherited.via === 'timing' || inherited.guessed) && { guessed: true as const }) };
 };
