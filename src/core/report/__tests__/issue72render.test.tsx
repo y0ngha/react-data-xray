@@ -50,8 +50,8 @@ it('real_report: 보고서 상한 밖 행도 비교용 부분에 남아, 순위�
   expect(before.renders.omitted).toMatchObject({ components: 0, renders: 0, avoidable: 0 });
   expect(before.renders.components.length).toBe(report.renders.components.length + report.renders.omitted.components);
 
-  // 같은 측정을 보고서 JSON 으로만 가진 경우(파일): 상한 밖 행을 모르므로 한쪽에만 보이는 행은 unknown 이다.
-  const fromFile = toComparable(JSON.parse(JSON.stringify(report)));
+  // 같은 측정을 보고서로만 가진 경우(파일·상한 밖 행 없음): 한쪽에만 보이는 행은 unknown 이다.
+  const fromFile = toComparable(report);
   expect(fromFile.renders.omitted).toEqual(report.renders.omitted);
   const missing = before.renders.components.find((c) => !fromFile.renders.components.some((f) => f.name === c.name))!;
   const vsFile = compare(fromFile, before);
