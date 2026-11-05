@@ -173,8 +173,10 @@ const snapshot = async (name: string): Promise<RdxReport> => {
     throw new Error(NO_PLUGIN_MESSAGE);
   }
   // 호출 위치가 원본 위치와 변환 전 위치로 갈리지 않게, 진행 중인 소스맵 변환을 기다린다.
-  await whenSourcesResolved();
-  const result = report();
+  const resolved = await whenSourcesResolved();
+  const monitoring = isRenderMonitoring();
+  keepRenderMonitoring();
+  const result = buildReport(monitoring, Date.now(), true, {}, { sourceMapTimedOut: !resolved });
   const res = await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
     method: 'POST',
     credentials: 'omit',
@@ -223,10 +225,18 @@ const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
 
 /**
  * 주기 업로드가 "바뀌었나" 를 볼 때 쓰는 값. 받은 commit 수는 패널 자신의 commit 에도 늘어, 그대로 비교하면
- * 앱이 멈춰 있어도 5초마다 전체를 보낸다. 0 인지(연결 여부)만 남긴다. 큐에 남은 step 수(pendingAnalysis)도
- * 패널이 도는 동안 늘 바뀌므로 빼고, 끝났는지(complete)만 본다. 보내는 본문에는 그대로 둔다.
+ * 앱이 멈춰 있어도 5초마다 전체를 보낸다. 0 인지(연결 여부)만 남긴다. 완료 표시(complete·incompleteReasons·pendingAnalysis·
+ * sourcesResolved·queryKeysResolved)도 패널이 도는 동안 늘 흔들리므로 뺀다. 덜 분석된 파일이 따라잡는 것은 startUpload 가
+ * complete 가 false → true 로 바뀔 때 한 번 보내서 맞춘다. 보내는 본문에는 그대로 둔다.
  */
-export const changeKeyOf = ({ pendingAnalysis: _pending, ...content }: Omit<RdxReport, 'generatedAt'>): string =>
+export const changeKeyOf = ({
+  complete: _complete,
+  incompleteReasons: _reasons,
+  pendingAnalysis: _pending,
+  sourcesResolved: _sources,
+  queryKeysResolved: _queryKeys,
+  ...content
+}: Omit<RdxReport, 'generatedAt'>): string =>
   JSON.stringify({
     ...content,
     diagnostics: {
@@ -250,13 +260,16 @@ const startUpload = async (): Promise<void> => {
   keepRenderMonitoring();
   let last = '';
   let lastSent = 0;
+  let sentComplete = true; // 마지막으로 보낸 파일이 끝난 보고서였는지
   let failures = 0;
   let timer = 0;
   const upload = async () => {
     const full = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
     const { generatedAt: _generatedAt, ...content } = full;
     const key = changeKeyOf(content);
-    const idle = key === last;
+    // 덜 분석된 파일을 보낸 뒤 분석이 끝나면, 내용이 그대로여도 한 번 보내 파일이 complete: true 로 따라잡게 한다.
+    const caughtUp = full.complete && !sentComplete;
+    const idle = key === last && !caughtUp;
     // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
     if (idle && Date.now() - lastSent < TAB_HEARTBEAT_MS) return;
     const body = JSON.stringify(full); // summary 가 맨 앞에 오도록 키 순서를 그대로 둔다
@@ -271,6 +284,7 @@ const startUpload = async (): Promise<void> => {
     if (res?.ok) {
       last = key;
       lastSent = Date.now();
+      sentComplete = full.complete;
       failures = 0;
       return;
     }

@@ -5,8 +5,9 @@ import type { RdxReport } from './buildReport.js';
 export interface ComparableReport {
   /** 마지막 reset 시각(ms). null 이거나 없으면 reset 하지 않고 잰 것이다(이 필드 전에 저장한 스냅샷에는 없다). */
   resetAt?: number | null;
-  /** 분석이 다 끝난 보고서인지(RdxReport.complete). 이 필드 전에 저장한 스냅샷에는 없다 */
+  /** 분석이 다 끝난 보고서인지(RdxReport.complete)와 그렇지 않은 이유. 이 필드 전에 저장한 스냅샷에는 없다 */
   complete?: boolean;
+  incompleteReasons?: string[];
   requests: { endpoints: Array<{ endpoint: string; count: number; duplicates: number; sameResponses: number }> };
   renders: {
     monitoring: boolean;
@@ -20,6 +21,7 @@ export interface ComparableReport {
 export const toComparable = (r: RdxReport): ComparableReport => ({
   resetAt: r.resetAt,
   complete: r.complete,
+  incompleteReasons: r.incompleteReasons,
   requests: {
     endpoints: r.requests.endpoints.map(({ endpoint, count, duplicates, sameResponses }) => ({
       endpoint,
@@ -126,9 +128,14 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
     const afterStr = rb !== null ? formatTime(rb) : 'none';
     warnings.push(`only one report was measured after a reset (before: ${beforeStr}, after: ${afterStr})`);
   }
-  // snapshot 은 분석과 소스맵 변환을 마친 뒤 만들지만, 소스맵이 2초 안에 끝나지 않으면 덜 분석된 채 남는다.
-  if (a.complete === false || b.complete === false)
-    warnings.push('one of the reports was saved before analysis finished (complete: false); callers and counts may differ for that reason');
+  // snapshot 은 큐를 비우고 소스맵을 2초까지 기다리지만, 그 안에 끝나지 않으면 덜 분석된 채 남는다.
+  const incompleteOf = (name: string, r: ComparableReport): string[] =>
+    r.complete === false ? [`${name} (${(r.incompleteReasons ?? []).join(', ') || 'unknown'})`] : [];
+  const incomplete = [...incompleteOf('before', a), ...incompleteOf('after', b)];
+  if (incomplete.length > 0)
+    warnings.push(
+      `saved before analysis finished (complete: false): ${incomplete.join('; ')}; callers and counts may differ for that reason`,
+    );
   splitEndpoints(a, b).forEach((e) =>
     warnings.push(`endpoint naming changed for ${e} (one report splits it into "${e} (…)" rows; likely different rdx versions)`),
   );
