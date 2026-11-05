@@ -36,7 +36,7 @@ const onLoad = (xhr: XMLHttpRequest): void => {
     attempt(() => {
       record.responseHeaders = parseRawHeaders(rawHeaders);
       // shortcut: 앱이 load 핸들러에서 응답 객체를 고치면 고친 값으로 비교한다, 오판이 보이면 원문(responseText) 기반으로 바꾼다.
-      if (isObject) keepResponseText(record, JSON.stringify(response), { compare: true });
+      if (isObject) keepResponseText(record, JSON.stringify(response), { compare: true, reserialized: true });
       else if (text !== undefined && isReadableText(contentType)) keepResponseText(record, text, { compare: isJson(contentType) });
     });
     touchRecords(); // finishRecord 의 알림은 이 step 보다 먼저라, 열려 있는 상세가 헤더를 보려면 한 번 더 알린다.

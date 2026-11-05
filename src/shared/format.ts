@@ -14,11 +14,13 @@ export const formatJson = (value: unknown, max = 120): string => {
   }
 };
 
-/** 크기를 B·KB·MB 로. 10 보다 작으면 소수 한 자리까지 보인다(1.5 KB, 400 KB). */
+const roundSize = (v: number): number => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v));
+
+/** 크기를 B·KB·MB 로. 10 보다 작으면 소수 한 자리까지 보인다(1.5 KB, 400 KB). 단위는 반올림한 뒤 고른다(1048575 → 1 MB). */
 export const formatSize = (size: number): string => {
   if (size < 1024) return `${size} B`;
-  const [value, unit] = size < 1024 * 1024 ? [size / 1024, 'KB'] : [size / 1024 / 1024, 'MB'];
-  return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)} ${unit}`;
+  const kb = roundSize(size / 1024);
+  return kb < 1024 ? `${kb} KB` : `${roundSize(size / 1024 / 1024)} MB`;
 };
 
 /** JSON 이면 들여쓰기해서, 아니면 원문 그대로 */

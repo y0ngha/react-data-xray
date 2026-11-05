@@ -34,11 +34,14 @@ const holdsResponseOf = (root: unknown, requestKey: string, maxDepth = MAX_DEPTH
 export const findConsumers = (
   record: RequestRecord,
   isOwnUi: (el: Element) => boolean,
-  /** 방금 도착한 큰 응답의 출처 등록을 마치려고 큐를 비우는 시간 상한. 렌더 중에는 부르지 않는다(큐의 step 이 setState 할 수 있다). */
+  /**
+   * 방금 도착한 큰 응답의 출처 등록을 마치려고 큐를 비우는 시간 상한. 렌더 중에는 부르지 않는다(큐의 step 이 setState 할 수 있다).
+   * 0 이면 비우지 않는다(열린 상세가 기록이 바뀔 때 다시 찾을 때: 그때까지 등록된 출처로만 찾는다).
+   */
   flushLimitMs = 1000,
 ): Consumer[] => {
   queueIndex();
-  flushQueue(flushLimitMs);
+  if (flushLimitMs > 0) flushQueue(flushLimitMs);
   const key = requestKeyOf(record);
   const consumers: Consumer[] = [];
   // 같은 객체(react-intl 의 IntlContext 값처럼 수천 컴포넌트가 함께 읽는 context 등)는 한 번만 훑는다.

@@ -16,8 +16,10 @@ export interface RequestRecord {
   responseHeaders?: Record<string, string>;
   /** 응답 원문(텍스트 응답만, 최대 100KB). 상세 화면에서 보여 준다. */
   responseText?: string;
-  /** 응답 원문의 글자 수(100KB 로 자르기 전). 텍스트 응답만. 과다 응답(화면에 보이는 필드 비율) 옆에 크기로 보여 준다. */
-  responseSize?: number;
+  /** 응답 원문의 UTF-8 바이트 수(100KB 로 자르기 전). 텍스트 응답만, 유휴 큐에서 조각으로 센다. 과다 응답 옆에 크기로 보여 준다. */
+  responseBytes?: number;
+  /** responseBytes 가 원문이 아니라 응답 객체를 다시 직렬화한 글자로 센 값이다(XHR responseType 'json'). 공백·키 순서가 원문과 다를 수 있다. */
+  responseBytesApprox?: boolean;
   /** 네트워크 실패·취소·타임아웃 */
   error?: string;
   /** 창 포커스·탭 표시 전환, 네트워크 재연결 직후에 나간 요청(라이브러리의 자동 재요청) */
