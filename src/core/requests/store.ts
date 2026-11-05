@@ -7,6 +7,7 @@ import { isAborted } from './aborted.js';
 import { repeatCauseStep } from './repeatCause.js';
 import { waterfallParentOf } from './waterfall.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
+import { createByteCounter } from './byteLength.js';
 import { createResponseHasher, digestOf, HASH_CHUNK } from './responseHash.js';
 import type { RequestRecord } from './types.js';
 
@@ -131,8 +132,22 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
   notify();
 };
 
+const setResponseBytes = (record: RequestRecord, text: string, reserialized: boolean): void => {
+  const counter = createByteCounter(text);
+  while (!counter.step());
+  record.responseBytes = counter.total();
+  if (reserialized) record.responseBytesApprox = true;
+};
+
 /** 응답 원문을 상세 화면용으로 보관하고, 같은 요청의 직전 응답과 비교한다. */
-export const keepResponseText = (record: RequestRecord, text: string, { compare }: { compare: boolean }): void => {
+export const keepResponseText = (
+  record: RequestRecord,
+  text: string,
+  {
+    compare,
+    reserialized = false,
+  }: { compare: boolean; /** 원문이 아니라 응답 객체를 다시 직렬화한 글자(XHR responseType 'json') */ reserialized?: boolean },
+): void => {
   // payload 를 모르는 요청은 detectSameResponse 가 판정하지 않으므로 해시도 하지 않는다.
   const judge = compare && !record.bodyUnreadable;
   const short = text.length <= HASH_CHUNK;
@@ -140,9 +155,22 @@ export const keepResponseText = (record: RequestRecord, text: string, { compare 
     if (isStale(record)) return true;
     record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (truncated after 100KB)` : text;
     if (judge && short) record.sameResponseAs = detectSameResponse(record, digestOf(text));
+    // 과다 응답 옆에 보일 크기(UTF-8 바이트). 짧은 원문은 여기서 바로, 큰 원문은 뒤 step 에서 조각으로 센다.
+    if (short) setResponseBytes(record, text, reserialized);
     notify();
     return true;
   });
+  if (!short) {
+    const bytes = createByteCounter(text);
+    enqueue(() => {
+      if (isStale(record)) return true;
+      if (!bytes.step()) return false;
+      record.responseBytes = bytes.total();
+      if (reserialized) record.responseBytesApprox = true;
+      notify();
+      return true;
+    });
+  }
   if (!judge || short) return;
   // 큰 응답은 해시를 여러 조각에 나눠 계산한다. 큐는 앞 step 이 끝나야 다음으로 넘어가므로, 그동안 뒤의 일은 기다리고 판정 순서는 그대로다.
   const hasher = createResponseHasher(text);
