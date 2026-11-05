@@ -47,6 +47,17 @@ interface ShiftLayout {
   shift: LayoutShift;
 }
 
+/** 워터폴 화살표: 앞 요청 막대의 끝(응답)에서, 그 응답이 마운트한 컴포넌트가 보낸 요청 막대의 시작으로 */
+export interface LinkLayout {
+  key: number;
+  from: RequestRecord;
+  to: RequestRecord;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 export interface TimelineLayout {
   width: number;
   height: number;
@@ -55,6 +66,8 @@ export interface TimelineLayout {
   dividerY: number;
   commitBaseY: number;
   bars: BarLayout[];
+  /** 둘 다 보이는 워터폴 고리 */
+  links: LinkLayout[];
   bursts: BurstLayout[];
   commits: CommitLayout[];
   /** 레이아웃 이동. 렌더 영역 위에서 아래로 점수만큼 내려 그린다 */
@@ -74,6 +87,26 @@ const assignLanes = (records: readonly RequestRecord[]): number[] =>
     },
     { lanes: [], ends: [] },
   ).lanes;
+
+/** 보이는 막대끼리의 워터폴 고리(record.waterfallFrom). 화살표는 막대 세로 가운데를 잇는다. */
+const waterfallLinks = (bars: readonly BarLayout[]): LinkLayout[] => {
+  const byId = new Map(bars.map((b) => [b.record.id, b]));
+  return bars.flatMap((to) => {
+    const from = to.record.waterfallFrom === undefined ? undefined : byId.get(to.record.waterfallFrom);
+    if (!from) return [];
+    return [
+      {
+        key: to.record.id,
+        from: from.record,
+        to: to.record,
+        x1: from.x + from.width,
+        y1: from.y + LANE_H / 2,
+        x2: to.x,
+        y2: to.y + LANE_H / 2,
+      },
+    ];
+  });
+};
 
 /**
  * 몰림 구간. 버튼과 같게 전체 기록으로 판정하고(대상으로 좁혀도 판정이 버튼과 어긋나지 않는다), 보이는 요청이
@@ -97,7 +130,7 @@ const visibleBursts = (
 };
 
 /**
- * 최근 20초의 요청 막대, 요청 몰림 구간, 렌더 commit 눈금, 레이아웃 이동을 화면 좌표로 계산한다.
+ * 최근 20초의 요청 막대, 워터폴 화살표, 요청 몰림 구간, 렌더 commit 눈금, 레이아웃 이동을 화면 좌표로 계산한다.
  * records 는 그릴 요청(대상으로 좁혔으면 그 안), all 은 몰림 판정에 쓸 전체 기록이다.
  */
 export const layoutTimeline = (
@@ -116,18 +149,20 @@ export const layoutTimeline = (
   const reqH = Math.max(1, ...lanes.map((l) => l + 1)) * (LANE_H + LANE_GAP);
   const recentCommits = commits.filter((c) => c.time >= from);
   const maxCount = Math.max(1, ...recentCommits.map((c) => c.count));
+  const bars = visible.map((record, i) => ({
+    record,
+    x: x(record.startedAt),
+    y: lanes[i] * (LANE_H + LANE_GAP) + LANE_GAP,
+    width: Math.max(MIN_BAR_W, x(record.startedAt + record.durationMs) - x(record.startedAt)),
+  }));
   return {
     width,
     height: reqH + COMMIT_H + AXIS_H,
     laneH: LANE_H,
     dividerY: reqH + 4,
     commitBaseY: reqH + 6 + COMMIT_H,
-    bars: visible.map((record, i) => ({
-      record,
-      x: x(record.startedAt),
-      y: lanes[i] * (LANE_H + LANE_GAP) + LANE_GAP,
-      width: Math.max(MIN_BAR_W, x(record.startedAt + record.durationMs) - x(record.startedAt)),
-    })),
+    bars,
+    links: waterfallLinks(bars),
     bursts: visibleBursts(records, all, from, classOf).map((b) => ({
       key: b.from,
       x: x(b.from) - 2,

@@ -8,6 +8,12 @@ const ITEMS: ReadonlyArray<{ color: string; mark: string; label: string; title?:
   { color: color.muted, mark: '■', label: 'expected repeat' },
   { color: color.failed, mark: '■', label: 'failed' },
   {
+    color: color.review,
+    mark: '→',
+    label: 'waterfall',
+    title: 'Waterfall: this response mounted a component that then sent the next request (they ran in series, not in parallel)',
+  },
+  {
     color: color.render,
     mark: '▮',
     label: 'render commit',
