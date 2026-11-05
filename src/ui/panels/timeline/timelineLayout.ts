@@ -1,4 +1,4 @@
-import { analyzeBursts, BURST_WINDOW_MS } from '../../../core/requests/bursts.js';
+import { analyzeBursts, burstWindowMs } from '../../../core/requests/bursts.js';
 import type { RequestClass } from '../../../core/requests/classify.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import type { Commit } from '../../../core/render/types.js';
@@ -74,7 +74,7 @@ const visibleBursts = (
 ) => {
   const shownIds = new Set(shown.map((r) => r.id));
   return analyzeBursts(
-    all.filter((r) => r.startedAt >= from - BURST_WINDOW_MS),
+    all.filter((r) => r.startedAt >= from - burstWindowMs()),
     classOf,
   ).flatMap((seg) => {
     const inView = seg.records.filter((r) => r.startedAt >= from);

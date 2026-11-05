@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 
 import { findQueryClients } from '../../core/reactQuery/cacheAudit.js';
 import { countProblems, findRenderStorms, stormItems, type RenderStorm, type WasteRow } from '../../core/problems.js';
-import { analyzeBursts, BURST_WINDOW_MS, type BurstWindow } from '../../core/requests/bursts.js';
+import { analyzeBursts, burstWindowMs, type BurstWindow } from '../../core/requests/bursts.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
 import { useInterval } from './useInterval.js';
@@ -18,10 +18,10 @@ const SETTLE_MS = 1000;
 
 /** 최근 판정에 쓸 기록. 판정할 창의 요청이 빠지지 않게, 최근에 끝난 요청의 가장 이른 시작보다 창 하나만큼 앞부터 둔다. */
 const recentRecords = (records: readonly RequestRecord[], now: number): RequestRecord[] => {
-  const horizon = now - RECENT_MS - SETTLE_MS - BURST_WINDOW_MS;
+  const horizon = now - RECENT_MS - SETTLE_MS - burstWindowMs();
   let cutoff = Infinity;
   for (const r of records) if (r.startedAt + r.durationMs >= horizon) cutoff = Math.min(cutoff, r.startedAt);
-  return records.filter((r) => r.startedAt >= cutoff - BURST_WINDOW_MS);
+  return records.filter((r) => r.startedAt >= cutoff - burstWindowMs());
 };
 
 /**

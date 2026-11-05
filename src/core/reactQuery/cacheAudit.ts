@@ -3,7 +3,7 @@ import { findDerivedOrigin, isIndexPending } from '../inspect/derivedMatch.js';
 import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
-import { requestKeyOf } from '../requests/requestKey.js';
+import { paramKeyOf, requestKeyOf } from '../requests/requestKey.js';
 import { getRecords, lastRecordId, touchRecords } from '../requests/store.js';
 import type { Origin, RequestRecord } from '../requests/types.js';
 import { cancelledBy, noteOverlap, resetOverlaps, sentAfter, type Overlap } from './overlapCancel.js';
@@ -102,6 +102,8 @@ interface Fetched {
   queryHash: string;
   queryKey: string;
   requestKey: string;
+  /** keyHeaders 를 뺀 요청 키. 키에 빠진 파라미터는 이것으로 본다(헤더만 다른 요청은 파라미터가 다른 것이 아니다) */
+  paramKey: string;
   request: string;
 }
 
@@ -246,6 +248,7 @@ const toFetched = (at: number, queryHash: string, queryKey: unknown, record: Req
   queryHash,
   queryKey: keyText(queryKey),
   requestKey: requestKeyOf(record),
+  paramKey: paramKeyOf(record),
   request: describeRequest(record),
 });
 
@@ -564,7 +567,7 @@ const keyFindings = (fetched: readonly Fetched[]): CacheFinding[] => [
       requests: [list[0].request],
     })),
   ...groupFetched(fetched, (f) => f.queryHash)
-    .filter((list) => new Set(list.map((f) => f.requestKey)).size > 1)
+    .filter((list) => new Set(list.map((f) => f.paramKey)).size > 1)
     .map((list): CacheFinding => ({
       kind: 'key-missing-param',
       keys: [list[0].queryKey],
