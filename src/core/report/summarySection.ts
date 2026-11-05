@@ -295,6 +295,8 @@ export const buildSummary = (
   const ms = avoidableMs > 0 ? `, ${avoidableMs}${capped ? '+' : ''}ms` : '';
   const verdict = [
     `${plural(problems.wasteEndpoints.length, 'endpoint')} with wasted requests (${plural(wastedRequests, 'request')})`,
+    // 워터폴은 있을 때만 말한다(없는 보고서의 verdict 는 그대로)
+    ...(requests.waterfalls.length > 0 ? [plural(requests.waterfalls.length, 'request waterfall')] : []),
     `${plural(avoidable.length, 'component', capped)} with avoidable renders (${plural(avoidableRenders, 'render', capped)}${ms})`,
     plural(rqCount, 'React Query finding'),
     `RDX badge ${problems.issues}${renders.monitoring ? '' : ' (render monitoring was off)'}`,

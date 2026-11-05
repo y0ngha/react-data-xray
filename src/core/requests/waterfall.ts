@@ -1,42 +1,27 @@
-import { commitCausesBetween } from '../render/commitCauses.js';
-import { endpointOf } from './requestKey.js';
+import { groupBy } from '../../shared/collections.js';
+import { mountAt } from './repeatCause.js';
+import { endpointOf, requestKeyOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
-// 마운트 commit 의 effect 가 보낸 요청은 commit 직후에 나간다(repeatCause 의 MOUNT_TO_REQUEST_MS 와 같다). 이보다 늦으면 마운트 뒤 핸들러가 보낸 것이다.
-const MOUNT_TO_REQUEST_MS = 2000;
 // 고리 하나에 담는 요청 수 상한과, 기록에서 찾는 고리 수 상한(목록 행이 모두 마운트되며 요청을 보내는 화면)
 const MAX_DEPTH = 10;
 const MAX_PATHS = 200;
 
 /**
- * 이 요청이 기다린 앞 요청: 보낸 컴포넌트가 요청 순번의 commit(useLayoutEffect 면 다음 순번)에서 마운트됐고, 그 마운트 렌더의
- * 네트워크 원인이 앞 요청이며, 이 요청은 그 commit 뒤 2초 안에, 앞 요청의 응답이 온 뒤에 나갔다.
- * 응답 전에 시작한 요청(같은 때 병렬로 나간 요청)은 기다린 것이 아니다. StrictMode 가 effect 를 다시 돌려 보낸 요청은 건너뛴다.
+ * 이 요청이 기다린 앞 요청의 id: 보낸 컴포넌트가 이 요청을 마운트 effect 에서 보낸 commit(`mountAt`)의 마운트 렌더 원인이 앞 요청이고,
+ * 이 요청은 앞 요청의 응답이 온 뒤에 나갔다. 응답 전에 시작한 요청(같은 때 병렬로 나간 요청)은 기다린 것이 아니다.
+ * 마운트 원인은 응답 객체로 확인한 것만 담긴다(시간으로만 짐작한 timing 원인과 그것을 이어받은 렌더는 빠진다, render/monitor).
+ * StrictMode 재실행 요청도 잇는다(첫 실행은 대개 cleanup 이 취소해 그 응답으로 다음 고리가 이어지지 않는다). 같은 요청 둘은 고리를 셀 때 하나로 본다.
+ * 렌더 기록은 이름마다 최근 몇 commit 만 남으므로 요청을 만든 직후 유휴 큐에서 정해 고정한다(requests/store).
+ * records 는 끝난 요청 목록(store 의 배열. store 가 이 파일을 가져오므로 넘겨받는다)이다.
  * shortcut: 컴포넌트는 이름으로 맞춘다. 같은 이름의 다른 인스턴스가 같은 commit 에서 응답 때문에 마운트됐으면 그것으로 본다.
  */
-const waterfallParentOf = (record: RequestRecord, records: readonly RequestRecord[]): number | undefined => {
-  const at = record.commitSeq;
-  const component = record.component;
-  if (at === undefined || !component || record.strictModeReplay) return undefined;
-  const mount = commitCausesBetween(component, at - 1, at + 1).find(
-    (c) => c.mounted && c.causedBy !== undefined && c.time !== undefined && Math.abs(record.startedAt - c.time) <= MOUNT_TO_REQUEST_MS,
-  );
-  if (!mount || mount.causedBy === record.id) return undefined;
-  const parent = records.find((r) => r.id === mount.causedBy);
+export const waterfallParentOf = (record: RequestRecord, records: readonly RequestRecord[]): number | undefined => {
+  const causedBy = mountAt(record)?.causedBy;
+  if (causedBy === undefined) return undefined;
+  const parent = records.find((r) => r.id === causedBy);
   return parent && record.startedAt >= parent.startedAt + parent.durationMs ? parent.id : undefined;
 };
-
-/**
- * record.waterfallFrom 을 채우는 큐 step. 렌더 기록은 이름마다 최근 몇 commit 만 남으므로 요청을 만든 직후에 정해 고정한다.
- * 보낸 컴포넌트를 채우는 step, 그리고 useLayoutEffect 가 보낸 요청이면 그 다음 commit 의 렌더 기록 step 뒤에 걸어야 한다.
- * records 는 끝난 요청 목록(store 의 배열. store 가 이 파일을 가져오므로 넘겨받는다)이다.
- */
-export const waterfallStep =
-  (record: RequestRecord, records: readonly RequestRecord[]): (() => boolean) =>
-  () => {
-    record.waterfallFrom = waterfallParentOf(record, records);
-    return true;
-  };
 
 export interface WaterfallStep {
   endpoint: string;
@@ -58,16 +43,25 @@ export interface Waterfall {
   count: number;
 }
 
+/**
+ * 한 앞 요청 뒤에 같은 컴포넌트가 같은 commit 에서 보낸 같은 요청(StrictMode 가 effect 를 두 번 돌림)은 하나만 남긴다.
+ * 취소·실패하지 않은 것(대개 재실행 쪽)을, 둘 다 같으면 나중 것을 고른다. 다른 요청(목록 행마다 다른 id)은 그대로 둔다.
+ */
+const distinctChildren = (children: readonly RequestRecord[]): RequestRecord[] =>
+  Array.from(groupBy(children, (r) => `${requestKeyOf(r)}|${r.component ?? ''}|${r.commitSeq ?? ''}`).values(), (same) =>
+    same.reduce((best, r) => (!r.error || best.error ? r : best)),
+  );
+
 /** 앞 요청이 없는(또는 기록에서 밀려난) 요청부터 뒤 요청을 따라 끝까지 간 고리들. 요청 둘 이상인 것만. */
 const pathsOf = (records: readonly RequestRecord[]): RequestRecord[][] => {
-  const byId = new Map(records.map((r) => [r.id, r]));
-  const next = new Map<number, RequestRecord[]>();
-  records.forEach((r) => {
-    if (r.waterfallFrom === undefined || !byId.has(r.waterfallFrom)) return;
-    const list = next.get(r.waterfallFrom) ?? [];
-    list.push(r);
-    next.set(r.waterfallFrom, list);
-  });
+  const ids = new Set(records.map((r) => r.id));
+  const linked = (r: RequestRecord) => r.waterfallFrom !== undefined && ids.has(r.waterfallFrom);
+  const next = new Map(
+    Array.from(
+      groupBy(records.filter(linked), (r) => r.waterfallFrom!),
+      ([id, children]) => [id, distinctChildren(children)],
+    ),
+  );
   const paths: RequestRecord[][] = [];
   const walk = (path: RequestRecord[]): void => {
     if (paths.length >= MAX_PATHS) return;
@@ -79,7 +73,7 @@ const pathsOf = (records: readonly RequestRecord[]): RequestRecord[][] => {
     children.forEach((c) => walk([...path, c]));
   };
   records.forEach((r) => {
-    if (next.has(r.id) && (r.waterfallFrom === undefined || !byId.has(r.waterfallFrom))) walk([r]);
+    if (next.has(r.id) && !linked(r)) walk([r]);
   });
   return paths;
 };
@@ -89,11 +83,7 @@ const pathsOf = (records: readonly RequestRecord[]): RequestRecord[][] => {
  * locate 는 요청을 보낸 코드 위치를 돌려준다.
  */
 export const findWaterfalls = (records: readonly RequestRecord[], locate: (r: RequestRecord) => string | undefined): Waterfall[] => {
-  const groups = new Map<string, RequestRecord[][]>();
-  pathsOf(records).forEach((path) => {
-    const key = JSON.stringify(path.map((r) => [endpointOf(r), r.component]));
-    groups.set(key, [...(groups.get(key) ?? []), path]);
-  });
+  const groups = groupBy(pathsOf(records), (path) => JSON.stringify(path.map((r) => [endpointOf(r), r.component])));
   return Array.from(groups.values())
     .map((paths): Waterfall => {
       const chain = paths[paths.length - 1].map((r, i): WaterfallStep => {

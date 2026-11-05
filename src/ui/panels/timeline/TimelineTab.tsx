@@ -52,7 +52,8 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
         {hovered && (
           <TimelineTooltip
             record={hovered.record}
-            waitedFor={layout.links.find((l) => l.to === hovered.record)?.from}
+            // 앞 요청이 20초 창 밖이거나 대상 밖이어도 알려 준다(화살표는 둘 다 보일 때만 그린다)
+            waitedFor={hovered.record.waterfallFrom === undefined ? undefined : all.find((r) => r.id === hovered.record.waterfallFrom)}
             x={hovered.x}
             y={hovered.y + layout.laneH + 4}
             maxX={width}
