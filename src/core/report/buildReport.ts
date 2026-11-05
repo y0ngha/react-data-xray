@@ -19,6 +19,7 @@ import { buildRequestSection, REQUEST_HOW_TO_READ, REQUEST_HOW_TO_READ_EXTRA, ty
 import { getResetAt } from './resetAt.js';
 import { buildSummary, SUMMARY_HOW_TO_READ, type ReportSummary } from './summarySection.js';
 import { findRenderStorms } from '../problems.js';
+import { getEndpointRenders, reportWindowMs } from '../render/monitor.js';
 
 /** AI·사람이 읽는 rdx 결과 요약. 응답 본문과 헤더는 넣지 않는다(인증 정보가 섞일 수 있다). */
 export interface RdxReport {
@@ -74,9 +75,9 @@ export interface BuildContext {
 /**
  * HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침,
  * 4: config 줄과 설정 안내 줄(#78), 5: complete·incompleteReasons 줄 #71, 6: requests.nPlusOne 줄과 config.nPlusOne #85,
- * 7: requests.bursts·followUps 줄 #74).
+ * 7: requests.endpoints[].renders #84, 8: requests.bursts·followUps 줄 #74).
  */
-export const HOW_TO_READ_VERSION = 7;
+export const HOW_TO_READ_VERSION = 8;
 
 // 섹션별 줄을 읽는 순서로 잇는다.
 export const HOW_TO_READ: readonly string[] = [
@@ -124,7 +125,11 @@ export const buildReport = (
   const classes = classifyRecords(records, ignored);
   // 요청 섹션(callers.queryKey)을 만들기 전에 본다. 주기 파일은 찾아 둔 문맥만 쓰므로 아직 찾아 보지 않은 요청은 queryKey 가 빠진다.
   const queryKeysKnown = drain || records.every(isQueryContextChecked);
-  const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf);
+  // 엔드포인트별 렌더 비용은 렌더 섹션과 같은 구간·인스턴스 상한에서, 이미 기록된 렌더를 세기만 한다(#84).
+  // 기록 상한으로 빠진 요청이 일으킨 렌더는 세지 않는다(엔드포인트 건수와 같은 요청끼리 맞춘다).
+  const shown = new Set(records);
+  const endpointRenders = getEndpointRenders(now, reportWindowMs(now), { include: (r) => shown.has(r) });
+  const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf, endpointRenders);
   const reactQuery = buildReactQuerySection(records, classes);
   const renders = buildRenderSection(monitoring, now);
   // 섹션을 만든 뒤에 읽는다(만드는 동안 큐에 들어간 일도 센다). 읽기만 하고 비우지 않는다.
