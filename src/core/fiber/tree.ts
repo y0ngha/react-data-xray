@@ -46,8 +46,8 @@ export const getComponentName = (fiber: Pick<Fiber, 'type'>): string => {
 /** 파일 경로·모듈 주소를 src/... 부터로 줄인다(번들러가 붙인 쿼리는 뗀다). */
 const shortPath = (path: string): string => path.split('?')[0].replace(/^.*?\/(src|app|pages|components)\//, '$1/');
 
-// React·라이브러리 프레임(사전 번들 포함)과 React 19 가 스택 맨 위에 붙이는 표식 프레임
-const LIBRARY_FRAME = /\/node_modules\/|\/\.vite\/deps\/|react-stack-top-frame/;
+// React·라이브러리 프레임(사전 번들, Turbopack 의 node_modules_… 청크 포함)과 React 19 가 스택 맨 위에 붙이는 표식 프레임
+const isLibraryOrMarkerFrame = (line: string): boolean => line.includes('react-stack-top-frame') || isLibraryFrame(line);
 // V8 "at fn (url:1:2)"·"at url:1:2", Firefox·Safari "fn@url:1:2" 의 주소와 줄
 const FRAME_LOCATION = /(?:\(|@|at )((?:[a-z]+:\/\/)?[^\s()@]+):(\d+):\d+\)?$/;
 
@@ -57,7 +57,7 @@ const jsxFrameOf = (fiber: Fiber): string | undefined =>
     ?.split('\n')
     .slice(1)
     .map((line) => line.trim())
-    .find((line) => FRAME_LOCATION.test(line) && !LIBRARY_FRAME.test(line));
+    .find((line) => FRAME_LOCATION.test(line) && !isLibraryOrMarkerFrame(line));
 
 export const locationOfFrame = (frame: string): string | undefined => {
   const match = FRAME_LOCATION.exec(frame);
@@ -75,11 +75,25 @@ export const jsxLocationOf = (fiber: Fiber): string | undefined => {
   return frame && locationOfFrame(frame);
 };
 
-// React 19 의 _debugStack 맨 위에 있는 React 런타임 프레임(jsx 를 부른 쪽이 아니다)
-const RUNTIME_FRAME = /react-stack-top-frame|jsx-dev-runtime|jsx-runtime|react_jsx|\/react\/|\/react-dom\//;
+// React 19 의 _debugStack 맨 위에 있는 React 런타임 프레임(jsx 를 부른 쪽이 아니다).
+// 경로로 모를 때(Turbopack 은 런타임을 next 청크에 넣는다)를 위해 함수 이름 jsxDEV·jsx·jsxs 로도 알아본다.
+// 서버 컴포넌트가 만든 element 는 RSC 클라이언트가 JSX 자리를 흉내 낸 fakeJSXCallSite 가 맨 위에 온다.
+const RUNTIME_FRAME =
+  /react-stack-top-frame|jsx-dev-runtime|jsx-runtime|react_jsx|\/react\/|\/react-dom\/|(?:^|[\s.])(?:jsx(?:DEV|s)?|fakeJSXCallSite)(?: \(|@)/;
 
-/** 번들 경로에서 패키지 이름: node_modules/@scope/pkg/ 의 마지막 것, Vite 사전 번들은 파일 이름(@mui_material → @mui/material) */
+// Turbopack dev 청크: 경로의 / 를 _ 로 바꾸고 해시를 붙인 이름(node_modules_%40scope_pkg_build_<hash>._.js)
+const TURBOPACK_CHUNK = /\/_next\/static\/chunks\/[^/]*node_modules_([^/?:]+)_[^_/?:]+\._\.js/;
+
+/**
+ * 번들 경로에서 패키지 이름: node_modules/@scope/pkg/ 의 마지막 것, Vite 사전 번들은 파일 이름(@mui_material → @mui/material),
+ * Turbopack 청크는 node_modules_ 다음 조각(해시만 있는 청크는 알 수 없어 (bundle))
+ */
 const packageOfPath = (path: string): string => {
+  const chunk = TURBOPACK_CHUNK.exec(path.replace(/%40/gi, '@'))?.[1];
+  if (chunk) {
+    const [first, second] = chunk.split('_');
+    return first.startsWith('@') && second ? `${first}/${second}` : first;
+  }
   const dep = /\.vite\/deps\/([^/?:]+?)\.js/.exec(path)?.[1];
   if (dep) return dep.startsWith('chunk-') ? '(bundle)' : dep.replace(/^(@[^_]+)_/, '$1/');
   return /^.*node_modules\/(@[^/]+\/[^/?:]+|[^/?:]+)\//.exec(path)?.[1] ?? '(bundle)';
