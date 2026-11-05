@@ -1,3 +1,4 @@
+import { effectiveConfig, type EffectiveConfig } from '../config.js';
 import { knownQueryContextOf, queryContextOf } from '../capture/queryContext.js';
 import { queueIndex } from '../inspect/derivedMatch.js';
 import { areSourcesResolved } from '../capture/requestContext.js';
@@ -44,6 +45,8 @@ export interface RdxReport {
   /** 이 탭에서 마지막으로 reset 한 시각(ms). reset 한 적이 없으면 null */
   resetAt: number | null;
   page: string;
+  /** configure() 로 정한(또는 기본) 판정 기준. compare 가 기준이 다른 두 보고서를 경고한다 */
+  config: EffectiveConfig;
   requests: RequestSection;
   reactQuery: ReactQuerySection;
   renders: RenderSection;
@@ -68,7 +71,10 @@ export interface BuildContext {
   sourceMapTimedOut?: boolean;
 }
 
-/** HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침, 4: complete 줄 #71, 5: incompleteReasons 와 snapshot 대기 상한 #71). */
+/**
+ * HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침,
+ * 4: config 줄과 설정 안내 줄(#78), 5: complete·incompleteReasons 줄 #71).
+ */
 export const HOW_TO_READ_VERSION = 5;
 
 // 섹션별 줄을 읽는 순서로 잇는다.
@@ -93,6 +99,7 @@ export const HOW_TO_READ: readonly string[] = [
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
   'complete is false when some analysis that feeds this report had not finished; incompleteReasons says why: pending-analysis (pendingAnalysis steps still queued), source-maps (still resolving, so some callers are http addresses), source-map-timeout (snapshot waited 2s for source maps and gave up), query-keys (React Query request contexts not looked up yet). The periodic .rdx/report.json waits for none of these, and report() is a quick read that finishes the queue but does not wait for source maps. For before/after comparisons use window.__RDX__.snapshot(name), which finishes the queue and waits up to 2s for source maps, and check that its complete is true.',
   'Check diagnostics.problems first: if rdx was loaded after react-dom (renderHook.commitsSeen is 0) or requests went out before it loaded (capture.requestsBeforeInstall), the rest of the report is incomplete. Each problem says how to fix it.',
+  'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
   'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
   'howToReadVersion is the version of these lines. If you already read this version, call window.__RDX__.report({ howToRead: false }) to leave them out.',
 ];
@@ -142,6 +149,7 @@ export const buildReport = (
     generatedAt: new Date(now).toISOString(),
     resetAt: getResetAt(),
     page: typeof location === 'undefined' ? '' : location.pathname,
+    config: effectiveConfig(ignored.panel),
     requests,
     reactQuery,
     renders,

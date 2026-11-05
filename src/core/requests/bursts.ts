@@ -1,9 +1,10 @@
 import { hasNavigationIn } from '../capture/navigation.js';
 import type { RequestClass } from './classify.js';
+import { config } from '../config.js';
 import type { RequestRecord } from './types.js';
 
-export const BURST_WINDOW_MS = 500;
-const BURST_MIN = 5;
+/** 몰림을 재는 창 길이(기본 500ms, configure 의 burst.windowMs) */
+export const burstWindowMs = (): number => config().burstWindowMs;
 // 페이지에 들어온 직후와 화면을 옮긴 직후에는 화면 전체가 동시에 데이터를 불러오는 것이 흔하다.
 const INITIAL_LOAD_MS = 3000;
 // 응답이 끝나고 이만큼 안에 화면을 옮겨도 화면 진입이다(응답을 받은 뒤 주소를 바꾸는 데이터 라우터).
@@ -40,15 +41,16 @@ export interface BurstSegment {
 }
 
 /**
- * 정렬된 시작 시각에서 5건 이상인 500ms 창을 찾는다(두 포인터, O(n)).
+ * 정렬된 시작 시각에서 5건 이상인 500ms 창(기본값. configure 의 burst 로 바꾼다)을 찾는다(두 포인터, O(n)).
  * first·last 는 창의 첫·끝 요청 위치다.
  */
 const windowsOf = (sorted: readonly number[]): Array<{ first: number; last: number }> => {
   const out: Array<{ first: number; last: number }> = [];
+  const { burstWindowMs: windowMs, burstCount: min } = config();
   let first = 0;
   for (let last = 0; last < sorted.length; last++) {
-    while (sorted[last] - sorted[first] > BURST_WINDOW_MS) first++;
-    if (last - first + 1 >= BURST_MIN) out.push({ first, last });
+    while (sorted[last] - sorted[first] > windowMs) first++;
+    if (last - first + 1 >= min) out.push({ first, last });
   }
   return out;
 };
