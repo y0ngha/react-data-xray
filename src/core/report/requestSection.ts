@@ -3,7 +3,9 @@ import { analyzeBursts, type BurstSegment, type EntryReason } from '../requests/
 import { isWaste, type RequestClass } from '../requests/classify.js';
 import { followUps, isMutation } from '../requests/followUps.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
-import { endpointOf } from '../requests/requestKey.js';
+import { callerOf } from '../requests/callerFrames.js';
+import { nPlusOneRuns, type NPlusOneRun } from '../requests/nPlusOne.js';
+import { endpointOf, pathOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
@@ -64,6 +66,8 @@ export interface RequestSection {
   burstsOmitted: number;
   /** 변경 요청 응답 뒤 1초 안에 다시 나간 조회(요청 상세와 같은 followUps)를 변경·재조회 엔드포인트 쌍으로 모은 것 */
   followUps: FollowUpEntry[];
+  /** 목록의 항목마다 보낸 요청(N+1) 묶음. 요청이 많은 순. 무시한 엔드포인트는 뺀다 */
+  nPlusOne: NPlusOneEntry[];
 }
 
 export interface BurstEntry {
@@ -103,6 +107,20 @@ export interface FollowUpEntry {
   ignored?: true;
 }
 
+export interface NPlusOneEntry {
+  endpoint: string;
+  /** 보낸 컴포넌트. 모르면 없고, 그때 묶은 기준은 location 이다 */
+  component?: string;
+  /** 보낸 코드 위치(첫 요청의 호출 스택 앞쪽 3줄, 소스맵으로 바꾼 것) */
+  location?: string;
+  /** 서로 다른 ID(경로) 수 */
+  count: number;
+  /** 첫 요청부터 마지막 요청까지의 시작 시각 간격(ms) */
+  windowMs: number;
+  /** 요청 URL 예(쿼리 포함) */
+  examples: string[];
+}
+
 /** 순서는 buildReport 가 다른 섹션 줄과 맞춘다. */
 export const REQUEST_HOW_TO_READ = {
   waste:
@@ -116,21 +134,6 @@ export const REQUEST_HOW_TO_READ = {
   dropped:
     'When requests.dropped is greater than 0, the record limit (200) was exceeded and older requests were dropped. Split the scenario into shorter segments and measure again.',
 };
-
-// 첫 줄은 대개 앱의 공통 fetch 함수라 그것만으로는 어디서 보냈는지 모른다. 바깥으로 몇 줄 더 본다.
-const CALLER_FRAMES = 3;
-
-/** 호출 스택의 앞쪽 몇 줄(rdx 프레임은 기록할 때 이미 뺐다) */
-const callerOf = (stack: string | undefined): string | undefined =>
-  stack
-    ?.split('\n')
-    .map((line) => line.trim())
-    // V8: "at fn (url:1:2)", Firefox·Safari: "fn@url:1:2"
-    .filter((line) => line.startsWith('at ') || /@.+:\d+:\d+$/.test(line))
-    .slice(0, CALLER_FRAMES)
-    // dev 서버가 파일을 고칠 때마다 붙이는 ?t=·?v= 를 뗀다. 그래야 같은 호출 위치가 고칠 때마다 갈라지지 않는다.
-    .map((line) => line.replace(/\?[^\s:)]*(?=:\d+:\d+)/g, ''))
-    .join(' <- ') || undefined;
 
 /**
  * 같은 호출 위치(frame)에서 보낸 것끼리 센다. route·component·queryKey 로 더 쪼개면 상위 3 자르기가 순위를 왜곡하므로 첫 기록의 것을 붙인다.
@@ -249,6 +252,20 @@ const followUpsOf = (
     .slice(0, MAX_FOLLOW_UPS);
 };
 
+const nPlusOneEntryOf = (run: NPlusOneRun): NPlusOneEntry => {
+  const first = run.records[0];
+  const location = callerOf(first.sourceStack ?? first.stack);
+  return {
+    endpoint: run.endpoint,
+    ...(run.component && { component: run.component }),
+    ...(location && { location }),
+    count: run.distinct,
+    windowMs: (run.records.at(-1)?.startedAt ?? first.startedAt) - first.startedAt,
+    // 같은 ID 의 다른 쿼리는 예로 겹쳐 싣지 않는다
+    examples: [...new Map(run.records.map((r) => [pathOf(r.url), r.url])).values()].slice(0, MAX_EXAMPLES).map(redactUrl),
+  };
+};
+
 /**
  * queryOf 는 요청의 React Query 문맥을 찾는 함수다. 기본은 fiber 트리를 걸어 찾는다(사용자가 요청한 보고서).
  * 5초 주기 업로드처럼 앱 경로 가까이서 돌 때는 knownQueryContextOf 를 넘겨 이미 찾아 둔 것만 쓴다.
@@ -287,6 +304,9 @@ export const buildRequestSection = (
     }),
     ...burstsOf(records, classes),
     followUps: followUpsOf(records, matcher, queryOf),
+    nPlusOne: nPlusOneRuns(records)
+      .filter((run) => !matcher.sourceOf(run.endpoint))
+      .map(nPlusOneEntryOf),
   };
 };
 
@@ -300,5 +320,6 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
   'requests.bursts lists request bursts (config.burst.count, default 5, or more requests starting within config.burst.windowMs, default 500), the same ones the timeline draws. kind entry means it came right after page entry, and reason says why: initial-load (within 3s of the page load) or navigation (a route change from 3s before the burst to 1s after its last response) — screens commonly load everything at once, so review only if it looks excessive. kind waste (reason no-entry) has no page entry nearby: find what fires these requests together. from and to are the start times (ms epoch) of the first and last request, count the requests in it, wasted how many of them were duplicates or sameResponses, route the path when the first was sent, topEndpoints the endpoints with the most requests in it. As in the timeline, repeats classed ignored (an ignored endpoint), StrictMode re-runs and requests from before a reload are not counted. Waste bursts come first, then the largest; at most 20 (burstsOmitted is how many more). summary lists each waste burst as a medium request-burst finding.',
   'requests.followUps lists GET requests sent within 1s after a mutation (POST, PUT, PATCH, DELETE) response, grouped by mutation (method + endpoint) and refetched endpoint — by timing only, the same as the request detail panel. mutations is how many such mutations were followed by it, count the refetches, sameResponse how many got a response identical to the previous one (invalidated but nothing changed: the invalidation is broader than the change), queryKey the React Query key when known. periodic: true means the refetched endpoint is polling and may be unrelated to the mutation. ignored: true means the refetched endpoint is ignored (in the panel or config.ignore) — skip it. Sorted by sameResponse, then count; at most 20. summary lists each pair that is neither periodic nor ignored with sameResponse > 0 as a medium refetch-after-mutation finding; the same refetches are also counted on the refetched endpoint (sameResponses, or review when React Query refetched after an invalidation), so do not add the savings twice.',
+  'requests.nPlusOne lists requests sent once per list item (N+1): config.nPlusOne.count (default 5)+ requests for different IDs to the same endpoint (an :id path segment) from the same component (or, when the component is unknown, the same caller location) within config.nPlusOne.windowMs (default 1000). count is the number of different IDs (paths), windowMs the time from the first to the last request, examples a few URLs (one per ID). Ignored endpoints are left out. Repeats of the same ID are duplicates and are not included. It is review (may be intended, e.g. a virtualized list), not waste: fetch them in one request from the list (batch endpoint, include/expand) or fetch once in the parent.',
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
 ];

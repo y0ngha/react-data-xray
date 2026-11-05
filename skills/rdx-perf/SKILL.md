@@ -40,6 +40,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 
 1. `summary` first: `summary.verdict` is a one-line count, and `summary.topFindings` lists what to fix in order (severity `high` is what the RDX button badge counts). Open each finding's `detail` path for the full entry and start from `target.location`.
 2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional (in the panel, or in code via `config.ignore`) — skip it. Then `requests.bursts` (`kind: 'waste'` first; `entry` bursts right after page load or navigation are usually expected) and `requests.followUps` (refetches right after a mutation; `sameResponse` > 0 means nothing changed).
+2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional (in the panel, or in code via `config.ignore`) — skip it. Then `requests.nPlusOne`: requests sent once per list item (review, not waste).
 3. `reactQuery.findings`: follow each item's `fix`.
 4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
 
@@ -54,6 +55,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 | Finding | Fix |
 |---|---|
 | Duplicate requests (two components send the same request) | Fetch once in a common ancestor; move to React Query for cache sharing |
+| N+1 requests (`requests.nPlusOne`: one request per list item, e.g. `<ItemCard>`×24 `GET /items/:id/owner`) | Fetch the list's related data in one request (a batch endpoint such as `?ids=1,2,3`, or include/expand it in the list response), or fetch once in the parent and pass it down. Leave it if intended (e.g. a virtualized list fetching visible rows) |
 | Same-response refetch + renders caused by it (`fromSameResponse`) | Skip `setState` when the response is unchanged; use React Query structural sharing; increase `staleTime` |
 | Request burst outside page entry (`requests.bursts[]` with `kind: 'waste'`) | Find what fires the `topEndpoints` together: fetch the list in one request instead of per item, share one fetch between components (common ancestor or React Query), or debounce the trigger (input, scroll, resize). An `entry` burst is the screen loading — leave it unless it looks excessive |
 | Refetch after a mutation got the same response (`requests.followUps[]` with `sameResponse` > 0) | Narrow the invalidation after that `mutation` to the queries it changes (a more specific `queryKey`, `exact: true`), or update the cache from the mutation response with `setQueryData`. Skip pairs with `periodic: true` (polling) or `ignored: true` |

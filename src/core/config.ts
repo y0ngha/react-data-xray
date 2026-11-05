@@ -14,6 +14,8 @@ export interface RdxConfig {
   dedupeWindowMs?: number;
   /** windowMs 안에 count 건 이상 시작하면 요청 몰림이다. 기본 500ms·5건 */
   burst?: { windowMs?: number; count?: number };
+  /** 같은 보낸 곳이 windowMs 안에 같은 엔드포인트로 서로 다른 ID 를 count 개 이상 요청하면 N+1(항목마다 보낸 요청)이다. 기본 1000ms·5개 */
+  nPlusOne?: { windowMs?: number; count?: number };
   /** 기억할 요청 수. 넘으면 오래된 것부터 버린다. 기본 200 */
   maxRecords?: number;
   /** 보고서를 보낼 dev 서버 경로. Next.js `basePath` 처럼 앞에 경로가 붙을 때 바꾼다. 기본 `/__rdx/report` */
@@ -27,6 +29,7 @@ export interface EffectiveConfig {
   keyHeaders: string[];
   dedupeWindowMs: number;
   burst: { windowMs: number; count: number };
+  nPlusOne: { windowMs: number; count: number };
   maxRecords: number;
   reportPath: string;
 }
@@ -38,6 +41,8 @@ interface Settings {
   dedupeWindowMs: number;
   burstWindowMs: number;
   burstCount: number;
+  nPlusOneWindowMs: number;
+  nPlusOneCount: number;
   maxRecords: number;
   reportPath: string;
 }
@@ -50,6 +55,8 @@ const DEFAULTS: Settings = {
   dedupeWindowMs: 2000,
   burstWindowMs: 500,
   burstCount: 5,
+  nPlusOneWindowMs: 1000,
+  nPlusOneCount: 5,
   maxRecords: 200,
   reportPath: REPORT_PATH,
 };
@@ -150,6 +157,14 @@ const isReportPath = (v: unknown): v is string => typeof v === 'string' && /^\/(
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+const isCount = (v: unknown): v is number => isPositiveInt(v) && v >= 2;
+
+/** { windowMs, count } 꼴 옵션. 객체가 아니면 경고하고 기본값을 쓴다 */
+const windowOptions = (value: unknown, name: string, example: string): Record<string, unknown> => {
+  if (value !== undefined && !isObject(value)) warn(`${name} must be an object like ${example}; using defaults.`);
+  return isObject(value) ? value : {};
+};
+
 const capRecords = (n: number): number => {
   if (n <= MAX_RECORDS_LIMIT) return n;
   warn(`maxRecords ${n} is above the limit; using ${MAX_RECORDS_LIMIT}.`);
@@ -167,15 +182,16 @@ export const configure = (options: RdxConfig = {}): void => {
     replace(DEFAULTS);
     return;
   }
-  const burst: unknown = options.burst;
-  if (burst !== undefined && !isObject(burst)) warn('burst must be an object like { windowMs: 500, count: 5 }; using defaults.');
-  const burstOptions = isObject(burst) ? burst : {};
+  const burstOptions = windowOptions(options.burst, 'burst', '{ windowMs: 500, count: 5 }');
+  const nPlusOneOptions = windowOptions(options.nPlusOne, 'nPlusOne', '{ windowMs: 1000, count: 5 }');
   replace({
     ...parseIgnore(options.ignore),
     keyHeaders: parseKeyHeaders(options.keyHeaders),
     dedupeWindowMs: pick(options.dedupeWindowMs, isNonNegative, base.dedupeWindowMs, 'dedupeWindowMs', 'a number >= 0'),
     burstWindowMs: pick(burstOptions.windowMs, isPositiveInt, base.burstWindowMs, 'burst.windowMs', 'a positive integer'),
-    burstCount: pick(burstOptions.count, (v): v is number => isPositiveInt(v) && v >= 2, base.burstCount, 'burst.count', 'an integer >= 2'),
+    burstCount: pick(burstOptions.count, isCount, base.burstCount, 'burst.count', 'an integer >= 2'),
+    nPlusOneWindowMs: pick(nPlusOneOptions.windowMs, isPositiveInt, base.nPlusOneWindowMs, 'nPlusOne.windowMs', 'a positive integer'),
+    nPlusOneCount: pick(nPlusOneOptions.count, isCount, base.nPlusOneCount, 'nPlusOne.count', 'an integer >= 2'),
     maxRecords: capRecords(pick(options.maxRecords, isPositiveInt, base.maxRecords, 'maxRecords', 'a positive integer')),
     reportPath: pick(options.reportPath, isReportPath, base.reportPath, 'reportPath', "a path starting with '/' (no query)"),
   });
@@ -201,6 +217,7 @@ export const effectiveConfig = (panel: ReadonlySet<string> = new Set()): Effecti
     keyHeaders: [...current.keyHeaders],
     dedupeWindowMs: current.dedupeWindowMs,
     burst: { windowMs: current.burstWindowMs, count: current.burstCount },
+    nPlusOne: { windowMs: current.nPlusOneWindowMs, count: current.nPlusOneCount },
     maxRecords: current.maxRecords,
     reportPath: current.reportPath,
   };
