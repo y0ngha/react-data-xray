@@ -1,9 +1,11 @@
 import { enqueue } from '../scheduler/idleQueue.js';
+import { isLibraryFrame } from './libraryFrame.js';
 import { getNativeFetch } from './nativeFetch.js';
 
 /**
  * 호출 스택의 위치(dev 서버가 변환한 코드 기준)를 원본 소스 위치로 바꾼다.
  * Vite 처럼 모듈 끝에 sourceMappingURL(data URL 또는 파일)을 붙이는 dev 서버에서 동작한다.
+ * Next.js Turbopack 이 내는 index map(모듈마다 offset 을 둔 sections)도 하나로 합쳐 푼다.
  * 라이브러리 프레임(node_modules, Vite 의 사전 번들)은 건너뛴다. 알고 싶은 것은 앱 코드 위치이고, 큰 번들의 소스맵은 비싸다.
  */
 
@@ -94,6 +96,12 @@ export const parseMappingsStepped = (mappings: string): Promise<Segment[][]> =>
 
 // 이보다 큰 모듈(인라인 소스맵 제외)은 앱과 라이브러리를 한 파일에 묶은 번들(webpack 등)이라 소스맵이 수십 MB 다. 메인 스레드를 멈추지 않게 건너뛴다.
 const MAX_MODULE_BYTES = 1_000_000;
+// Turbopack dev 는 라이브러리를 node_modules_… 청크로 따로 낸다. 앱 청크는 앱 코드뿐인데도 큰 페이지는 1MB 를 넘는다(#118).
+const MAX_TURBOPACK_APP_CHUNK_BYTES = 5_000_000;
+const TURBOPACK_CHUNK = /\/_next\/static\/chunks\//;
+
+const maxModuleBytes = (scriptUrl: string): number =>
+  TURBOPACK_CHUNK.test(scriptUrl) && !isLibraryFrame(scriptUrl) ? MAX_TURBOPACK_APP_CHUNK_BYTES : MAX_MODULE_BYTES;
 
 const MAP_COMMENT = /\/[/*][#@]\s*sourceMappingURL=([^\s*]+)\s*(?:\*\/\s*)?$/;
 
@@ -133,26 +141,71 @@ const noteFailure = (scriptUrl: string): void => {
 /** 소스맵을 받거나 읽지 못한 모듈 수 */
 export const sourceMapFailures = (): number => failedUrls.size;
 
+interface RawMap {
+  sources?: string[];
+  sourceRoot?: string;
+  mappings?: string;
+  /** index map: 변환된 코드의 (줄, 열)(0 부터)부터 적용되는 하위 맵들 */
+  sections?: Array<{ offset?: { line?: number; column?: number }; map?: RawMap }>;
+}
+
+/** 읽을 수 있는 일반 소스맵(mappings 문자열과 sources 배열이 있다) */
+const isFlatMap = (map: RawMap | null | undefined): map is RawMap & { mappings: string; sources: string[] } =>
+  typeof map?.mappings === 'string' && Array.isArray(map.sources);
+
+/** 일반 소스맵 하나를 sources 와 줄별 구간으로 푼다. */
+const parseFlatMap = async (map: RawMap, scriptUrl: string, base: string): Promise<ParsedMap | null> => {
+  if (!map.mappings || !map.sources) return null;
+  const root = map.sourceRoot ? map.sourceRoot.replace(/\/?$/, '/') : '';
+  // sources 는 소스맵(또는 모듈) 위치 기준 상대 경로일 수 있다(Vite: "client.ts"). 모듈 주소 기준으로 풀어 경로를 살린다.
+  return { sources: map.sources.map((s) => sourcePath(`${root}${s}`, scriptUrl, base)), lines: await parseMappingsStepped(map.mappings) };
+};
+
+/**
+ * index map 을 맵 하나로 합친다: 섹션마다 offset 줄만큼 내리고, 섹션 첫 줄의 열은 offset 열만큼 밀고,
+ * sources 번호는 앞 섹션들의 sources 뒤로 잇는다. 섹션은 서로 겹치지 않고 위치 순서대로 온다(소스맵 명세).
+ */
+const parseIndexMap = async (sections: NonNullable<RawMap['sections']>, scriptUrl: string, base: string): Promise<ParsedMap | null> => {
+  const parts = await Promise.all(sections.map(({ map }) => (isFlatMap(map) ? parseFlatMap(map, scriptUrl, base) : null)));
+  const merged: ParsedMap = { sources: [], lines: [] };
+  parts.forEach((part, index) => {
+    if (!part) return;
+    const firstLine = sections[index].offset?.line ?? 0;
+    const firstColumn = sections[index].offset?.column ?? 0;
+    const sourceShift = merged.sources.length;
+    merged.sources.push(...part.sources);
+    part.lines.forEach((segments, i) => {
+      if (segments.length === 0) return;
+      const moved = segments.map((s) => ({ ...s, source: s.source + sourceShift, column: i === 0 ? s.column + firstColumn : s.column }));
+      (merged.lines[firstLine + i] ??= []).push(...moved);
+    });
+  });
+  return merged.sources.length > 0 ? merged : null;
+};
+
 const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   const send = getNativeFetch();
   if (!send) return null;
   const code = await send(scriptUrl, { credentials: 'same-origin' }).then(textOf);
   const ref = MAP_COMMENT.exec(code.trimEnd())?.[1];
-  if (!ref || code.length - ref.length > MAX_MODULE_BYTES) return null;
+  if (!ref || code.length - ref.length > maxModuleBytes(scriptUrl)) return null;
   const mapUrl = new URL(ref, scriptUrl).href;
   const json = mapUrl.startsWith('data:')
     ? parseMapJson(dataUrlText(mapUrl))
     : parseMapJson(await send(mapUrl, { credentials: 'same-origin' }).then(textOf));
-  const map = json as { sources?: string[]; sourceRoot?: string; mappings?: string } | null;
-  if (typeof map?.mappings !== 'string' || !Array.isArray(map.sources)) {
+  const map = json as RawMap | null;
+  const base = entryBase();
+  if (Array.isArray(map?.sections)) {
+    // 섹션 하나라도 읽을 수 없으면 실패로 센다(나머지 섹션은 그대로 쓴다).
+    if (map.sections.some((section) => !isFlatMap(section.map))) noteFailure(scriptUrl);
+    return parseIndexMap(map.sections, scriptUrl, base);
+  }
+  if (!isFlatMap(map)) {
     noteFailure(scriptUrl); // sourceMappingURL 은 있는데 읽을 수 없는 소스맵
     return null;
   }
   if (!map.mappings) return null; // 올바르지만 비어 있는 소스맵(바꿀 위치가 없다)
-  const root = map.sourceRoot ? map.sourceRoot.replace(/\/?$/, '/') : '';
-  const base = entryBase();
-  // sources 는 소스맵(또는 모듈) 위치 기준 상대 경로일 수 있다(Vite: "client.ts"). 모듈 주소 기준으로 풀어 경로를 살린다.
-  return { sources: map.sources.map((s) => sourcePath(`${root}${s}`, scriptUrl, base)), lines: await parseMappingsStepped(map.mappings) };
+  return parseFlatMap(map, scriptUrl, base);
 };
 
 // HMR 이 모듈 주소에 ?t= 를 붙여 새 키가 계속 생기므로, 오래된 것부터 버린다.
@@ -221,7 +274,6 @@ export const originalPosition = (map: ParsedMap, line: number, column: number): 
 // V8: "at fn (url:1:2)" 또는 "at url:1:2", Firefox·Safari: "fn@url:1:2"
 // 브라우저 스택의 http(s) 주소만 본다(테스트 환경의 파일 경로 등은 건너뛴다).
 const FRAME = /^(.*?)(\(?)(https?:\/\/[^\s()]+):(\d+):(\d+)(\)?)$/;
-const SKIP = /\/node_modules\/|\/\.vite\/deps\//;
 
 const isSameOrigin = (url: string): boolean => {
   try {
@@ -238,7 +290,7 @@ export const resolveStack = async (stack: string): Promise<string> => {
       const m = FRAME.exec(line.trim());
       if (!m) return line;
       const [, before, open, url, lineNo, column, close] = m;
-      if (SKIP.test(url) || !isSameOrigin(url)) return line;
+      if (isLibraryFrame(url) || !isSameOrigin(url)) return line;
       const map = await mapOf(new URL(url, location.href).href);
       const original = map && originalPosition(map, Number(lineNo), Number(column));
       return original ? `${before}${open}${original}${close}` : line;

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { mockFetch } from '../../../testing/fetchMock.js';
 import { enqueue, flushQueue, isQueuePending } from '../../scheduler/idleQueue.js';
-import { parseMappings, parseMappingsStepped, resolveStack } from '../sourceMap.js';
+import { parseMappings, parseMappingsStepped, resolveStack, sourceMapFailures } from '../sourceMap.js';
 
 // 변환된 3번째 줄 0열 → 원본 0번 소스의 10번째 줄(0 부터 9) 3번째 열(0 부터 2). VLQ: 0=A, 9→18=S, 2→4=E
 const MAPPINGS = ';;AASE';
@@ -52,6 +52,41 @@ describe('소스맵', () => {
     const frame = 'at f (http://localhost:3000/static/js/bundle.js:3:1)';
     expect(await resolveStack(frame)).toBe(frame);
     expect(mockFetch.mock.calls.some(([u]) => String(u).endsWith('.map'))).toBe(false);
+  });
+
+  // Next.js Turbopack dev 의 청크: 모듈마다 offset 을 둔 index map(sections), 경로의 / 는 _ 로 바꾼 이름 (#118)
+  const CHUNKS = 'http://localhost:3000/_next/static/chunks';
+
+  it('index map(sections)은 섹션의 offset 만큼 옮겨 그 섹션의 원본 위치로 바꾼다 (#118)', async () => {
+    const map = {
+      version: 3,
+      sources: [],
+      sections: [
+        // 0번째 줄(0 부터)부터: 그 섹션의 3번째 줄 → a.ts 10번째 줄
+        { offset: { line: 0, column: 0 }, map: { version: 3, sources: ['file:///Users/me/app/src/a.ts'], mappings: MAPPINGS } },
+        // 10번째 줄 5열부터: 섹션 첫 줄의 열은 offset.column 만큼 밀린다(AASE: 0열 → 10번째 줄 3열)
+        { offset: { line: 10, column: 5 }, map: { version: 3, sources: ['file:///Users/me/app/src/b.ts'], mappings: 'AASE;AACC' } },
+      ],
+    };
+    mockFetch.mockImplementation(async (input) =>
+      String(input).endsWith('.map') ? new Response(JSON.stringify(map)) : new Response('code\n//# sourceMappingURL=src_x._.js.map'),
+    );
+    const frame = (line: number, column: number) => `at f (${CHUNKS}/src_x._.js:${line}:${column})`;
+    const failuresBefore = sourceMapFailures();
+    expect(await resolveStack(frame(3, 1))).toBe('at f (app/src/a.ts:10:3)');
+    expect(sourceMapFailures()).toBe(failuresBefore); // 읽을 수 있는 index map 은 실패로 세지 않는다(#76)
+    expect(await resolveStack(frame(11, 6))).toBe('at f (app/src/b.ts:10:3)');
+    // 다음 줄은 offset.column 이 붙지 않는다(AACC: 0열 → 11번째 줄 4열)
+    expect(await resolveStack(frame(12, 1))).toBe('at f (app/src/b.ts:11:4)');
+  });
+
+  it('Turbopack 앱 청크는 1MB 를 넘어도 소스맵을 받고, node_modules_… 청크는 받지 않는다 (#118)', async () => {
+    const code = `${'x'.repeat(1_200_000)}\nb\nload()\n//# sourceMappingURL=${inlineMap({ version: 3, sources: ['/Users/me/app/src/page.tsx'], mappings: MAPPINGS })}`;
+    mockFetch.mockImplementation(async () => new Response(code));
+    expect(await resolveStack(`at Page (${CHUNKS}/src_07-h1l2e_fir4._.js:3:1)`)).toBe('at Page (app/src/page.tsx:10:3)');
+    const lib = `at jsxDEV (${CHUNKS}/node_modules_next_0xwmtz0bm-kxf._.js:3:1)`;
+    expect(await resolveStack(lib)).toBe(lib);
+    expect(mockFetch.mock.calls.some(([u]) => String(u).includes('node_modules_'))).toBe(false);
   });
 
   it('mappings_parsed_in_steps: 2000줄 mappings 는 flush 전에는 끝나지 않고, flush 뒤 원본 위치로 끝난다', async () => {
