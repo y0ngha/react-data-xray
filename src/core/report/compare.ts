@@ -376,6 +376,10 @@ const rowIdOf = (c: RenderRowTally): string => c.id ?? componentIdOf({ name: c.n
 /** renderedAt 에서 끝의 :줄(:열) 을 뗀 파일 */
 const fileOf = (location: string): string => location.replace(/:\d+(?::\d+)?$/, '');
 
+/** 줄만 옮겨진 행을 찾는 열쇠: 이름·파일·패키지. 위치를 모르는 행은 맞추지 않는다 */
+const movedKeyOf = (c: RenderRowTally): string | undefined =>
+  c.renderedAt ? JSON.stringify([c.name, fileOf(c.renderedAt), c.package ?? null]) : undefined;
+
 /**
  * id 로 짝이 없는 렌더 행 가운데, 이름·파일·패키지가 같고 줄만 다른 행을 짝짓는다(#129). 고친 파일에서 JSX 줄이 밀리면
  * id(c:이름@파일:줄)가 바뀌어 같은 컴포넌트가 다른 행이 되기 때문이다. 같은 조합이 어느 한쪽에 둘 이상이면(한 파일의 여러
@@ -385,14 +389,12 @@ const fileOf = (location: string): string => location.replace(/:\d+(?::\d+)?$/, 
 const movedRows = (a: readonly RenderRowTally[], b: readonly RenderRowTally[]): Map<RenderRowTally, RenderRowTally> => {
   const idsA = new Set(a.map(rowIdOf));
   const idsB = new Set(b.map(rowIdOf));
-  const keyOf = (c: RenderRowTally): string | undefined =>
-    c.renderedAt ? JSON.stringify([c.name, fileOf(c.renderedAt), c.package ?? null]) : undefined;
   const byKey = (rows: readonly RenderRowTally[], others: ReadonlySet<string>): Map<string, RenderRowTally[]> => {
     const groups = new Map<string, RenderRowTally[]>();
     rows
       .filter((c) => !others.has(rowIdOf(c)))
       .forEach((c) => {
-        const key = keyOf(c);
+        const key = movedKeyOf(c);
         if (key !== undefined) groups.set(key, [...(groups.get(key) ?? []), c]);
       });
     return groups;
