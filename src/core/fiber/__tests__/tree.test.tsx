@@ -6,7 +6,6 @@ import { mockFetch } from '../../../testing/fetchMock.js';
 import { flushQueue } from '../../scheduler/idleQueue.js';
 import { collectValues } from '../componentValues.js';
 import {
-  componentRect,
   findRootFibers,
   getComponentName,
   getFiber,
@@ -89,8 +88,7 @@ describe('fiber tree', () => {
     expect(roots.length).toBeGreaterThan(0);
     const pair = roots[0].child!;
     expect(hostNodesOf(pair).map((n) => n.tagName)).toEqual(['I', 'B']);
-    expect(componentRect(pair, () => false)).toEqual(new DOMRect(10, 20, 30, 40));
-    expect(componentRect(pair, () => true)).toBeNull();
+    expect(unionRect(hostNodesOf(pair))).toEqual(new DOMRect(10, 20, 30, 40));
     spy.mockRestore();
     expect(unionRect([])).toBeNull();
   });

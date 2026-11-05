@@ -57,14 +57,18 @@ const readJsonFile = async (file: string): Promise<unknown> => JSON.parse(await 
 interface Server {
   base: string;
   token?: string;
+  /** 명령 경로. 보고서 경로를 바꾼 dev 서버(`path`)는 다른 경로를 적어 둔다 */
+  commandPath: string;
 }
 
 /** dev 서버가 적어 둔 `.rdx/.server.json`(토큰, dev 서버 자신의 주소) */
-const readServerFile = async (opts: CliOptions): Promise<{ url?: string; token?: string }> => {
+const readServerFile = async (opts: CliOptions): Promise<{ url?: string; token?: string; commandPath?: string }> => {
   const saved = (await readJsonFile(join(opts.cwd, opts.dir, SERVER_FILE)).catch(() => null)) as Record<string, unknown> | null;
   return {
     ...(typeof saved?.url === 'string' && { url: saved.url }),
     ...(typeof saved?.token === 'string' && { token: saved.token }),
+    // 같은 dev 서버의 경로만 따른다(경로 하나, 쿼리 없음)
+    ...(typeof saved?.commandPath === 'string' && /^\/(?!\/)[^\s?#]*$/.test(saved.commandPath) && { commandPath: saved.commandPath }),
   };
 };
 
@@ -72,7 +76,7 @@ const readServerFile = async (opts: CliOptions): Promise<{ url?: string; token?:
 const resolveServer = async (opts: CliOptions): Promise<Server> => {
   const saved = await readServerFile(opts);
   const base = opts.url ?? opts.env?.RDX_URL ?? saved.url;
-  if (base) return { base, token: saved.token };
+  if (base) return { base, token: saved.token, commandPath: saved.commandPath ?? COMMAND_PATH };
   throw new CliError(
     `Could not find the dev server address. Pass --url (e.g. --url http://localhost:5173), or open the app once so the dev server writes ${opts.dir}/${SERVER_FILE}. Next.js cannot record its address: always pass --url (or RDX_URL).`,
     EXIT.usage,
@@ -122,8 +126,9 @@ const send = async (server: Server, path: string, init: RequestInit = {}) => {
  * 토큰이 틀렸으면(dev 서버를 다시 띄웠거나 아직 파일이 없었으면) 파일을 다시 읽고 한 번 더 보낸다.
  * rdx 처리기가 붙이는 헤더가 없으면 다른 것이 답한 것이다(플러그인 없음, 이전 버전, Next 의 명령 route 없음).
  */
-const call = async (opts: CliOptions, path: string, init?: RequestInit): Promise<{ status: number; body: Record<string, unknown> }> => {
+const call = async (opts: CliOptions, suffix: string, init?: RequestInit): Promise<{ status: number; body: Record<string, unknown> }> => {
   const server = await resolveServer(opts);
+  const path = `${server.commandPath}${suffix}`;
   let res = await send(server, path, init);
   if (res.status === 403 && res.headers.get(REPORT_HEADER) === '1') {
     const { token } = await readServerFile(opts);
@@ -157,7 +162,7 @@ const call = async (opts: CliOptions, path: string, init?: RequestInit): Promise
 };
 
 export const listTabs = async (opts: CliOptions): Promise<TabInfo[]> => {
-  const { body } = await call(opts, COMMAND_PATH);
+  const { body } = await call(opts, '');
   return Array.isArray(body.tabs) ? (body.tabs as TabInfo[]) : [];
 };
 
@@ -173,7 +178,7 @@ const tabsOf = (body: Record<string, unknown>): TabInfo[] => (Array.isArray(body
 
 /** 탭에 명령을 맡기고 끝날 때까지 기다린다 */
 export const runCommand = async (opts: CliOptions, op: CommandOp, name?: string): Promise<CommandOutcome> => {
-  const created = await call(opts, COMMAND_PATH, {
+  const created = await call(opts, '', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -198,7 +203,7 @@ export const runCommand = async (opts: CliOptions, op: CommandOp, name?: string)
   const deadline = Date.now() + opts.timeoutMs;
   /** 기다리기를 그만둔다. dev 서버에 알려, 아직 받아 가지 않은 명령은 실행하지 않고 늦은 결과도 받지 않게 한다 */
   const giveUp = async (current: CommandState, why: 'timeout' | 'cancelled'): Promise<never> => {
-    const { body } = await call(opts, `${COMMAND_PATH}/${current.id}`, { method: 'DELETE' }).catch(() => ({ body: {} }));
+    const { body } = await call(opts, `/${current.id}`, { method: 'DELETE' }).catch(() => ({ body: {} }));
     const status = (body as Partial<CommandState>).status === 'done' ? 'done' : current.status;
     const ran = status === 'pending' ? 'It did not run.' : 'The tab received it, so it may have run.';
     if (why === 'cancelled') throw new CliError(`Cancelled the ${op} command for tab ${current.tab}. ${ran}`, EXIT.cancelled);
@@ -213,7 +218,7 @@ export const runCommand = async (opts: CliOptions, op: CommandOp, name?: string)
     if (opts.signal?.aborted) return giveUp(current, 'cancelled');
     if (Date.now() >= deadline) return giveUp(current, 'timeout');
     await sleep(Math.min(opts.pollMs ?? 250, Math.max(0, deadline - Date.now())));
-    const { status, body } = await call(opts, `${COMMAND_PATH}/${current.id}`);
+    const { status, body } = await call(opts, `/${current.id}`);
     if (status !== 200) throw new CliError(String(body.error ?? `status ${status}`), EXIT.timeout);
     return wait(body as unknown as CommandState);
   };

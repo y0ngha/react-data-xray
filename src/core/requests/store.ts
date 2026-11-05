@@ -1,14 +1,16 @@
+import { config } from '../config.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { registerOrigins } from './origins.js';
 import { markOverlapCancelled } from '../reactQuery/overlapCancel.js';
 import { currentCommitSeq } from '../render/commitCauses.js';
 import { isAborted } from './aborted.js';
 import { repeatCauseStep } from './repeatCause.js';
+import { noteNPlusOneStage, resetNPlusOne } from './nPlusOne.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
+import { createByteCounter } from './byteLength.js';
 import { createResponseHasher, digestOf, HASH_CHUNK } from './responseHash.js';
 import type { RequestRecord } from './types.js';
 
-const MAX_RECORDS = 200;
 const MAX_RESPONSE_TEXT = 100_000;
 
 const records: RequestRecord[] = [];
@@ -85,6 +87,7 @@ export const createRecord = (
   enqueue(() => {
     const duplicate = isStale(record) ? undefined : detectDuplicate(record);
     record.duplicateOf = duplicate?.id;
+    if (!isStale(record) && noteNPlusOneStage(record, 'deduped')) notify();
     // 보낸 컴포넌트는 앞서 걸린 annotate step 이 채우므로, 그 뒤로 한 번 더 미룬다.
     if (duplicate) {
       const step = repeatCauseStep(record, duplicate.commitSeq);
@@ -100,6 +103,17 @@ export const createRecord = (
   return record;
 };
 
+/**
+ * 상한(configure 의 maxRecords, 기본 200)을 넘은 만큼 오래된 기록부터 버린다. 그때의 설정을 읽으므로 도중에 줄여도 맞는다.
+ * 되살린 이전 페이지 기록은 버려도 세지 않는다(이번 측정에서 넘친 것이 아니다).
+ */
+const trimRecords = (): boolean => {
+  const over = records.length - config().maxRecords;
+  if (over <= 0) return false;
+  dropped += records.splice(0, over).filter((r) => !r.restored).length;
+  return true;
+};
+
 /** 응답이 오면 목록에 넣는다. 본문을 읽지 않는 요청과 실패한 요청도 감시 대상이다. */
 export const finishRecord = (record: RequestRecord, status: number, error?: string): void => {
   record.status = status;
@@ -113,15 +127,31 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
       return true;
     });
   records.push(record);
-  if (records.length > MAX_RECORDS) {
-    records.shift();
-    dropped++;
-  }
+  trimRecords();
+  // 항목마다 보낸 요청(N+1)인지는 유휴 큐에서 그 요청이 든 창만 본다. 보낸 곳(annotate)·중복 판정 step 과 이 step 중 마지막 것이 판정한다.
+  enqueue(() => {
+    if (!isStale(record) && noteNPlusOneStage(record, 'finished')) notify();
+    return true;
+  });
   notify();
 };
 
+const setResponseBytes = (record: RequestRecord, text: string, reserialized: boolean): void => {
+  const counter = createByteCounter(text);
+  while (!counter.step());
+  record.responseBytes = counter.total();
+  if (reserialized) record.responseBytesApprox = true;
+};
+
 /** 응답 원문을 상세 화면용으로 보관하고, 같은 요청의 직전 응답과 비교한다. */
-export const keepResponseText = (record: RequestRecord, text: string, { compare }: { compare: boolean }): void => {
+export const keepResponseText = (
+  record: RequestRecord,
+  text: string,
+  {
+    compare,
+    reserialized = false,
+  }: { compare: boolean; /** 원문이 아니라 응답 객체를 다시 직렬화한 글자(XHR responseType 'json') */ reserialized?: boolean },
+): void => {
   // payload 를 모르는 요청은 detectSameResponse 가 판정하지 않으므로 해시도 하지 않는다.
   const judge = compare && !record.bodyUnreadable;
   const short = text.length <= HASH_CHUNK;
@@ -129,9 +159,22 @@ export const keepResponseText = (record: RequestRecord, text: string, { compare 
     if (isStale(record)) return true;
     record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (truncated after 100KB)` : text;
     if (judge && short) record.sameResponseAs = detectSameResponse(record, digestOf(text));
+    // 과다 응답 옆에 보일 크기(UTF-8 바이트). 짧은 원문은 여기서 바로, 큰 원문은 뒤 step 에서 조각으로 센다.
+    if (short) setResponseBytes(record, text, reserialized);
     notify();
     return true;
   });
+  if (!short) {
+    const bytes = createByteCounter(text);
+    enqueue(() => {
+      if (isStale(record)) return true;
+      if (!bytes.step()) return false;
+      record.responseBytes = bytes.total();
+      if (reserialized) record.responseBytesApprox = true;
+      notify();
+      return true;
+    });
+  }
   if (!judge || short) return;
   // 큰 응답은 해시를 여러 조각에 나눠 계산한다. 큐는 앞 step 이 끝나야 다음으로 넘어가므로, 그동안 뒤의 일은 기다리고 판정 순서는 그대로다.
   const hasher = createResponseHasher(text);
@@ -161,9 +204,15 @@ export const mergeRecords = (others: readonly RequestRecord[]): void => {
   const known = new Set(records.map((r) => r.id));
   const added = others.filter((r) => !known.has(r.id));
   if (added.length === 0) return;
-  const merged = [...records, ...added].sort((a, b) => a.id - b.id).slice(-MAX_RECORDS);
+  const merged = [...records, ...added].sort((a, b) => a.id - b.id);
   records.splice(0, records.length, ...merged);
   nextId = Math.max(nextId, ...added.map((r) => r.id + 1));
+  // 새로고침 전 기록은 import 할 때 되살려 configure() 보다 먼저 들어온다. 여기서 자르면 기본 상한(200)으로 잘리므로,
+  // 유휴 큐에서(그때의 설정으로) 자른다. 그 전에 끝난 요청이 있으면 finishRecord 가 먼저 자른다.
+  enqueue(() => {
+    if (trimRecords()) notify();
+    return true;
+  });
   notify();
 };
 
@@ -172,5 +221,6 @@ export const clearRecords = (): void => {
   firstLiveId = nextId;
   dropped = 0;
   resetRepeatDetection();
+  resetNPlusOne();
   notify();
 };

@@ -82,6 +82,8 @@ export interface RdxReportOptions {
    * 명령을 받아 갈 수 있다. 명령 경로 자체는 여전히 토큰이 있어야 한다).
    */
   commands?: 'local' | 'lan';
+  /** CLI·MCP 의 명령 경로. 미들웨어가 보고서 경로(`path`)에 맞춰 넘긴다. 기본 `/__rdx/command` */
+  commandPath?: string;
 }
 
 /** 서버마다 다른 요청 객체(connect 의 IncomingMessage, Next 의 Web Request)에서 처리에 필요한 것만 꺼낸 것 */
@@ -255,19 +257,20 @@ const exists = (file: string): Promise<boolean> =>
  * CLI 가 토큰을 그 기기로 보내게 된다. 주소를 모르면(Next) 지난번에 적은 주소를 그대로 둔다(없으면 CLI 가 --url 을 묻는다).
  * 내용이 바뀌었거나 파일이 지워졌을 때만 쓰고, 쓰기에 성공한 뒤에야 기억한다.
  */
-const writeServerFile = async (folder: string, store: Store, serverUrl: string | undefined): Promise<void> => {
+const writeServerFile = async (folder: string, store: Store, serverUrl: string | undefined, commandPath: string): Promise<void> => {
   const file = join(folder, SERVER_FILE);
   if (serverUrl) store.serverUrl = serverUrl;
   if (!store.serverUrl) {
     const saved = (await readFile(file, 'utf8').then(JSON.parse, () => null)) as { url?: unknown } | null;
     if (typeof saved?.url === 'string') store.serverUrl = saved.url;
   }
-  const content = JSON.stringify({ token: store.token, url: store.serverUrl });
+  // CLI 는 commandPath 로 보낸다(보고서 경로를 바꿨으면 명령 경로도 따라 바뀐다).
+  const content = JSON.stringify({ token: store.token, url: store.serverUrl, commandPath });
   if (store.written === content && (await exists(file))) return;
   await mkdir(folder, { recursive: true });
   // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다. 이미 있으면 그대로 둔다.
   await writeFile(join(folder, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined);
-  await writeJson(file, { token: store.token, url: store.serverUrl, updatedAt: Date.now() }, SERVER_FILE_MODE);
+  await writeJson(file, { token: store.token, url: store.serverUrl, commandPath, updatedAt: Date.now() }, SERVER_FILE_MODE);
   store.written = content;
 };
 
@@ -283,13 +286,19 @@ const isLocalPeer = (req: ReportRequest): boolean => {
   return name === 'localhost' || name.endsWith('.localhost') || name === '127.0.0.1' || name === '[::1]';
 };
 
-const writeReport = async (folder: string, req: ReportRequest, query: URLSearchParams, commands: boolean): Promise<ReportReply> => {
+const writeReport = async (
+  folder: string,
+  commandPath: string,
+  req: ReportRequest,
+  query: URLSearchParams,
+  commands: boolean,
+): Promise<ReportReply> => {
   const name = query.get('name');
   const tab = query.get('tab');
   const report: unknown = JSON.parse(await readBody(req.body));
   const store = storeFor(folder);
   // .rdx 와 .gitignore 도 여기서 만든다.
-  await writeServerFile(folder, store, req.serverUrl);
+  await writeServerFile(folder, store, req.serverUrl, commandPath);
   if (tab !== null && typeof report === 'object' && report !== null) {
     const notice = tabNotice(tab, query);
     const entry: TabEntry = { id: tab, path: notice.path, title: notice.title, updatedAt: Date.now(), file: reportFileFor(tab) };
@@ -332,7 +341,13 @@ const sameToken = (given: string | undefined, token: string): boolean => {
  * - `DELETE /__rdx/command/<id>`: 기다리기를 그만둔다(시간 초과·Ctrl+C·MCP 취소). 아직 실행하지 않았으면 실행하지 않는다
  * 탭은 업로드·받아 가기 응답으로 명령을 받아 window.__RDX__ 의 reset·snapshot 을 부른다.
  */
-const handleCommand = async (folder: string, req: ReportRequest, path: string, commands: boolean): Promise<ReportReply> => {
+const handleCommand = async (
+  folder: string,
+  commandPath: string,
+  req: ReportRequest,
+  path: string,
+  commands: boolean,
+): Promise<ReportReply> => {
   if (!commands)
     return json(403, {
       error: 'not-local',
@@ -340,21 +355,21 @@ const handleCommand = async (folder: string, req: ReportRequest, path: string, c
     });
   const store = storeFor(folder);
   // 토큰 파일이 아직 없으면(브라우저가 아직 오지 않았으면) 지금 써서 CLI 가 다시 읽고 보내게 한다.
-  await writeServerFile(folder, store, req.serverUrl);
+  await writeServerFile(folder, store, req.serverUrl, commandPath);
   if (!sameToken(req.token, store.token)) return json(403, { error: 'token', message: `missing or wrong ${SERVER_FILE} token` });
   const now = Date.now();
   markCliActive(store, now);
-  const id = path.slice(COMMAND_PATH.length + 1);
+  const id = path.slice(commandPath.length + 1);
   if (req.method === 'GET') {
-    if (path === COMMAND_PATH) return json(200, { tabs: liveTabs(store, now) });
+    if (path === commandPath) return json(200, { tabs: liveTabs(store, now) });
     const command = getCommand(store, id, now);
     return command ? json(200, command) : json(404, { error: `unknown or expired command: ${id}` });
   }
   if (req.method === 'DELETE') {
-    const cancelled = path === COMMAND_PATH ? undefined : cancelCommand(store, id, now);
+    const cancelled = path === commandPath ? undefined : cancelCommand(store, id, now);
     return cancelled ? json(200, cancelled) : json(404, { error: `unknown or expired command: ${id}` });
   }
-  if (path !== COMMAND_PATH) return { status: 405, mark: '1' };
+  if (path !== commandPath) return { status: 405, mark: '1' };
   if (!req.contentType?.startsWith('application/json')) return { status: 403, mark: '1' };
   const created = createCommand(store, JSON.parse(await readBody(req.body)), now);
   if (!created.ok)
@@ -366,7 +381,10 @@ const handleCommand = async (folder: string, req: ReportRequest, path: string, c
  * rdx 보고서 요청(GET 은 있는지 묻기, POST 는 쓰기)과 명령 경로를 처리한다. connect 미들웨어와 Next.js route handler 가 같이 쓴다.
  * 보고서는 `<root>/<dir>/report.json`(이름을 주면 `<이름>.json`, 탭은 `tabs/<id>.json`)에 쓴다.
  */
-export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts = [], commands = 'local' }: RdxReportOptions = {}) => {
+export const createReportHandler = (
+  root: string,
+  { dir = '.rdx', allowedHosts = [], commands = 'local', commandPath = COMMAND_PATH }: RdxReportOptions = {},
+) => {
   const folder = join(root, dir);
   return async (req: ReportRequest): Promise<ReportReply> => {
     // 브라우저가 "처리기는 있지만 이 주소는 막혔다"를 알고 안내할 수 있게 표시한다.
@@ -375,8 +393,8 @@ export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts =
     const query = url.searchParams;
     // 명령을 주고받는 쪽(탭 등록·받아 가기·결과, 명령 경로)은 같은 PC 에서 온 요청만 받는다(commands: 'lan' 이면 LAN 도).
     const commandsAllowed = commands === 'lan' || isLocalPeer(req);
-    if (url.pathname === COMMAND_PATH || url.pathname.startsWith(`${COMMAND_PATH}/`))
-      return handleCommand(folder, req, url.pathname, commandsAllowed).catch(failure);
+    if (url.pathname === commandPath || url.pathname.startsWith(`${commandPath}/`))
+      return handleCommand(folder, commandPath, req, url.pathname, commandsAllowed).catch(failure);
     const tab = query.get('tab');
     if (req.method === 'GET') {
       // TAB_HEADER 가 없는 GET(다른 사이트의 <img> 등)은 아무것도 바꾸지 않는 핸드셰이크로 답한다.
@@ -387,7 +405,7 @@ export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts =
       // 탭이 맡은 명령을 받아 간다(보고서가 그대로라 올리지 않는 주기). 열려 있다는 알림도 된다.
       if (fromTab) {
         const store = storeFor(folder);
-        await writeServerFile(folder, store, req.serverUrl);
+        await writeServerFile(folder, store, req.serverUrl, commandPath);
         seeTab(store, tabNotice(tab, query), Date.now());
         return replyWithCommands(store, tab);
       }
@@ -400,6 +418,6 @@ export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts =
     const name = query.get('name');
     if (name !== null && !isReportName(name)) return { status: 400, mark: '1' };
     if (tab !== null && (!isTabId(tab) || tab === TABS_INDEX || name !== null)) return { status: 400, mark: '1' };
-    return writeReport(folder, req, query, commandsAllowed).catch(failure);
+    return writeReport(folder, commandPath, req, query, commandsAllowed).catch(failure);
   };
 };

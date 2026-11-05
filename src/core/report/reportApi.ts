@@ -1,4 +1,5 @@
-import { isReportName, REPORT_HEADER, REPORT_PATH, reportFileFor, TAB_HEADER, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
+import { isReportName, REPORT_HEADER, reportFileFor, TAB_HEADER, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
+import { config, subscribeConfig } from '../config.js';
 import { getNativeFetch } from '../capture/nativeFetch.js';
 import { whenSourcesResolved } from '../capture/requestContext.js';
 import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../render/monitor.js';
@@ -145,8 +146,10 @@ const HANDSHAKE_RETRY_MS = 3000;
 const MAX_UPLOAD_FAILURES = 3;
 
 type Endpoint = 'ready' | 'forbidden-host' | 'missing';
-// dev 서버 미들웨어가 있는지 확인한 결과. snapshot 이 확인이 끝나기 전에 불려도 기다린다.
-let endpoint: Promise<Endpoint> = Promise.resolve('missing');
+// dev 서버 미들웨어가 있는지 그 경로로 확인한 결과. snapshot 이 확인이 끝나기 전에 불려도 기다린다.
+let checked: { path: string; state: Promise<Endpoint> } | undefined;
+// 주기 업로드가 도는 중(확인 중 포함)인지. reportPath 가 바뀌었을 때 멈춰 있으면 다시 시작한다.
+let uploading = false;
 
 export { getResetAt };
 
@@ -166,17 +169,20 @@ const snapshot = async (name: string): Promise<RdxReport> => {
     );
   }
   const send = getNativeFetch();
-  const state = send ? await endpoint : 'missing';
+  const target = send && endpointFor(send);
+  const state = target ? await target.state : 'missing';
   if (state === 'forbidden-host') {
     throw new Error(`[react-data-xray] ${MESSAGES.forbiddenHost(location.host, location.hostname)}`);
   }
-  if (!send || state === 'missing') {
+  if (!send || !target || state === 'missing') {
     throw new Error(NO_PLUGIN_MESSAGE);
   }
   // 호출 위치가 원본 위치와 변환 전 위치로 갈리지 않게, 진행 중인 소스맵 변환을 기다린다.
-  await whenSourcesResolved();
-  const result = report();
-  const res = await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
+  const resolved = await whenSourcesResolved();
+  const monitoring = isRenderMonitoring();
+  keepRenderMonitoring();
+  const result = buildReport(monitoring, Date.now(), true, {}, { sourceMapTimedOut: !resolved });
+  const res = await send(`${target.path}?name=${encodeURIComponent(name)}`, {
     method: 'POST',
     credentials: 'omit',
     headers: { 'content-type': 'application/json' },
@@ -197,8 +203,9 @@ const compareSnapshots = async (before: string, after: string): Promise<ReportCo
   const result = compare(a, b);
   const name = `compare-${before}-${after}`;
   const send = getNativeFetch();
-  if (send && isReportName(name) && (await endpoint) === 'ready') {
-    await send(`${REPORT_PATH}?name=${encodeURIComponent(name)}`, {
+  const target = send && isReportName(name) ? endpointFor(send) : undefined;
+  if (send && target && (await target.state) === 'ready') {
+    await send(`${target.path}?name=${encodeURIComponent(name)}`, {
       method: 'POST',
       credentials: 'omit',
       headers: { 'content-type': 'application/json' },
@@ -212,8 +219,8 @@ const compareSnapshots = async (before: string, after: string): Promise<ReportCo
  * dev 서버에 rdx 미들웨어가 있는지. 본문 없는 GET 으로 묻고, 미들웨어만 붙이는 헤더로 판단한다.
  * 의존성 최적화 리로드 중처럼 응답이 아예 없으면 한 번 더 묻는다. 응답이 왔는데 표시가 없으면 미들웨어가 없는 것이다(프록시·SPA 폴백).
  */
-const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
-  const ask = () => send(REPORT_PATH, { method: 'GET', credentials: 'omit' }).catch(() => null);
+const checkEndpoint = async (send: typeof fetch, path: string): Promise<Endpoint> => {
+  const ask = () => send(path, { method: 'GET', credentials: 'omit' }).catch(() => null);
   const res = (await ask()) ?? (await new Promise((resolve) => window.setTimeout(resolve, HANDSHAKE_RETRY_MS)).then(ask));
   const mark = res?.headers.get(REPORT_HEADER);
   if (mark === 'forbidden-host') {
@@ -222,11 +229,33 @@ const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
   return mark === '1' ? 'ready' : mark === 'forbidden-host' ? 'forbidden-host' : 'missing';
 };
 
+/** 지금 reportPath 를 확인한 결과. 경로가 바뀌었으면(configure) 다시 묻는다. 확인하지 않은 경로로는 보내지 않는다. */
+const endpointFor = (send: typeof fetch): { path: string; state: Promise<Endpoint> } => {
+  const path = config().reportPath;
+  if (checked?.path !== path) {
+    // 자가 점검(doctor)이 보는 상태도 함께 바꾼다. 늦게 끝난 앞 경로의 결과가 덮어쓰지 않게 지금 경로일 때만 적는다.
+    setReportPluginState('checking');
+    const target = { path, state: checkEndpoint(send, path) };
+    checked = target;
+    void target.state.then((state) => checked === target && setReportPluginState(state));
+  }
+  return checked;
+};
+
 /**
  * 주기 업로드가 "바뀌었나" 를 볼 때 쓰는 값. 받은 commit 수는 패널 자신의 commit 에도 늘어, 그대로 비교하면
- * 앱이 멈춰 있어도 5초마다 전체를 보낸다. 0 인지(연결 여부)만 남긴다. 보내는 본문에는 그대로 둔다.
+ * 앱이 멈춰 있어도 5초마다 전체를 보낸다. 0 인지(연결 여부)만 남긴다. 완료 표시(complete·incompleteReasons·pendingAnalysis·
+ * sourcesResolved·queryKeysResolved)도 패널이 도는 동안 늘 흔들리므로 뺀다. 덜 분석된 파일이 따라잡는 것은 startUpload 가
+ * complete 가 false → true 로 바뀔 때 한 번 보내서 맞춘다. 보내는 본문에는 그대로 둔다.
  */
-export const changeKeyOf = (content: Omit<RdxReport, 'generatedAt'>): string =>
+export const changeKeyOf = ({
+  complete: _complete,
+  incompleteReasons: _reasons,
+  pendingAnalysis: _pending,
+  sourcesResolved: _sources,
+  queryKeysResolved: _queryKeys,
+  ...content
+}: Omit<RdxReport, 'generatedAt'>): string =>
   JSON.stringify({
     ...content,
     diagnostics: {
@@ -241,21 +270,29 @@ export const changeKeyOf = (content: Omit<RdxReport, 'generatedAt'>): string =>
  */
 const startUpload = async (): Promise<void> => {
   const send = getNativeFetch();
-  if (!send) return;
-  setReportPluginState('checking');
-  endpoint = checkEndpoint(send);
-  const state = await endpoint;
-  setReportPluginState(state);
-  if (state !== 'ready') return;
+  if (!send || uploading) return;
+  uploading = true;
+  // 확인은 한 마이크로태스크 뒤에 보낸다. `import 'react-data-xray'` 바로 뒤의 configure({ reportPath }) 가 먼저 돌아야 그 경로로 묻는다.
+  await Promise.resolve();
+  if ((await endpointFor(send).state) !== 'ready') {
+    uploading = false;
+    return;
+  }
   keepRenderMonitoring();
   let last = '';
   let lastSent = 0;
+  let sentComplete = true; // 마지막으로 보낸 파일이 끝난 보고서였는지
   let failures = 0;
   const upload = async () => {
+    // 도중에 reportPath 가 바뀌었으면 새 경로를 먼저 확인한다. 없으면 이번 주기는 보내지 않는다.
+    const target = endpointFor(send);
+    if ((await target.state) !== 'ready') return;
     const full = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
     const { generatedAt: _generatedAt, ...content } = full;
     const key = changeKeyOf(content);
-    const idle = key === last;
+    // 덜 분석된 파일을 보낸 뒤 분석이 끝나면, 내용이 그대로여도 한 번 보내 파일이 complete: true 로 따라잡게 한다.
+    const caughtUp = full.complete && !sentComplete;
+    const idle = key === last && !caughtUp;
     const tab = getTabId();
     // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
     // 올리지 않는 주기에도 CLI·MCP 가 맡긴 명령을 본문 없는 GET 으로 받아 간다(#69). CLI 를 쓰지 않을 때는 1분 안쪽마다.
@@ -267,7 +304,7 @@ const startUpload = async (): Promise<void> => {
     // 받아 가기 주기는 보낸 때부터 센다(업로드도 응답으로 명령을 받으므로 받아 가기로 친다).
     notePollSent(Date.now());
     const res = await send(
-      `${REPORT_PATH}?${query}`,
+      `${target.path}?${query}`,
       quiet
         ? { method: 'GET', credentials: 'omit', headers: { [TAB_HEADER]: '1' } }
         : {
@@ -281,13 +318,15 @@ const startUpload = async (): Promise<void> => {
       if (!quiet) {
         last = key;
         lastSent = Date.now();
+        sentComplete = full.complete;
       }
       failures = 0;
       notePolled(res);
-      await receiveCommands(send, res, tab, { reset, snapshot });
+      await receiveCommands(send, target.path, res, tab, { reset, snapshot });
       return;
     }
     // 잠깐 실패하면 다음 주기에 다시 보낸다. 받아 가기의 실패는 세지 않는다(그때는 이미 쉬는 중이거나 보고서가 그대로다).
+    // 멈추지 않는다: 멈추면 dev 서버를 다시 띄운 뒤 CLI 명령이 탭에 닿지 않는다.
     if (!quiet) failures++;
   };
   window.setInterval(() => void upload(), UPLOAD_MS);
@@ -300,4 +339,8 @@ export const installReportApi = (): void => {
   window.__RDX__ = { report, reset, snapshot, compare: compareSnapshots, doctor: () => buildDiagnostics() };
   watchTabIdConflict();
   void startUpload();
+  // 확인한 뒤에 reportPath 를 바꾸면(늦은 configure) 그 경로로 다시 확인해 업로드를 시작한다.
+  subscribeConfig(() => {
+    if (checked && checked.path !== config().reportPath && !uploading) void startUpload();
+  });
 };

@@ -14,13 +14,27 @@ let scheduled = false;
 // 끝나지 않는 step 이 큐를 영원히 붙잡지 않게, 이만큼 불리면 버린다.
 const MAX_CALLS_PER_STEP = 100_000;
 
-export function enqueue(step: Step): void {
+/**
+ * 보고서에 들어가는 분석('analysis', 기본: 요청 주석·반복 원인·응답 해시·색인·렌더 기록 등)과
+ * 화면만 쓰는 일('ui': 오버레이 박스, 렌더 탭 목록, 훅 경로 캐시)을 가른다. 보고서는 analysis 만 남은 일로 센다.
+ */
+export type StepKind = 'analysis' | 'ui';
+
+// 화면만 쓰는 step. 큐 배열을 그대로 두고 표시만 한다.
+const uiSteps = new WeakSet<Step>();
+
+export function enqueue(step: Step, kind: StepKind = 'analysis'): void {
   let calls = 0;
-  queue.push(() => ++calls > MAX_CALLS_PER_STEP || step());
+  const wrapped: Step = () => ++calls > MAX_CALLS_PER_STEP || step();
+  if (kind === 'ui') uiSteps.add(wrapped);
+  queue.push(wrapped);
   schedule();
 }
 
 export const isQueuePending = (): boolean => queue.length > 0;
+
+/** 큐에 남은 보고서용 분석 step 수(읽기만 한다. 화면만 쓰는 'ui' step 은 세지 않는다) */
+export const pendingSteps = (): number => queue.reduce((n, s) => (uiSteps.has(s) ? n : n + 1), 0);
 
 /** 지금 바로 돌린다. 다 비었으면 true. step 안에서 다시 부르면 아무것도 안 하고 false. */
 export function flushQueue(limitMs = Infinity): boolean {

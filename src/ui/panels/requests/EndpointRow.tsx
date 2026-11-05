@@ -1,7 +1,9 @@
 import { Fragment } from 'react';
 
-import { isWastefulStat, type EndpointStat } from '../../../core/requests/endpointStats.js';
+import { isWastefulStat, type EndpointStat, type NPlusOneSender } from '../../../core/requests/endpointStats.js';
+import { nPlusOneHint } from '../../../core/requests/nPlusOne.js';
 import { useReveal } from '../../hooks/useReveal.js';
+import type { IgnoreSource } from '../../../shared/ignoredEndpoints.js';
 import type { FocusRequest } from '../../viewState.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
@@ -9,7 +11,8 @@ import { color, plainButtonStyle, rowStyle } from '../../theme.js';
 
 interface EndpointRowProps {
   stat: EndpointStat;
-  ignored: boolean;
+  /** 무시한 곳. code(configure 의 ignore)는 패널에서 풀 수 없다. 무시하지 않으면 없다 */
+  ignored: IgnoreSource | undefined;
   /** 주면 이 경로에서 보낸 건수만 보인다 */
   route?: string;
   /** 배지 내역에서 이 줄로 오라는 요청 */
@@ -35,8 +38,10 @@ interface Segment {
   bold?: boolean;
 }
 
+const senderLabel = (sender: NPlusOneSender): string => (sender.component ? `<${sender.component}>` : 'same caller');
+
 /** 요약 줄의 조각들. 없는 지표는 뺀다. */
-const segments = (stat: EndpointStat): Segment[] => {
+const segments = (stat: EndpointStat, ignored: boolean): Segment[] => {
   const all: Array<Segment | null> = [
     { text: `×${stat.count}` },
     { text: `avg ${stat.avgMs}ms` },
@@ -49,6 +54,12 @@ const segments = (stat: EndpointStat): Segment[] => {
       ? { text: `failed: ${stat.failedCodes.join('·')}`, title: 'Status codes of failed requests regardless of waste' }
       : null,
     stat.review > 0 ? { text: `review: ${stat.review}`, color: color.review } : null,
+    // 무시한 엔드포인트는 보고서처럼 N+1 로 보이지 않는다
+    ...(ignored ? [] : (stat.nPlusOne ?? [])).map((sender) => ({
+      text: `N+1: ${senderLabel(sender)}×${sender.count}`,
+      title: sender.location ? `${nPlusOneHint()}\n${sender.location}` : nPlusOneHint(),
+      color: color.review,
+    })),
     stat.explained > 0 ? { text: `expected: ${stat.explained}` } : null,
   ];
   return all.filter((seg): seg is Segment => seg !== null);
@@ -64,22 +75,28 @@ export const EndpointRow = ({ stat, ignored, route, focus, onSelect, onToggleIgn
           type="button"
           title={stat.endpoint}
           onClick={() => onSelect(stat.endpoint)}
-          style={{ ...plainButtonStyle, flex: 1, minWidth: 0, color: titleColor(stat, ignored) }}
+          style={{ ...plainButtonStyle, flex: 1, minWidth: 0, color: titleColor(stat, !!ignored) }}
         >
           {/* ellipsis 는 텍스트를 직접 담는 요소에 걸어야 한다 */}
           <u style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stat.endpoint}</u>
         </button>
-        <Button
-          subtle
-          onClick={() => onToggleIgnore(stat.endpoint)}
-          title="Do not count duplicates and same responses as waste for this endpoint (when intentional)"
-        >
-          {ignored ? 'Unignore' : 'Ignore'}
-        </Button>
+        {ignored === 'code' ? (
+          <span title="Ignored by configure({ ignore }) in code; change it there" style={{ color: color.muted, whiteSpace: 'nowrap' }}>
+            Ignored (config)
+          </span>
+        ) : (
+          <Button
+            subtle
+            onClick={() => onToggleIgnore(stat.endpoint)}
+            title="Do not count duplicates and same responses as waste for this endpoint (when intentional)"
+          >
+            {ignored ? 'Unignore' : 'Ignore'}
+          </Button>
+        )}
       </div>
       <Muted>
         {/* 조각 사이의 공백은 nowrap 밖에 두어 조각 사이에서만 줄이 바뀐다 */}
-        {segments(stat).map((seg, i) => (
+        {segments(stat, !!ignored).map((seg, i) => (
           <Fragment key={seg.text}>
             {i > 0 && ' · '}
             <span title={seg.title} style={{ whiteSpace: 'nowrap', color: seg.color, fontWeight: seg.bold ? 600 : undefined }}>

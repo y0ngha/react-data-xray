@@ -1,11 +1,21 @@
 import { formatTime } from '../../shared/format.js';
+import type { EffectiveConfig } from '../config.js';
 import type { RdxReport } from './buildReport.js';
 
 /** 비교에 쓰는 부분만 담은 보고서. sessionStorage 에 남기는 것도 이 크기다. */
 export interface ComparableReport {
   /** 마지막 reset 시각(ms). null 이거나 없으면 reset 하지 않고 잰 것이다(이 필드 전에 저장한 스냅샷에는 없다). */
   resetAt?: number | null;
-  requests: { endpoints: Array<{ endpoint: string; count: number; duplicates: number; sameResponses: number }> };
+  /** 분석이 다 끝난 보고서인지(RdxReport.complete)와 그렇지 않은 이유. 이 필드 전에 저장한 스냅샷에는 없다 */
+  complete?: boolean;
+  incompleteReasons?: string[];
+  /** 잰 때의 판정 기준(이 필드 전에 저장한 스냅샷에는 없다) */
+  config?: EffectiveConfig;
+  requests: {
+    /** 기록 상한을 넘어 버린 요청 수(이 필드 전에 저장한 스냅샷에는 없다) */
+    dropped?: number;
+    endpoints: Array<{ endpoint: string; count: number; duplicates: number; sameResponses: number }>;
+  };
   renders: {
     monitoring: boolean;
     windowSeconds: number;
@@ -17,7 +27,11 @@ export interface ComparableReport {
 /** 보고서에서 compare 가 읽는 값만 남긴다. */
 export const toComparable = (r: RdxReport): ComparableReport => ({
   resetAt: r.resetAt,
+  complete: r.complete,
+  incompleteReasons: r.incompleteReasons,
+  config: r.config,
   requests: {
+    dropped: r.requests.dropped,
     endpoints: r.requests.endpoints.map(({ endpoint, count, duplicates, sameResponses }) => ({
       endpoint,
       count,
@@ -105,6 +119,32 @@ const splitEndpoints = (a: ComparableReport, b: ComparableReport): string[] => {
   return [...new Set([...splitIn(x, y), ...splitIn(y, x)])];
 };
 
+// 판정 기준만 본다. 기준이 다르면 중복·같은 응답 수가 달라진다. reportPath 는 보내는 곳일 뿐이라 보지 않는다.
+const CRITERIA = ['dedupeWindowMs', 'burst', 'nPlusOne', 'keyHeaders'] as const;
+
+const sortedText = (values: readonly string[]): string => JSON.stringify([...values].sort());
+
+/**
+ * 두 설정에서 판정 기준이 다른 항목("dedupeWindowMs 2000 / 1000"). 무시 목록은 순서와 무관한 집합으로 코드·패널을 따로 본다.
+ * 기억할 요청 수는 어느 한쪽에서라도 넘쳐 버린 요청이 있을 때만 결과를 바꾸므로 그때만 본다.
+ * 한쪽이라도 설정을 남기지 않은 옛 보고서면 비교하지 않는다.
+ */
+const configDifferences = (a: ComparableReport, b: ComparableReport): string[] => {
+  const [x, y] = [a.config, b.config];
+  if (!x || !y) return [];
+  // nPlusOne(#85)처럼 나중에 더한 기준은 그 전에 저장한 보고서에 없다. 한쪽에 없으면 그 기준은 비교하지 않는다.
+  const rows: Array<[string, string, string]> = CRITERIA.filter((key) => x[key] !== undefined && y[key] !== undefined).map((key) => [
+    key,
+    JSON.stringify(x[key]),
+    JSON.stringify(y[key]),
+  ]);
+  rows.push(['ignore (code)', sortedText(x.ignore.code), sortedText(y.ignore.code)]);
+  rows.push(['ignore (panel)', sortedText(x.ignore.panel), sortedText(y.ignore.panel)]);
+  if ((a.requests.dropped ?? 0) > 0 || (b.requests.dropped ?? 0) > 0)
+    rows.push(['maxRecords', JSON.stringify(x.maxRecords), JSON.stringify(y.maxRecords)]);
+  return rows.filter(([, before, after]) => before !== after).map(([key, before, after]) => `${key} ${before} / ${after}`);
+};
+
 const findingId = (f: ComparableReport['reactQuery']['findings'][number]): string => `${f.kind} ${f.keys.join(', ')}`;
 
 /** 저장한 두 보고서(a: 전, b: 후)의 차이. 양수는 b 에서 늘어난 것이다. */
@@ -123,6 +163,15 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
     const afterStr = rb !== null ? formatTime(rb) : 'none';
     warnings.push(`only one report was measured after a reset (before: ${beforeStr}, after: ${afterStr})`);
   }
+  // snapshot 은 큐를 비우고 소스맵을 2초까지 기다리지만, 그 안에 끝나지 않으면 덜 분석된 채 남는다.
+  const incompleteOf = (name: string, r: ComparableReport): string[] =>
+    r.complete === false ? [`${name} (${(r.incompleteReasons ?? []).join(', ') || 'unknown'})`] : [];
+  const incomplete = [...incompleteOf('before', a), ...incompleteOf('after', b)];
+  if (incomplete.length > 0)
+    warnings.push(
+      `saved before analysis finished (complete: false): ${incomplete.join('; ')}; callers and counts may differ for that reason`,
+    );
+  configDifferences(a, b).forEach((d) => warnings.push(`detection config differs: ${d}`));
   splitEndpoints(a, b).forEach((e) =>
     warnings.push(`endpoint naming changed for ${e} (one report splits it into "${e} (…)" rows; likely different rdx versions)`),
   );

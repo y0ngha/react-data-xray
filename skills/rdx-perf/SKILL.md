@@ -31,7 +31,7 @@ Start each scenario from a clean state. Use the browser tool directly if availab
 3. Run the scenario:
    - Idle for 30s: checks for polling, periodic renders, or the page rendering on its own (do not exceed 2 min).
    - The problematic interaction: filter change, tab switch, scroll, etc.
-4. Save: `await window.__RDX__.snapshot('before-<scenario>')` (no browser tool: `npx react-data-xray snapshot before-<scenario>`) → creates `.rdx/before-<scenario>.json`. If the plugin is unavailable or rejected, read `report()` directly.
+4. Save: `await window.__RDX__.snapshot('before-<scenario>')` (no browser tool: `npx react-data-xray snapshot before-<scenario>`) → creates `.rdx/before-<scenario>.json`. Use `snapshot` for anything you will compare: it finishes the deferred analysis and waits up to 2s for source maps. Check that the saved report has `complete: true`; if not, `incompleteReasons` says why (e.g. `source-map-timeout`) — wait a moment and save again. `report()` is a quick read that may be incomplete, and the periodic `.rdx/report.json` waits for nothing. If the plugin is unavailable or rejected, read `report()` directly. The CLI snapshot runs the same `snapshot` in the tab, so the same `complete` check applies.
 5. If `renders.monitoring` is false, render data is empty (first `report()` call without a reset). Measure once more.
 6. `renders.windowSeconds` shows how much of the window was captured. Without a reset, it is the last 10s only — always reset before a measurement you will compare. After reset, data beyond 2 min is dropped. If `requests.dropped` is greater than 0, split the scenario into shorter runs.
 
@@ -40,7 +40,7 @@ Start each scenario from a clean state. Use the browser tool directly if availab
 The `howToRead` field in the report is authoritative. This document does not duplicate it (fields grow with each rdx version), so read it before reading the results. Once you have read a given `howToReadVersion`, later calls can use `window.__RDX__.report({ howToRead: false })` to leave it out. Only the order of inspection is prescribed here.
 
 1. `summary` first: `summary.verdict` is a one-line count, and `summary.topFindings` lists what to fix in order (severity `high` is what the RDX button badge counts). Open each finding's `detail` path for the full entry and start from `target.location`.
-2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
+2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional (in the panel, or in code via `config.ignore`) — skip it. Then `requests.nPlusOne`: requests sent once per list item (review, not waste).
 3. `reactQuery.findings`: follow each item's `fix`.
 4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
 
@@ -55,6 +55,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 | Finding | Fix |
 |---|---|
 | Duplicate requests (two components send the same request) | Fetch once in a common ancestor; move to React Query for cache sharing |
+| N+1 requests (`requests.nPlusOne`: one request per list item, e.g. `<ItemCard>`×24 `GET /items/:id/owner`) | Fetch the list's related data in one request (a batch endpoint such as `?ids=1,2,3`, or include/expand it in the list response), or fetch once in the parent and pass it down. Leave it if intended (e.g. a virtualized list fetching visible rows) |
 | Same-response refetch + renders caused by it (`fromSameResponse`) | Skip `setState` when the response is unchanged; use React Query structural sharing; increase `staleTime` |
 | Polling running in hidden tab or off-screen | Pause polling on `document.hidden` or when the component is off-screen (`refetchInterval` condition) |
 | Parent render causes child (`causedBy` is an ancestor) | Fix the unnecessary `setState` in the ancestor first, then consider `React.memo` |

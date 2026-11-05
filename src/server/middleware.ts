@@ -1,10 +1,25 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 
-import { CLI_ACTIVE_HEADER, COMMAND_PATH, REPORT_HEADER, REPORT_PATH, TAB_HEADER, TOKEN_HEADER } from '../shared/reportPath.js';
+import { CLI_ACTIVE_HEADER, commandPathFor, REPORT_HEADER, REPORT_PATH, TAB_HEADER, TOKEN_HEADER } from '../shared/reportPath.js';
 import { createReportHandler, type RdxReportOptions } from './reportHandler.js';
 
 export type { RdxReportOptions };
+
+export interface RdxMiddlewareOptions extends RdxReportOptions {
+  /**
+   * 보고서를 받을 경로. 브라우저 쪽 `configure({ reportPath })` 와 같게 둔다. 기본 `/__rdx/report`.
+   * 쿼리 없이 '/' 로 시작해야 한다.
+   */
+  path?: string;
+}
+
+/** 맞지 않는 경로는 실수로 앱의 다른 경로를 가로채지 않게 받지 않는다 */
+const reportPathOf = (path: string | undefined): string => {
+  if (path === undefined) return REPORT_PATH;
+  if (/^\/(?!\/)[^\s?#]*$/.test(path)) return path;
+  throw new Error(`[react-data-xray] path must start with '/' and have no query: ${path}`);
+};
 
 /** HTTP/1 은 Host, HTTP/2(https dev 서버)는 :authority 로 온다. */
 const hostOf = (req: IncomingMessage): string | undefined => req.headers.host ?? (req.headers[':authority'] as string | undefined);
@@ -23,15 +38,17 @@ export const serverUrlOf = (req: IncomingMessage): string | undefined => {
   return `${secure ? 'https' : 'http'}://${host}:${localPort}`;
 };
 
-/** 보고서 경로와 명령 경로(`/__rdx/command`, `/__rdx/command/<id>`) */
-const isRdxPath = (path: string): boolean => path === REPORT_PATH || path === COMMAND_PATH || path.startsWith(`${COMMAND_PATH}/`);
-
 /**
  * rdx 보고서를 받아 `<root>/.rdx/report.json`(이름을 주면 `<이름>.json`)에 쓰는 connect 미들웨어.
+ * 경로를 바꾸려면 `{ path }`(브라우저의 `configure({ reportPath })` 와 같게).
  * webpack: `devServer.setupMiddlewares = (m, server) => { server.app.use(rdxReportMiddleware()); return m; }`
  */
-export const rdxReportMiddleware = (root = process.cwd(), options: RdxReportOptions = {}) => {
-  const handle = createReportHandler(root, options);
+export const rdxReportMiddleware = (root = process.cwd(), { path, ...options }: RdxMiddlewareOptions = {}) => {
+  const reportPath = reportPathOf(path);
+  // CLI·MCP 의 명령 경로는 보고서 경로와 같은 밑에 둔다(기본 `/__rdx/command`, `/__rdx/command/<id>`).
+  const commandPath = commandPathFor(reportPath);
+  const isRdxPath = (p: string): boolean => p === reportPath || p === commandPath || p.startsWith(`${commandPath}/`);
+  const handle = createReportHandler(root, { ...options, commandPath });
   return (req: IncomingMessage, res: ServerResponse, next: () => void): void => {
     const url = req.url ?? '';
     if (!isRdxPath(url.split('?')[0]) || (req.method !== 'GET' && req.method !== 'POST' && req.method !== 'DELETE')) return next();

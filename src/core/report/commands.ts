@@ -4,7 +4,6 @@ import {
   isReportName,
   isTabId,
   QUIET_POLL_MS,
-  REPORT_PATH,
   TAB_HEADER,
   type RdxCommand,
   type RdxCommandResult,
@@ -110,15 +109,22 @@ let chain: Promise<unknown> = Promise.resolve();
 /**
  * dev 서버가 업로드·받아 가기 응답으로 넘긴 명령(CLI·MCP 가 맡긴 reset·snapshot, #69)을 실행하고 결과를 알린다.
  * 명령이 없으면 서버는 본문 없이(204) 답하므로 대부분의 주기에는 아무것도 읽지 않는다.
+ * 확인·결과는 업로드와 같은 보고서 경로(configure({ reportPath }))로 보낸다.
  * 응답은 가로채기 전의 fetch 로 받은 것이라 res.json() 이 요청 기록에 섞이지 않는다.
  */
-export const receiveCommands = async (send: typeof fetch, res: Response, tab: string, runner: CommandRunner): Promise<void> => {
+export const receiveCommands = async (
+  send: typeof fetch,
+  reportPath: string,
+  res: Response,
+  tab: string,
+  runner: CommandRunner,
+): Promise<void> => {
   if (res.status !== 200 || !res.headers.get('content-type')?.startsWith('application/json')) return;
   const payload = (await res.json().catch(() => null)) as { commands?: unknown } | null;
   const commands = Array.isArray(payload?.commands) ? payload.commands.filter(isCommand) : [];
   commands.forEach((command) => {
     chain = chain.then(async () => {
-      const url = `${REPORT_PATH}?${new URLSearchParams({ command: command.id, tab })}`;
+      const url = `${reportPath}?${new URLSearchParams({ command: command.id, tab })}`;
       if (!(await isLive(send, url))) return;
       await report(send, url, await run(command, runner));
     });

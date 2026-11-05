@@ -3,7 +3,11 @@ import { mkdtemp, readFile, rm, stat, unlink } from 'node:fs/promises';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+import { main } from '../../cli/main.js';
+import { commandPathFor } from '../../shared/reportPath.js';
 
 import {
   cancelCommand,
@@ -427,5 +431,40 @@ describe('명령 경로 보안(#69 2차)', () => {
     expect((await handle(req({ method: 'DELETE', url: `/__rdx/command/${c.id}` }))).status).toBe(403);
     expect((await handle(req({ method: 'DELETE', url: '/__rdx/command/nope', token }))).status).toBe(404);
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('보고서 경로를 바꾼 dev 서버(#78 와 함께)', () => {
+  it('명령 경로는 보고서 경로와 같은 밑에 두고(.server.json 에 적는다), CLI 는 그 경로로 보낸다', async () => {
+    expect(commandPathFor('/__rdx/report')).toBe('/__rdx/command');
+    expect(commandPathFor('/api/dev/report')).toBe('/api/dev/command');
+    expect(commandPathFor('/rdx-upload')).toBe('/rdx-upload/command');
+    const dir = await mkdtemp(join(tmpdir(), 'rdx-path-'));
+    const handle = rdxReportMiddleware(dir, { path: '/api/dev/report' });
+    const custom = createServer((req, res) => handle(req, res, () => ((res.statusCode = 404), res.end())));
+    await new Promise<void>((resolve) => custom.listen(0, resolve));
+    const a = custom.address();
+    const url = `http://localhost:${typeof a === 'object' && a ? a.port : 0}`;
+    try {
+      // 바꾼 보고서 경로로 탭이 받아 간다. 기본 명령 경로는 이 서버의 것이 아니다
+      expect((await fetch(`${url}/api/dev/report?tab=pathTab&visible=1`, { headers: { 'x-rdx-tab': '1' } })).status).toBe(204);
+      expect((await fetch(`${url}/__rdx/command`)).status).toBe(404);
+      const saved = JSON.parse(await readFile(join(dir, '.rdx', '.server.json'), 'utf8')) as {
+        token: string;
+        commandPath: string;
+        url: string;
+      };
+      expect(saved).toMatchObject({ commandPath: '/api/dev/command', url });
+      expect((await fetch(`${url}/api/dev/command`, { headers: { 'x-rdx-token': saved.token } })).status).toBe(200);
+      const out = new PassThrough();
+      let text = '';
+      out.on('data', (d) => (text += String(d)));
+      const code = await main(['tabs'], { stdout: out, stderr: new PassThrough(), stdin: new PassThrough(), cwd: dir, env: {} });
+      expect(code).toBe(0);
+      expect(text).toContain('pathTab');
+    } finally {
+      await new Promise<void>((resolve) => custom.close(() => resolve()));
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

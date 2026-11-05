@@ -26,8 +26,15 @@ export const TAB_STALE_MS = 10 * 60 * 1000;
 /** 열려 있는 탭은 보고서가 그대로여도 이 주기로 갱신 시각을 알려 지워지지 않게 한다 */
 export const TAB_HEARTBEAT_MS = 4 * 60 * 1000;
 
-/** CLI·MCP 가 열린 탭에 측정 명령(reset·snapshot)을 맡기는 dev 서버 경로. 브라우저는 REPORT_PATH 로 받아 간다(#69) */
+/** CLI·MCP 가 열린 탭에 측정 명령(reset·snapshot)을 맡기는 dev 서버 경로. 브라우저는 보고서 경로로 받아 간다(#69) */
 export const COMMAND_PATH = '/__rdx/command';
+
+/**
+ * 보고서 경로에 맞춘 명령 경로. 보고서 경로를 바꿨으면(서버의 `path`, 브라우저의 `configure({ reportPath })`) 같은 밑에 둔다:
+ * `/x/report` → `/x/command`, 그 밖의 이름은 `/x/rdx` → `/x/rdx/command`. 기본값은 COMMAND_PATH 다.
+ */
+export const commandPathFor = (reportPath: string): string =>
+  reportPath.endsWith('/report') ? `${reportPath.slice(0, -'report'.length)}command` : `${reportPath.replace(/\/$/, '')}/command`;
 /** 탭에 맡길 수 있는 명령. 측정 기록만 바꾸는 것으로 한정한다(임의 코드 실행 없음) */
 export const COMMAND_OPS = ['reset', 'snapshot'] as const;
 export type CommandOp = (typeof COMMAND_OPS)[number];

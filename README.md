@@ -128,12 +128,39 @@ export function Providers({ children }: { children: React.ReactNode }) {
 }
 ```
 
-To have AI agents read `.rdx/report.json` (see [Working with AI agents](./docs/ai.md)), add one route file. Next.js leaves folders starting with `_` out of routing, so the first `_` is written as `%5F`; the route answers at `/__rdx/report`, only under `next dev`. Apps with a `basePath` are not supported yet: the browser always sends to `/__rdx/report`, which does not reach the route.
+To have AI agents read `.rdx/report.json` (see [Working with AI agents](./docs/ai.md)), add one route file. Next.js leaves folders starting with `_` out of routing, so the first `_` is written as `%5F`; the route answers at `/__rdx/report`, only under `next dev`. With a `basePath`, keep the route file where it is (Next serves it at `<basePath>/__rdx/report`) and tell the browser with `configure({ reportPath: '<basePath>/__rdx/report' })` (see below).
 
 ```ts
 // src/app/%5F_rdx/report/route.ts
 export { GET, POST } from 'react-data-xray/next';
 ```
+
+</details>
+
+<details>
+<summary><b>Set thresholds and ignores in code: <code>configure()</code></b></summary>
+
+Call `configure()` right after the import, before your app sends any request, so the whole team shares the same settings. Every option is optional; the values below are the defaults (except `ignore` and `keyHeaders`, which are empty by default). In a production build it does nothing.
+
+```ts
+import 'react-data-xray';
+import { configure } from 'react-data-xray';
+
+configure({
+  ignore: ['GET /api/health', /\/metrics/], // endpoint names as shown in the Requests tab, or RegExps
+  keyHeaders: ['x-tenant'], // requests that differ only in these headers are different requests
+  dedupeWindowMs: 2000, // the same request again within this time is a duplicate
+  burst: { windowMs: 500, count: 5 }, // this many requests starting within windowMs is a burst
+  nPlusOne: { windowMs: 1000, count: 5 }, // this many different IDs to one endpoint from one sender within windowMs is N+1
+  maxRecords: 200, // requests to remember
+  reportPath: '/__rdx/report', // where the browser sends reports (e.g. '/docs/__rdx/report' under a Next.js basePath)
+});
+```
+
+- `ignore` is merged with the endpoints you ignore in the panel; those rows show "Ignored (config)" and cannot be unignored there.
+- Each call replaces the previous settings. Invalid values print a warning and fall back to the default; `maxRecords` is capped at 5000.
+- `reportPath` is where the browser sends reports; the dev server must answer at the same path: `rdx({ path })` (Vite), `rdxReportMiddleware(root, { path })` (webpack). The Next.js route answers wherever Next serves it.
+- The settings in effect are written to the report (`config`, with code and panel ignores listed separately). Comparing two reports warns when the detection criteria differ (`dedupeWindowMs`, `burst`, `nPlusOne`, `keyHeaders`, `ignore`, and `maxRecords` when requests were dropped).
 
 </details>
 
@@ -239,11 +266,11 @@ If you use Claude Code, copy the [`rdx-perf`](./skills/rdx-perf/SKILL.md) skill 
   };
   ```
 
-  The mock must export every name your app imports from `react-data-xray` (today only `RdxDevtools`). The `.cjs` extension keeps it CommonJS even in a `"type": "module"` app.
+  The mock must export every name your app imports from `react-data-xray` (today `RdxDevtools` and `configure`). The `.cjs` extension keeps it CommonJS even in a `"type": "module"` app.
 
   ```js
   // test/rdx-mock.cjs
-  module.exports = { RdxDevtools: () => null };
+  module.exports = { RdxDevtools: () => null, configure: () => {} };
   ```
 
 ## Contributing

@@ -16,6 +16,10 @@ export interface RequestRecord {
   responseHeaders?: Record<string, string>;
   /** 응답 원문(텍스트 응답만, 최대 100KB). 상세 화면에서 보여 준다. */
   responseText?: string;
+  /** 응답 원문의 UTF-8 바이트 수(100KB 로 자르기 전). 텍스트 응답만, 유휴 큐에서 조각으로 센다. 과다 응답 옆에 크기로 보여 준다. */
+  responseBytes?: number;
+  /** responseBytes 가 원문이 아니라 응답 객체를 다시 직렬화한 글자로 센 값이다(XHR responseType 'json'). 공백·키 순서가 원문과 다를 수 있다. */
+  responseBytesApprox?: boolean;
   /** 네트워크 실패·취소·타임아웃 */
   error?: string;
   /** 창 포커스·탭 표시 전환, 네트워크 재연결 직후에 나간 요청(라이브러리의 자동 재요청) */
@@ -53,6 +57,11 @@ export interface RequestRecord {
   sameResponseAs?: number;
   /** 새로고침 전 페이지에서 기록해 되살린 요청. 응답 객체(body)는 없고 원문만 있다. */
   restored?: boolean;
+  /**
+   * 목록의 항목마다 보낸 요청(N+1)으로 짚은 요청. 1초 안에 같은 엔드포인트(ID 를 묶은 경로)로 같은 보낸 곳에서 서로 다른 ID 5건 이상이 나갔다.
+   * 보낸 곳은 컴포넌트(component), 모르면 호출 위치(stack 앞쪽 3줄)다. 유휴 큐가 정한다(nPlusOne.ts).
+   */
+  nPlusOne?: { component?: string; location?: string };
   /** 같은 탭에서 몇 번째로 연 페이지의 요청인지. 주기 판정은 같은 페이지 안에서만 한다(새로고침 사이 간격은 주기가 아니다). */
   load?: number;
 }

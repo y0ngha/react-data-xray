@@ -6,8 +6,8 @@ import type { Origin, RequestRecord } from '../requests/types.js';
 // 이만큼의 필드 값이 같아야 같은 데이터를 가공한 객체로 본다.
 const MIN_DERIVED_FIELDS = 2;
 
-/** 우연히 같기 어려운 값만 쓴다(짧은 문자열, 작은 숫자, boolean 은 뺀다). */
-const isDistinctive = (v: unknown): v is string | number =>
+/** 우연히 같기 어려운 값만 쓴다(짧은 문자열, 작은 숫자, boolean 은 뺀다). 과다 응답 세기(visibleFields)도 같은 기준이다. */
+export const isDistinctive = (v: unknown): v is string | number =>
   (typeof v === 'string' && v.length >= 2 && v.length <= 200) || (typeof v === 'number' && Math.abs(v) >= 10);
 
 const fieldKey = (name: string, value: string | number) => `${name}\u0000${value}`;
