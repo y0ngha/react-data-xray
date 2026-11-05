@@ -30,7 +30,7 @@ Start each scenario from a clean state. Use the browser tool directly if availab
 3. Run the scenario:
    - Idle for 30s: checks for polling, periodic renders, or the page rendering on its own (do not exceed 2 min).
    - The problematic interaction: filter change, tab switch, scroll, etc.
-4. Save: `await window.__RDX__.snapshot('before-<scenario>')` → creates `.rdx/before-<scenario>.json`. If the plugin is unavailable or rejected, read `report()` directly. Without a browser tool, wait 5s then copy `.rdx/report.json` under that name.
+4. Save: `await window.__RDX__.snapshot('before-<scenario>')` → creates `.rdx/before-<scenario>.json`. Use `snapshot` for anything you will compare: it finishes the deferred analysis and waits for source maps, so it has `complete: true`. The periodic `.rdx/report.json` does neither and may have `complete: false`. If the plugin is unavailable or rejected, read `report()` directly. Without a browser tool, wait 5s then copy `.rdx/report.json` under that name, and only once it shows `complete: true` (otherwise wait another 5s and copy again).
 5. If `renders.monitoring` is false, render data is empty (first `report()` call without a reset). Measure once more.
 6. `renders.windowSeconds` shows how much of the window was captured. Without a reset, it is the last 10s only — always reset before a measurement you will compare. After reset, data beyond 2 min is dropped. If `requests.dropped` is greater than 0, split the scenario into shorter runs.
 

@@ -22,6 +22,9 @@ export function enqueue(step: Step): void {
 
 export const isQueuePending = (): boolean => queue.length > 0;
 
+/** 큐에 남은 step 수(읽기만 한다. 보고서가 덜 분석됐는지 알릴 때 쓴다) */
+export const pendingSteps = (): number => queue.length;
+
 /** 지금 바로 돌린다. 다 비었으면 true. step 안에서 다시 부르면 아무것도 안 하고 false. */
 export function flushQueue(limitMs = Infinity): boolean {
   if (running) return false;

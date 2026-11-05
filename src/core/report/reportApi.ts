@@ -223,9 +223,10 @@ const checkEndpoint = async (send: typeof fetch): Promise<Endpoint> => {
 
 /**
  * 주기 업로드가 "바뀌었나" 를 볼 때 쓰는 값. 받은 commit 수는 패널 자신의 commit 에도 늘어, 그대로 비교하면
- * 앱이 멈춰 있어도 5초마다 전체를 보낸다. 0 인지(연결 여부)만 남긴다. 보내는 본문에는 그대로 둔다.
+ * 앱이 멈춰 있어도 5초마다 전체를 보낸다. 0 인지(연결 여부)만 남긴다. 큐에 남은 step 수(pendingAnalysis)도
+ * 패널이 도는 동안 늘 바뀌므로 빼고, 끝났는지(complete)만 본다. 보내는 본문에는 그대로 둔다.
  */
-export const changeKeyOf = (content: Omit<RdxReport, 'generatedAt'>): string =>
+export const changeKeyOf = ({ pendingAnalysis: _pending, ...content }: Omit<RdxReport, 'generatedAt'>): string =>
   JSON.stringify({
     ...content,
     diagnostics: {

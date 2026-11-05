@@ -139,6 +139,9 @@ const resolveSourceStack = (record: RequestRecord): void => {
 const resolving = new Set<Promise<void>>();
 const RESOLVE_WAIT_MS = 2000;
 
+/** 진행 중인 소스맵 변환이 없는지(읽기만 한다). 큐에 남은 step 이 새 변환을 시작할 수 있으므로 큐 길이와 함께 본다. */
+export const areSourcesResolved = (): boolean => resolving.size === 0;
+
 // 소스맵 step 은 맵을 받은 뒤에야 큐에 들어오므로, 큐를 비우고 한 틱 기다리기를 변환이 끝날 때까지 되풀이한다.
 const settle = async (deadline: number): Promise<void> => {
   flushQueue();
