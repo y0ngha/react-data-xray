@@ -23,9 +23,9 @@ describe('저장되는 설정', () => {
     act(() => result.current.toggle('GET /a'));
     act(() => result.current.toggle('GET /b'));
     act(() => result.current.toggle('GET /a'));
-    expect([...result.current.ignored]).toEqual(['GET /b']);
+    expect([...result.current.ignored.panel]).toEqual(['GET /b']);
     unmount();
-    expect([...renderHook(() => useIgnoredEndpoints()).result.current.ignored]).toEqual(['GET /b']);
+    expect([...renderHook(() => useIgnoredEndpoints()).result.current.ignored.panel]).toEqual(['GET /b']);
   });
 
   it('저장된 도킹 설정이 잘못되면 기본값을 쓰고, 바꾼 설정은 기억한다', () => {

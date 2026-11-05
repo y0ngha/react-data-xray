@@ -9,6 +9,7 @@ import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
 import { queryContextOf, type QueryContext } from '../capture/queryContext.js';
 import { groupBy } from '../../shared/collections.js';
+import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 
 const MAX_CALLERS = 3;
 const MAX_EXAMPLES = 3;
@@ -162,10 +163,11 @@ const nPlusOneEntryOf = (run: NPlusOneRun): NPlusOneEntry => {
 export const buildRequestSection = (
   records: readonly RequestRecord[],
   classes: ReadonlyMap<number, RequestClass>,
-  ignored: ReadonlySet<string>,
+  ignored: IgnoreMatcher | ReadonlySet<string>,
   queryOf: (record: RequestRecord) => QueryContext | undefined = queryContextOf,
 ): RequestSection => {
   const byEndpoint = groupBy(records, endpointOf);
+  const matcher = toIgnoreMatcher(ignored);
   return {
     total: records.length,
     dropped: getDroppedCount(),
@@ -173,7 +175,7 @@ export const buildRequestSection = (
       const own = byEndpoint.get(s.endpoint) ?? [];
       return {
         endpoint: s.endpoint,
-        ignored: ignored.has(s.endpoint),
+        ignored: !!matcher.sourceOf(s.endpoint),
         count: s.count,
         restoredCount: own.filter((r) => r.restored).length,
         avgMs: s.avgMs,
@@ -191,13 +193,14 @@ export const buildRequestSection = (
       };
     }),
     nPlusOne: nPlusOneRuns(records)
-      .filter((run) => !ignored.has(run.endpoint))
+      .filter((run) => !matcher.sourceOf(run.endpoint))
       .map(nPlusOneEntryOf),
   };
 };
 
 // 새 howToRead 줄은 여기에 더한다.
 export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
+  'The 2s duplicate window and the 200-record limit above are defaults; the values in effect are config.dedupeWindowMs and config.maxRecords. ignored: true also covers endpoints in config.ignore (set in code with configure(), not removable in the panel).',
   'failedDuplicates is the count of duplicates and sameResponses that were failed responses (4xx, 5xx, or network error). These may be retries or a local environment issue (backend down) rather than code waste — check the status code first.',
   'refetchReasons is a breakdown by cause of React Query refetches that received the same response. stale-elapsed (refetched after staleTime expired) and after-invalidate (invalidated but response unchanged) are repeats to review but are not counted as waste. stale-zero (staleTime is 0, so fetched every time) stays in sameResponses as waste — increase staleTime. Same-response matches against pre-reload records are not counted as waste.',
   "callers.waste is how many of that caller's requests were counted as waste (duplicates or sameResponses); absent when none. summary points at the listed caller with the most waste.",

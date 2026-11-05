@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { getEndpointStats, type EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
+import { toIgnoreMatcher, type IgnoreMatcher } from '../../../shared/ignoredEndpoints.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { useRequestActions } from '../../contexts.js';
@@ -17,7 +18,8 @@ type View = 'endpoints' | 'log' | 'cache';
 interface RequestsTabProps {
   records: readonly RequestRecord[];
   stats: readonly EndpointStat[];
-  ignored: ReadonlySet<string>;
+  /** 패널·코드 무시를 합친 판정(useIgnoredEndpoints). 패널 목록만 주면 지금 설정과 합친다 */
+  ignored: IgnoreMatcher | ReadonlySet<string>;
   onToggleIgnore: (endpoint: string) => void;
 }
 
@@ -25,9 +27,14 @@ interface RequestsTabProps {
  * 무시로 저장했지만 지금 기록의 어느 엔드포인트와도 맞지 않는 키. 엔드포인트 이름 규칙이 바뀐 옛 키(`POST /graphql` 처럼
  * 지금은 연산별로 나뉜 것)는 줄이 없어 풀 수 없으므로 여기서 지운다. 비교는 지금처럼 정확히 같은 이름끼리다.
  */
-const UnseenIgnored = ({ ignored, stats, onToggleIgnore }: Pick<RequestsTabProps, 'ignored' | 'stats' | 'onToggleIgnore'>) => {
+const UnseenIgnored = ({
+  ignored,
+  stats,
+  onToggleIgnore,
+}: Pick<RequestsTabProps, 'stats' | 'onToggleIgnore'> & { ignored: IgnoreMatcher }) => {
   const seen = new Set(stats.map((s) => s.endpoint));
-  const unseen = [...ignored].filter((e) => !seen.has(e));
+  // 패널에서 고른 키만 지울 수 있다. 코드로도 무시한 키는 지워도 다시 무시되므로 보이지 않는다.
+  const unseen = [...ignored.panel].filter((e) => !seen.has(e) && ignored.sourceOf(e) === 'panel');
   if (!unseen.length) return null;
   return (
     <div style={{ marginTop: 8 }}>
@@ -50,7 +57,8 @@ const UnseenIgnored = ({ ignored, stats, onToggleIgnore }: Pick<RequestsTabProps
 };
 
 /** 네트워크 › 요청: 엔드포인트별 지표와 전체 기록. 엔드포인트를 누르면 그 요청만 기록에 보여 준다. */
-export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: RequestsTabProps) => {
+export const RequestsTab = ({ records, stats, ignored: ignoredInput, onToggleIgnore }: RequestsTabProps) => {
+  const ignored = toIgnoreMatcher(ignoredInput);
   const [view, setView] = useState<View>('endpoints');
   const [filter, setFilter] = useState<string | null>(null);
   const [currentOnly, setCurrentOnly] = useState(false);
@@ -106,7 +114,7 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore }: Request
           <EndpointRow
             key={stat.endpoint}
             stat={stat}
-            ignored={ignored.has(stat.endpoint)}
+            ignored={ignored.sourceOf(stat.endpoint)}
             route={route}
             focus={focus?.key === stat.endpoint ? focus : undefined}
             onSelect={showEndpoint}

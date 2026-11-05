@@ -56,7 +56,7 @@ describe('항목마다 보낸 요청(N+1) 판정 (#85)', () => {
 
   it('같은 ID 의 반복(중복)은 서로 다른 ID 로 세지도 섞지도 않는다', () => {
     // 같은 ID 만 여섯 번: 중복이지 N+1 이 아니다
-    const same = owners(1_000, [7, 7, 7, 7, 7, 7]).map((r, i) => (i > 0 ? { ...r, duplicateOf: r.id - 1 } : r));
+    const same = owners(1_000, [7, 7, 7, 7, 7, 7]).map((r, i) => Object.assign(r, i > 0 ? { duplicateOf: r.id - 1 } : {}));
     expect(finishAll(same).some((r) => r.nPlusOne)).toBe(false);
     // 서로 다른 ID 4개 + 쿼리만 다른 같은 ID: 서로 다른 ID 는 4개뿐이다
     const queryOnly = [...owners(3_000, [1, 2, 3, 4]), rec(3_100, '/api/items/4/owner?fields=name', { component: 'ItemCard' })];
@@ -98,7 +98,7 @@ describe('항목마다 보낸 요청(N+1) 판정 (#85)', () => {
   it('경로에 ID 가 없는 엔드포인트와 다른 페이지(load)의 요청은 짚지 않는다', () => {
     const search = [1, 2, 3, 4, 5].map((n) => rec(1_000 + n, `/api/search?q=${n}`, { component: 'ItemCard' }));
     expect(finishAll(search).some((r) => r.nPlusOne)).toBe(false);
-    const loads = owners(2_000, [1, 2, 3, 4, 5]).map((r, i) => ({ ...r, load: i < 3 ? 1 : 2 }));
+    const loads = owners(2_000, [1, 2, 3, 4, 5]).map((r, i) => Object.assign(r, { load: i < 3 ? 1 : 2 }));
     expect(finishAll(loads).some((r) => r.nPlusOne)).toBe(false);
   });
 
