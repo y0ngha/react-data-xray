@@ -1,3 +1,4 @@
+import type { LayoutShift } from '../../../core/render/layoutShifts.js';
 import { pathOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { formatTime } from '../../../shared/format.js';
@@ -9,6 +10,8 @@ interface TimelineChartProps {
   layout: TimelineLayout;
   hovered: RequestRecord | null;
   onHover: (bar: BarLayout | null) => void;
+  /** 원인 요청이 있는 이동 표시를 눌렀을 때 */
+  onShiftClick?: (shift: LayoutShift) => void;
 }
 
 // 패널이 여럿(팝업 창 포함) 떠도 같은 문서 안에서는 하나만 그려지므로 고정 id 로 둔다.
@@ -75,8 +78,20 @@ const BurstBand = ({
   );
 };
 
-/** 요청 막대(호버하면 요약, 클릭하면 상세), 워터폴 화살표, 몰림 구간, 렌더 commit 눈금을 그린다. */
-export const TimelineChart = ({ layout, hovered, onHover }: TimelineChartProps) => {
+/** 이동 표시의 툴팁: 시각, 점수, 밀린 컴포넌트, 원인 응답과 그 응답으로 렌더된 컴포넌트 */
+export const shiftLabel = (s: LayoutShift): string =>
+  [
+    `${formatTime(s.time)} · layout shift ${s.value.toFixed(3)}`,
+    s.component ? `moved: <${s.component.name}>` : 'moved: unknown node',
+    s.cause
+      ? `${s.cause.inferred ? 'likely after' : 'after'} ${s.cause.endpoint} rendered <${s.cause.component}> (click for details)`
+      : s.causeUnavailable
+        ? 'cause unknown: render monitoring was off'
+        : 'no network cause found',
+  ].join(' · ');
+
+/** 요청 막대(호버하면 요약, 클릭하면 상세), 워터폴 화살표, 몰림 구간, 렌더 commit 눈금, 레이아웃 이동(클릭하면 원인 요청 상세)을 그린다. */
+export const TimelineChart = ({ layout, hovered, onHover, onShiftClick }: TimelineChartProps) => {
   const { open, classOf } = useRequestActions();
   const barFill = (record: RequestRecord) => {
     const c = classOf(record);
@@ -140,6 +155,21 @@ export const TimelineChart = ({ layout, hovered, onHover }: TimelineChartProps) 
       {layout.commits.map((c) => (
         <rect key={c.key} x={c.x} y={layout.commitBaseY - c.height} width={2} height={c.height} fill={color.render}>
           <title>{`${formatTime(c.time)} · ${c.count} components rendered`}</title>
+        </rect>
+      ))}
+      {layout.shifts.map(({ key, x, height, shift }) => (
+        <rect
+          key={key}
+          x={x - 1}
+          y={layout.dividerY + 1}
+          width={3}
+          height={height}
+          fill={color.shift}
+          opacity={shift.cause?.inferred ? 0.55 : 1}
+          style={shift.cause ? { cursor: 'pointer' } : undefined}
+          onClick={shift.cause && onShiftClick ? () => onShiftClick(shift) : undefined}
+        >
+          <title>{shiftLabel(shift)}</title>
         </rect>
       ))}
       {layout.ticks.map((t) => (

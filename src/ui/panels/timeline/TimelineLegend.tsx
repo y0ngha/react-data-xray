@@ -1,3 +1,4 @@
+import { layoutShiftSupported } from '../../../core/render/layoutShifts.js';
 import { color } from '../../theme.js';
 
 const ITEMS: ReadonlyArray<{ color: string; mark: string; label: string; title?: string }> = [
@@ -21,9 +22,19 @@ const ITEMS: ReadonlyArray<{ color: string; mark: string; label: string; title?:
   },
 ];
 
+const SHIFT_ITEM = {
+  color: color.shift,
+  mark: '▮',
+  label: 'layout shift',
+  title: 'Layout shifts (height = shift score). Hover for the component that moved and the response that caused it',
+};
+
+// 이동 표시는 layout-shift 를 주는 브라우저(Chromium 계열)에서만 나온다.
+const itemsNow = () => (layoutShiftSupported() ? [...ITEMS, SHIFT_ITEM] : ITEMS);
+
 export const TimelineLegend = () => (
   <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: '0 6px' }}>
-    {ITEMS.map((item) => (
+    {itemsNow().map((item) => (
       <span key={item.label} title={item.title} style={{ whiteSpace: 'nowrap' }}>
         <span style={{ color: item.color }}>{item.mark}</span> {item.label}
       </span>
