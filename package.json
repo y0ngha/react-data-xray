@@ -1,6 +1,6 @@
 {
   "name": "react-data-xray",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Dev-only React devtools: click a value on screen to see which API response field it came from, and find wasted requests and renders",
   "keywords": [
     "react",
