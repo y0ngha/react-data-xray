@@ -243,7 +243,7 @@ describe('보고서의 고칠 위치와 섹션 공통 id (#73)', () => {
     expect(lines[0]).toBe('at save (src/rq-save.ts:10:3)');
     expect(shownStacks(misses[0]).stack).not.toContain('node_modules');
     // 보고서에는 원본 위치만 싣는다
-    const [finding] = buildReactQuerySection([], new Map()).findings.filter((f) => f.kind === 'invalidate-miss');
+    const finding = buildReactQuerySection([], new Map()).findings.find((f) => f.kind === 'invalidate-miss')!;
     expect(finding.stack?.split('\n')[0]).toBe('at save (src/rq-save.ts:10:3)');
     expect(finding).not.toHaveProperty('resolvedStack');
   });

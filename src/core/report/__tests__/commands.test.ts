@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { REPORT_HEADER, REPORT_PATH } from '../../../shared/reportPath.js';
 import { jsonResponse, mockFetch } from '../../../testing/fetchMock.js';
 import { notePolled, notePollSent, receiveCommands, shouldPoll, tabState } from '../commands.js';
+import { flushQueue } from '../../scheduler/idleQueue.js';
 import { getResetAt, installReportApi } from '../reportApi.js';
 
 const mark = { [REPORT_HEADER]: '1' };
@@ -42,6 +43,9 @@ it('보고서가 그대로인 주기에는 CLI 를 쓰지 않으면 55초마다,
     });
     installReportApi();
     await vi.advanceTimersByTimeAsync(0);
+    // 유휴 큐는 예산을 실제 시간으로 잰다. 부하가 크면 분석이 가짜 시계로 늦게 끝나, 따라잡는 업로드(#71)가
+    // 받아 가기 자리(55초)를 차지할 수 있다. 여기서 큐를 비워 분석이 끝나는 때를 고정한다(#114).
+    flushQueue();
     // 첫 주기는 보고서를 올린다(POST). 탭 헤더와 보이는지를 붙인다
     const [upload] = callsTo(`${REPORT_PATH}?tab=`, 'POST');
     expect(headerOf(upload[1], 'x-rdx-tab')).toBe('1');

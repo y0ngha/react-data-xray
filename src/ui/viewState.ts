@@ -52,9 +52,14 @@ export const focusItem = (tab: FocusTab, key: string, fallbacks?: readonly strin
 
 /** 배지 내역에서 고른 렌더 행. 렌더 그룹 키(이름 + 그리는 위치)로 찾고, 없으면 fallbacks, 그다음 이름(같은 이름이 여럿이면 첫 줄)으로 찾는다. */
 export const focusedRenderRow = (groups: ReadonlyArray<{ key?: string; name: string }>, focus: FocusRequest): number => {
+  // 키 → 첫 줄 위치를 한 번에 만든다(후보 키마다 목록을 다시 훑지 않게)
+  const byKey = new Map<string, number>();
+  groups.forEach((g, i) => {
+    if (g.key !== undefined && !byKey.has(g.key)) byKey.set(g.key, i);
+  });
   for (const key of [focus.key, ...(focus.fallbacks ?? [])]) {
-    const i = groups.findIndex((g) => g.key === key);
-    if (i >= 0) return i;
+    const i = byKey.get(key);
+    if (i !== undefined) return i;
   }
   return groups.findIndex((g) => g.name === focus.key);
 };
