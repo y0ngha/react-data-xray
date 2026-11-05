@@ -48,4 +48,6 @@ export interface Consumer {
   rect: DOMRect | null;
   /** 컴포넌트 안에서 데이터가 있던 곳. 예: props.item, useQuery */
   via: string;
+  /** 컴포넌트가 그린 가장 바깥 DOM 요소들(rdx 자신의 UI 는 뺀다). 화면에 보이는 필드를 셀 때 이 안의 글자를 읽는다. */
+  nodes: Element[];
 }

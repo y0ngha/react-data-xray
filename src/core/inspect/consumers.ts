@@ -1,5 +1,5 @@
 import { collectValues } from '../fiber/componentValues.js';
-import { componentRect, findRootFibers, getComponentName, hostNodesOf, walkFibers } from '../fiber/tree.js';
+import { findRootFibers, getComponentName, hostNodesOf, unionRect, walkFibers } from '../fiber/tree.js';
 import { isComposite } from '../fiber/types.js';
 import { queueIndex } from './derivedMatch.js';
 import { flushQueue } from '../scheduler/idleQueue.js';
@@ -57,8 +57,10 @@ export const findConsumers = (
     walkFibers(root.child, (f) => {
       if (consumers.length >= MAX_CONSUMERS) return false;
       const found = isComposite(f) ? collectValues(f).find(({ value, searchDepth }) => holds(value, searchDepth)) : undefined;
-      if (found && hostNodesOf(f).some((n) => !isOwnUi(n)))
-        consumers.push({ id: consumers.length, name: getComponentName(f), rect: componentRect(f, isOwnUi), via: found.via });
+      if (!found) return true;
+      const nodes = hostNodesOf(f).filter((n) => !isOwnUi(n));
+      if (nodes.length > 0)
+        consumers.push({ id: consumers.length, name: getComponentName(f), rect: unionRect(nodes), via: found.via, nodes });
       return true;
     }),
   );

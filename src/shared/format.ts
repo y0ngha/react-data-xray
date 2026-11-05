@@ -14,6 +14,13 @@ export const formatJson = (value: unknown, max = 120): string => {
   }
 };
 
+/** 크기를 B·KB·MB 로. 10 보다 작으면 소수 한 자리까지 보인다(1.5 KB, 400 KB). */
+export const formatSize = (size: number): string => {
+  if (size < 1024) return `${size} B`;
+  const [value, unit] = size < 1024 * 1024 ? [size / 1024, 'KB'] : [size / 1024 / 1024, 'MB'];
+  return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)} ${unit}`;
+};
+
 /** JSON 이면 들여쓰기해서, 아니면 원문 그대로 */
 export const prettyText = (text: string): string => {
   try {

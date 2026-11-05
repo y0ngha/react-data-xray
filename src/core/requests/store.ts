@@ -127,6 +127,7 @@ export const keepResponseText = (record: RequestRecord, text: string, { compare 
   const short = text.length <= HASH_CHUNK;
   enqueue(() => {
     if (isStale(record)) return true;
+    record.responseSize = text.length;
     record.responseText = text.length > MAX_RESPONSE_TEXT ? `${text.slice(0, MAX_RESPONSE_TEXT)}\n… (truncated after 100KB)` : text;
     if (judge && short) record.sameResponseAs = detectSameResponse(record, digestOf(text));
     notify();

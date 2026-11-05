@@ -11,6 +11,7 @@ import { Section } from '../components/Section.js';
 import { useRequestActions } from '../contexts.js';
 import { isOwnUi } from '../ownUi.js';
 import { codeBlockStyle } from '../theme.js';
+import { VisibleFieldsSection } from './VisibleFields.js';
 
 /** 컴포넌트의 마운트·언마운트 횟수와 재마운트를 일으킨 부모. 기록이 없으면 아무것도 그리지 않는다. */
 const MountNote = ({ name }: { name: string }) => {
@@ -30,7 +31,7 @@ const MountNote = ({ name }: { name: string }) => {
   );
 };
 
-/** 이 요청의 데이터를 쓰는 컴포넌트를 이름별로 센다. 버튼으로 화면에서 강조를 켜고 끈다. */
+/** 이 요청의 데이터를 쓰는 컴포넌트를 이름별로 센다. 버튼으로 화면에서 강조를 켜고 끈다. 그 컴포넌트들의 화면 글자로 보이는 필드도 센다. */
 export const ConsumerList = ({ record }: { record: RequestRecord }) => {
   const { hover } = useRequestActions();
   const [highlight, setHighlight] = useState(false);
@@ -48,30 +49,38 @@ export const ConsumerList = ({ record }: { record: RequestRecord }) => {
     setHighlight(!highlight);
   };
   return (
-    <Section title={`Components using this response (${consumers.length})`}>
-      <div style={codeBlockStyle}>
-        {consumers.length === 0 ? (
-          <>
-            <Muted>No component found holding this response object (data may be transformed).</Muted>
-            {record.component && (
-              <div>
-                Sending component &lt;{record.component}&gt; <MountNote name={record.component} />
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            {byName.map(([name, list]) => (
-              <div key={name}>
-                &lt;{name}&gt; {list.length > 1 && `× ${list.length}`} <Muted>← {list[0].via}</Muted> <MountNote name={name} />
-              </div>
-            ))}
-            <Button subtle active={highlight} onClick={toggle} title="Highlight these components on the page with an orange dashed border">
-              Highlight
-            </Button>
-          </>
-        )}
-      </div>
-    </Section>
+    <>
+      <Section title={`Components using this response (${consumers.length})`}>
+        <div style={codeBlockStyle}>
+          {consumers.length === 0 ? (
+            <>
+              <Muted>No component found holding this response object (data may be transformed).</Muted>
+              {record.component && (
+                <div>
+                  Sending component &lt;{record.component}&gt; <MountNote name={record.component} />
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {byName.map(([name, list]) => (
+                <div key={name}>
+                  &lt;{name}&gt; {list.length > 1 && `× ${list.length}`} <Muted>← {list[0].via}</Muted> <MountNote name={name} />
+                </div>
+              ))}
+              <Button
+                subtle
+                active={highlight}
+                onClick={toggle}
+                title="Highlight these components on the page with an orange dashed border"
+              >
+                Highlight
+              </Button>
+            </>
+          )}
+        </div>
+      </Section>
+      <VisibleFieldsSection record={record} consumers={consumers} />
+    </>
   );
 };
