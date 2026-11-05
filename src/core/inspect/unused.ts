@@ -25,9 +25,28 @@ const STEP_MS = 1;
 // 훑는 사이 commit 이 트리를 바꿨으면 못 찾은 요청만 다시 훑는다. 쉬지 않고 그리는 화면에서 끝없이 돌지 않게 이만큼만 하고, 그래도 바뀌면 판정하지 않는다.
 const MAX_ATTEMPTS = 3;
 
-/** 출처를 참조로 찾을 수 있는 본문: 빈 객체·배열이 아닌 JSON 객체·배열 */
-const hasContent = (body: unknown): boolean =>
-  body !== null && typeof body === 'object' && (Array.isArray(body) ? body.length > 0 : Object.keys(body).length > 0);
+// 이만큼 훑어도 원시값이 없으면 내용이 있다고 본다(판정은 지금처럼 한다). 비어 있기만 한 구조는 이보다 훨씬 작다.
+const MAX_CONTENT_NODES = 1000;
+
+/**
+ * 출처를 찾을 수 있는 본문: 원시값(문자열·숫자·불리언·null)이 하나라도 있는 JSON 객체·배열.
+ * {"disabledModels":[]} 처럼 키만 있고 값이 모두 빈 구조는 그릴 값도 들고 있을 값도 없어 쓰는 곳을 찾을 수 없다(#123).
+ * 첫 원시값에서 멈추므로 보통 응답은 곧바로 끝난다.
+ */
+const hasContent = (body: unknown): boolean => {
+  if (body === null || typeof body !== 'object') return false;
+  const stack: object[] = [body];
+  let seen = 1;
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    for (const child of Array.isArray(node) ? node : Object.values(node)) {
+      if (child === null || typeof child !== 'object') return true;
+      if (++seen > MAX_CONTENT_NODES) return true;
+      stack.push(child);
+    }
+  }
+  return false;
+};
 
 /**
  * 판정할 요청인가. 변경 요청(POST 등)의 응답은 결과 확인용이라 그리지 않아도 정상이고, 실패 응답·빈 본문·JSON 이 아닌 응답(body 가 없다)은
