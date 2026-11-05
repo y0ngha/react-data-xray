@@ -122,7 +122,11 @@ export const RequestsTab = ({ records, stats, ignored: ignoredInput, onToggleIgn
           />
         ))}
       {view === 'endpoints' && <UnseenIgnored ignored={ignored} stats={stats} onToggleIgnore={onToggleIgnore} />}
-      {view === 'log' && logs.map((record) => <RequestLogRow key={record.id} record={record} />)}
+      {view === 'log' &&
+        logs.map((record) => (
+          // 무시한 엔드포인트(패널·코드)는 보고서처럼 N+1 로 표시하지 않는다
+          <RequestLogRow key={record.id} record={record} nPlusOne={!!record.nPlusOne && !ignored.sourceOf(endpointOf(record))} />
+        ))}
     </div>
   );
 };

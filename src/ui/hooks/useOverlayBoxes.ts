@@ -41,7 +41,7 @@ export const useOverlayBoxes = (enabled: boolean, scope: Fiber | null): Box[] =>
       inflight = true;
       dirty = false;
       tries = 0;
-      enqueue(step);
+      enqueue(step, 'ui');
     };
     // 덜 모았으면 다음 조각을 큐 뒤에 다시 넣는다. 큐 머리를 붙잡으면 뒤의 분석·알림이 그만큼 밀린다.
     const step = (): boolean => {
@@ -58,7 +58,7 @@ export const useOverlayBoxes = (enabled: boolean, scope: Fiber | null): Box[] =>
       const { boxes: next, deferred } = result;
       // 트리가 계속 바뀌어 끝나지 않아도 무한히 잇지 않는다(직전 결과로 반영).
       if (deferred && ++tries < MAX_TRIES) {
-        enqueue(step);
+        enqueue(step, 'ui');
         return true;
       }
       inflight = false;

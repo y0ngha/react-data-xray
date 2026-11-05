@@ -1,3 +1,4 @@
+import { noteNPlusOneStage } from '../requests/nPlusOne.js';
 import { touchRecords } from '../requests/store.js';
 import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestRecord } from '../requests/types.js';
@@ -116,6 +117,8 @@ export const annotateRequest = (record: RequestRecord, fallback?: Error): Reques
     record.component = componentOfStack(record.stack);
     record.noAppFrame = !hasAppFrame(record.stack) || undefined;
     resolveSourceStack(record);
+    // 보낸 곳을 알았으니 N+1 판정 단계 하나가 끝났다(응답·중복 판정이 먼저 끝났으면 여기서 판정한다).
+    if (noteNPlusOneStage(record, 'annotated')) touchRecords();
     return true;
   });
   return record;
@@ -139,13 +142,17 @@ const resolveSourceStack = (record: RequestRecord): void => {
 const resolving = new Set<Promise<void>>();
 const RESOLVE_WAIT_MS = 2000;
 
+/** 진행 중인 소스맵 변환이 없는지(읽기만 한다). 큐에 남은 step 이 새 변환을 시작할 수 있으므로 큐 길이와 함께 본다. */
+export const areSourcesResolved = (): boolean => resolving.size === 0;
+
 // 소스맵 step 은 맵을 받은 뒤에야 큐에 들어오므로, 큐를 비우고 한 틱 기다리기를 변환이 끝날 때까지 되풀이한다.
-const settle = async (deadline: number): Promise<void> => {
+const settle = async (deadline: number): Promise<boolean> => {
   flushQueue();
-  if ((resolving.size === 0 && !isQueuePending()) || Date.now() >= deadline) return;
+  if (resolving.size === 0 && !isQueuePending()) return true;
+  if (Date.now() >= deadline) return false;
   await new Promise((resolve) => setTimeout(resolve, 0));
   return settle(deadline);
 };
 
-/** 진행 중인 소스맵 변환이 끝날 때까지(길어도 2초) 기다린다. 보고서를 저장하기 직전에 부른다. */
-export const whenSourcesResolved = (): Promise<void> => settle(Date.now() + RESOLVE_WAIT_MS);
+/** 진행 중인 소스맵 변환이 끝날 때까지(길어도 2초) 기다린다. 보고서를 저장하기 직전에 부른다. 2초 안에 끝나지 않으면 false */
+export const whenSourcesResolved = (): Promise<boolean> => settle(Date.now() + RESOLVE_WAIT_MS);

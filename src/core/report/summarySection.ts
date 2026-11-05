@@ -1,4 +1,5 @@
 import { round3 } from '../../shared/format.js';
+import { N_PLUS_ONE_FIX } from '../requests/nPlusOne.js';
 import { countProblems, type RenderStorm } from '../problems.js';
 import type { CacheFindingKind } from '../reactQuery/cacheAudit.js';
 import { WINDOW_MS } from '../render/summary.js';
@@ -11,7 +12,15 @@ import type { RequestSection } from './requestSection.js';
 const MAX_TOP_FINDINGS = 10;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
-export type FindingKind = 'duplicate' | 'same-response' | 'react-query' | 'render-storm' | 'avoidable-renders' | 'layout-shift' | 'remount';
+export type FindingKind =
+  | 'duplicate'
+  | 'same-response'
+  | 'n-plus-one'
+  | 'react-query'
+  | 'render-storm'
+  | 'avoidable-renders'
+  | 'layout-shift'
+  | 'remount';
 
 export interface TopFinding {
   kind: FindingKind;
@@ -48,6 +57,7 @@ export interface ReportSummary {
 const KIND_ORDER: Record<FindingKind, number> = {
   duplicate: 0,
   'same-response': 0,
+  'n-plus-one': 0,
   'react-query': 1,
   'render-storm': 2,
   'avoidable-renders': 2,
@@ -94,6 +104,19 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
       },
     ];
   });
+
+/** 항목마다 보낸 요청(N+1). 의도된 경우(가상화 목록)도 있어 배지는 세지 않는다(medium). 한 번에 받으면 나머지 요청이 준다 */
+const nPlusOneFindings = (entries: RequestSection['nPlusOne']): Ranked[] =>
+  entries.map((n, i) => ({
+    kind: 'n-plus-one',
+    severity: 'medium',
+    target: { endpoint: n.endpoint, ...(n.component && { component: n.component }), ...(n.location && { location: n.location }) },
+    evidence: { count: n.count, windowMs: n.windowMs },
+    savings: { requests: n.count - 1 },
+    fix: N_PLUS_ONE_FIX,
+    detail: `requests.nPlusOne[${i}]`,
+    rank: [n.count - 1, 0, n.count],
+  }));
 
 const reactQueryFindings = (reactQuery: ReactQuerySection): Ranked[] =>
   reactQuery.findings.flatMap((f, i): Ranked[] => {
@@ -303,6 +326,7 @@ export const buildSummary = (
   const shifts = layoutShiftFindings(layoutShifts);
   const all = [
     ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
+    ...nPlusOneFindings(requests.nPlusOne),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),
     ...shifts.findings,

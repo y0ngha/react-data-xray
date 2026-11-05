@@ -35,8 +35,14 @@ const current = () => {
 // 한 번 찾은 결과는 쿼리가 gc 되거나 데이터가 바뀌어도 그 요청에 남긴다(보고서 출력이 캐시 상태로 흔들리지 않게).
 const known = new WeakMap<RequestRecord, QueryContext>();
 
+// 트리를 걸어 문맥을 찾아 본 요청(찾았든 못 찾았든). 주기 업로드는 찾아 보지 않으므로, 여기 없는 요청은 queryKey 를 아직 모른다.
+const checked = new WeakSet<RequestRecord>();
+
 /** 이미 찾아 둔 문맥만 돌려준다(트리를 걷지 않는다). 주기 업로드처럼 앱 경로 가까이서 부를 때 쓴다. */
 export const knownQueryContextOf = (record: RequestRecord): QueryContext | undefined => known.get(record);
+
+/** 이 요청의 React Query 문맥을 한 번이라도 찾아 봤는지(보고서가 queryKey 를 다 풀었는지 알릴 때 쓴다) */
+export const isQueryContextChecked = (record: RequestRecord): boolean => checked.has(record);
 
 const MAX_CHILDREN = 20;
 
@@ -68,6 +74,7 @@ const remember = (record: RequestRecord, queryKey: string, byKey: ReadonlyMap<st
  * shortcut: 같은 URL 을 React Query 밖에서 부른 요청도 같은 쿼리로 본다.
  */
 export const queryContextOf = (record: RequestRecord): QueryContext | undefined => {
+  checked.add(record);
   const cached = known.get(record);
   if (cached?.observer) return cached; // observer 를 모르면 다시 찾아 본다
   const { clients, byKey } = current();
