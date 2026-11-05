@@ -17,6 +17,7 @@ export type FindingKind =
   | 'refetch-after-mutation'
   | 'n-plus-one'
   | 'waterfall'
+  | 'unused-response'
   | 'react-query'
   | 'render-storm'
   | 'avoidable-renders'
@@ -41,6 +42,11 @@ export interface TopFinding {
    */
   savings?: { requests?: number; renders?: number; ms?: number; renderMs?: number };
   fix?: string;
+  /**
+   * 같은 요청을 함께 다루는 다른 항목의 경로. 몰림 finding 에는 그 몰림의 요청을 이미 센 항목(엔드포인트 행·N+1),
+   * 그 항목들에는 절감을 그쪽에 맡기고 summary 에서 뺀 몰림(requests.bursts[i])이 온다
+   */
+  relatedFindings?: string[];
   /** 상세 항목의 경로(예: requests.endpoints[0]). 보고서 범위 밖이라 상세 행이 없으면 두지 않는다 */
   detail?: string;
 }
@@ -60,14 +66,16 @@ export interface ReportSummary {
 const KIND_ORDER: Record<FindingKind, number> = {
   duplicate: 0,
   'same-response': 0,
-  'request-burst': 0,
+  // 몰림은 원인을 말해 주지 않는 묶음이라, 같은 요청을 짚는 구체적인 요청 finding(중복·N+1 등) 뒤에 둔다.
+  'request-burst': 1,
   'refetch-after-mutation': 0,
   'n-plus-one': 0,
   waterfall: 0,
-  'react-query': 1,
-  'render-storm': 2,
-  'avoidable-renders': 2,
-  remount: 3,
+  'unused-response': 0,
+  'react-query': 2,
+  'render-storm': 3,
+  'avoidable-renders': 3,
+  remount: 4,
 };
 
 // 고칠 것이 없는 React Query finding(아직 없는 쿼리를 무효화한 것은 정상이다)
@@ -124,24 +132,50 @@ type FollowUp = RequestSection['followUps'][number];
 const BURST_FIX =
   'These requests fired together outside page entry (no page load or navigation nearby). Find what triggers them at once in the top endpoints: fetch the list in one request instead of per item, share one fetch between components (a common ancestor or React Query), or debounce the trigger (input, scroll, resize).';
 
-/** 진입과 무관한 몰림. 배지는 세지 않는다(버튼이 1초 깜빡일 뿐이다). 줄일 양은 몰림이 한 건이 되는 것으로 본다 */
-const burstFindings = (bursts: readonly Burst[]): Ranked[] =>
-  bursts.flatMap((b, i): Ranked[] => {
+// 몰림의 요청을 이미 센 구체적인 finding 의 종류(그 finding 의 detail 이 몰림의 overlaps 에 온다)
+const SPECIFIC: ReadonlySet<FindingKind> = new Set(['duplicate', 'same-response', 'n-plus-one']);
+
+/**
+ * 진입과 무관한 몰림. 배지는 세지 않는다(버튼이 1초 깜빡일 뿐이다). 줄일 양은 몰림이 한 건이 되는 것으로 보되,
+ * 다른 finding 이 이미 센 요청은 뺀다. 그런 요청이 절반 이상이면 몰림은 짚지 않고, 그 finding 들의 relatedFindings 에 몰림을 단다.
+ */
+const burstFindings = (bursts: readonly Burst[], specific: readonly Ranked[]): Ranked[] => {
+  const byDetail = new Map(specific.filter((f) => SPECIFIC.has(f.kind) && f.detail).map((f) => [f.detail!, f]));
+  return bursts.flatMap((b, i): Ranked[] => {
     const top = b.topEndpoints[0];
     if (b.kind !== 'waste' || !top) return [];
+    const related = (b.overlaps ?? []).filter((o) => byDetail.has(o.detail));
+    const claimed = related.reduce((n, o) => n + o.requests, 0);
+    const detail = `requests.bursts[${i}]`;
+    if (claimed * 2 >= b.count) {
+      related.forEach((o) => {
+        const f = byDetail.get(o.detail)!;
+        f.relatedFindings = [...(f.relatedFindings ?? []), detail];
+      });
+      return [];
+    }
+    const saved = Math.max(0, b.count - 1 - claimed);
     return [
       {
         kind: 'request-burst',
         severity: 'medium',
         target: { endpoint: top.endpoint },
-        evidence: { count: b.count, spanMs: b.to - b.from, wasted: b.wasted, endpoints: b.topEndpoints.length },
-        savings: { requests: b.count - 1 },
+        evidence: {
+          count: b.count,
+          spanMs: b.to - b.from,
+          wasted: b.wasted,
+          endpoints: b.topEndpoints.length,
+          ...(claimed > 0 && { counted: claimed }),
+        },
+        savings: { requests: saved },
         fix: BURST_FIX,
-        detail: `requests.bursts[${i}]`,
-        rank: [b.count - 1, 0, b.count],
+        detail,
+        ...(related.length > 0 && { relatedFindings: related.map((o) => o.detail) }),
+        rank: [saved, 0, b.count],
       },
     ];
   });
+};
 
 const followUpFix = (f: FollowUp): string =>
   `After ${f.mutation}, ${f.refetched} was refetched and the response was unchanged. Narrow the invalidation after this mutation to the queries it actually changes (a more specific queryKey, exact: true), or update the cache from the mutation response (setQueryData) instead of refetching.`;
@@ -176,6 +210,30 @@ const nPlusOneFindings = (entries: RequestSection['nPlusOne']): Ranked[] =>
     detail: `requests.nPlusOne[${i}]`,
     rank: [n.count - 1, 0, n.count],
   }));
+/**
+ * 응답을 쓰는 컴포넌트를 못 찾은 엔드포인트(무시한 것은 뺀다). 배지는 세지 않는다(medium): effect·핸들러에서만 쓰거나 가공한 데이터도 이렇게 보인다.
+ * 보낸 위치는 가장 많이 보낸 caller 다(쓰지 않는 요청만 따로 세지 않는다).
+ */
+const unusedFindings = (endpoints: readonly Endpoint[]): Ranked[] =>
+  endpoints.flatMap((e, i): Ranked[] => {
+    if (e.ignored || !e.unused) return [];
+    const caller = e.callers[0];
+    const component = caller?.component ?? caller?.observer;
+    const ms = Math.round(e.unused * e.avgMs);
+    return [
+      {
+        kind: 'unused-response',
+        severity: 'medium',
+        target: { endpoint: e.endpoint, ...(component && { component }), ...(caller?.frame && { location: caller.frame }) },
+        evidence: { count: e.count, unused: e.unused },
+        savings: { requests: e.unused, ms },
+        fix: 'No component holds this response. Confirm in code that nothing reads it (effects, event handlers, transformed copies), then remove the request or fetch it only when needed.',
+        detail: `requests.endpoints[${i}]`,
+        rank: [e.unused, ms, e.count],
+      },
+    ];
+  });
+
 /**
  * 워터폴마다 하나. 고칠 곳은 마지막 요청을 보낸 컴포넌트(앞 응답이 와야 마운트돼 요청한다)다.
  * savings.ms 는 모두 병렬로 보냈을 때 줄어들 지연의 어림(응답 시간 합 − 가장 긴 응답 시간)이다.
@@ -362,12 +420,13 @@ export const buildSummary = (
   storms: ReadonlyMap<string, RenderStorm>,
 ): ReportSummary => {
   const problems = countProblems(requests.endpoints, storms);
+  const specific = [...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)), ...nPlusOneFindings(requests.nPlusOne)];
   const all = [
-    ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
-    ...burstFindings(requests.bursts),
+    ...specific,
+    ...burstFindings(requests.bursts, specific),
     ...followUpFindings(requests.followUps),
-    ...nPlusOneFindings(requests.nPlusOne),
     ...waterfallFindings(requests.waterfalls),
+    ...unusedFindings(requests.endpoints),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),
   ].sort(byRank);
@@ -398,6 +457,6 @@ export const buildSummary = (
 /** summary 를 먼저 읽으라는 줄. buildReport 가 howToRead 맨 앞에 둔다. 폭주 기준은 배지가 쓰는 상수로 만든다. */
 export const SUMMARY_HOW_TO_READ: readonly string[] = [
   'Read summary first. summary.verdict is a one-line count of the problems (a + after a number means the render rows hit their limit and there may be more); summary.topFindings lists up to 10 things to fix, in the order to fix them, and summary.omitted is how many more were left out.',
-  `topFindings[].severity high means the RDX button badge counts it (an endpoint with wasted requests, or a component group — name and JSX location — with an instance rendering ${RENDER_STORM}+ times within the last ${WINDOW_MS / 1000}s; the same rule and count as summary.badge); medium means it can be reduced but the badge does not count it. Within a severity, requests come first, then React Query, renders, and remounts; within each, the largest estimated savings (requests or renders saved, then ms) comes first.`,
+  `topFindings[].severity high means the RDX button badge counts it (an endpoint with wasted requests, or a component group — name and JSX location — with an instance rendering ${RENDER_STORM}+ times within the last ${WINDOW_MS / 1000}s; the same rule and count as summary.badge); medium means it can be reduced but the badge does not count it. Within a severity, requests come first (request bursts after the other request findings), then React Query, renders, and remounts; within each, the largest estimated savings (requests or renders saved, then ms) comes first.`,
   'topFindings[].detail is the path of the full entry in this report (e.g. requests.endpoints[0], or renders.components[2].libraries[0] for a library component folded into the app component that renders it); read it and confirm in code before fixing. target.location is the listed caller that sent the most wasted requests, the JSX location (renderedAt), or the call site (stack); it is absent when unknown. savings is an estimate (ms values are dev-build sums).',
 ];

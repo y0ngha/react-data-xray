@@ -4,13 +4,15 @@ import { classifyRecords, type RequestClass } from '../../core/requests/classify
 import { getEndpointStats, isWastefulStat, type EndpointStat } from '../../core/requests/endpointStats.js';
 import { requestKeyOf } from '../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../core/requests/types.js';
-import type { IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
+import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 import { useRecords } from './useRecords.js';
 
 export interface RequestAnalysis {
   records: readonly RequestRecord[];
   classes: ReadonlyMap<number, RequestClass>;
   classOf: (record: RequestRecord) => RequestClass;
+  /** 분류에 쓴 무시 판정(패널·configure). 몰림 판정도 같은 것으로 본다 */
+  ignored: IgnoreMatcher;
   stats: EndpointStat[];
   statsByEndpoint: ReadonlyMap<string, EndpointStat>;
   /** 낭비 요청이 있는 엔드포인트 수 */
@@ -30,6 +32,7 @@ export const useRequestAnalysis = (ignored: IgnoreMatcher | ReadonlySet<string>)
       records,
       classes,
       classOf: (record: RequestRecord) => classes.get(record.id) ?? 'ok',
+      ignored: toIgnoreMatcher(ignored),
       stats,
       statsByEndpoint: new Map(stats.map((s) => [s.endpoint, s])),
       wasteCount: stats.filter(isWastefulStat).length,

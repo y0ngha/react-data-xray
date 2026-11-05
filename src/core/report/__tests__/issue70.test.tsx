@@ -23,7 +23,7 @@ import { installReportApi } from '../reportApi.js';
 import { buildSummary } from '../summarySection.js';
 
 // howToRead 문구(와 문구에 들어가는 RENDER_STORM·WINDOW_MS)가 바뀌면 이 두 값을 함께 고친다. 판은 하나 올린다.
-const EXPECTED_HOW_TO_READ = { version: 9, hash: 'fe33c6f3d5fa' };
+const EXPECTED_HOW_TO_READ = { version: 12, hash: '3b50e8875d3a' };
 
 type Endpoint = RequestSection['endpoints'][number];
 type Component = RenderSection['components'][number];

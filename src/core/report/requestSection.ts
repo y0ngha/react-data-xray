@@ -1,8 +1,9 @@
+import { UNUSED_SETTLE_MS } from '../inspect/unused.js';
 import type { EndpointRenders } from '../render/endpointRenders.js';
 import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
 import { analyzeBursts, type BurstSegment, type EntryReason } from '../requests/bursts.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
-import { followUps, isMutation } from '../requests/followUps.js';
+import { allFollowUps } from '../requests/followUps.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
 import { callerOf } from '../requests/callerFrames.js';
 import { nPlusOneRuns, type NPlusOneRun } from '../requests/nPlusOne.js';
@@ -68,6 +69,10 @@ export interface RequestSection {
     repeatCauses?: Array<{ kind: 'deps' | 'remount' | 'strict'; detail: string; count: number }>;
     /** 낭비로 판정된 요청의 URL 예(쿼리 포함) */
     wasteExamples: string[];
+    /** 응답 몇 초 뒤에도 그 응답을 들고 있는 컴포넌트를 못 찾은 요청 수(확인 필요). 없으면 두지 않는다 */
+    unused?: number;
+    /** 그 요청의 URL 예(쿼리 포함) */
+    unusedExamples?: string[];
   }>;
   /** 요청 몰림 구간(panel 타임라인과 같은 analyzeBursts). 낭비 먼저, 그다음 건수가 많은 순 */
   bursts: BurstEntry[];
@@ -97,6 +102,11 @@ export interface BurstEntry {
   route?: string;
   /** 구간에 많이 든 엔드포인트(상위 3) */
   topEndpoints: Array<{ endpoint: string; count: number }>;
+  /**
+   * 이 구간의 요청 가운데 다른 항목이 이미 센 것: 낭비(중복·같은 응답)는 그 엔드포인트 행, N+1 은 그 묶음.
+   * detail 은 그 항목의 경로, requests 는 겹친 요청 수. 한 요청은 한 항목에만 센다(낭비 먼저). 없으면 두지 않는다
+   */
+  overlaps?: Array<{ detail: string; requests: number }>;
 }
 
 export interface FollowUpEntry {
@@ -208,7 +218,19 @@ const topEndpointsOf = (records: readonly RequestRecord[]) =>
     .sort((a, b) => b.count - a.count)
     .slice(0, MAX_BURST_ENDPOINTS);
 
-const burstEntryOf = (seg: BurstSegment, classes: ReadonlyMap<number, RequestClass>): BurstEntry => {
+/** 요청이 이미 든 항목의 경로. 낭비면 엔드포인트 행, N+1 이면 그 묶음 */
+type ClaimOf = (r: RequestRecord) => string | undefined;
+
+const overlapsOf = (records: readonly RequestRecord[], claimOf: ClaimOf) => {
+  const counts = new Map<string, number>();
+  records.forEach((r) => {
+    const detail = claimOf(r);
+    if (detail) counts.set(detail, (counts.get(detail) ?? 0) + 1);
+  });
+  return counts.size > 0 ? { overlaps: Array.from(counts, ([detail, requests]) => ({ detail, requests })) } : {};
+};
+
+const burstEntryOf = (seg: BurstSegment, classes: ReadonlyMap<number, RequestClass>, claimOf: ClaimOf): BurstEntry => {
   const route = seg.records[0]?.route;
   return {
     from: seg.from,
@@ -219,20 +241,26 @@ const burstEntryOf = (seg: BurstSegment, classes: ReadonlyMap<number, RequestCla
     wasted: seg.records.filter((r) => isWaste(classes.get(r.id))).length,
     ...(route !== undefined && { route }),
     topEndpoints: topEndpointsOf(seg.records),
+    ...overlapsOf(seg.records, claimOf),
   };
 };
 
-/** 타임라인·버튼과 같은 analyzeBursts 로 찾는다. 무시한 엔드포인트(classes 의 ignored)는 analyzeBursts 가 세지 않는다 */
-const burstsOf = (records: readonly RequestRecord[], classes: ReadonlyMap<number, RequestClass>) => {
-  const all = analyzeBursts(records, (r) => classes.get(r.id) ?? 'ok')
-    .map((seg) => burstEntryOf(seg, classes))
+/** 타임라인·버튼과 같은 analyzeBursts 에 같은 분류·무시 판정을 넘긴다. 무시한 엔드포인트의 요청은 첫 요청까지 세지 않는다 */
+const burstsOf = (
+  records: readonly RequestRecord[],
+  classes: ReadonlyMap<number, RequestClass>,
+  matcher: IgnoreMatcher,
+  claimOf: ClaimOf,
+) => {
+  const all = analyzeBursts(records, (r) => classes.get(r.id) ?? 'ok', matcher)
+    .map((seg) => burstEntryOf(seg, classes, claimOf))
     .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'waste' ? -1 : 1) || b.count - a.count || a.from - b.from);
   return { bursts: all.slice(0, MAX_BURSTS), burstsOmitted: Math.max(0, all.length - MAX_BURSTS) };
 };
 
 /**
- * 요청 상세와 같은 followUps 로 변경 요청마다 뒤따른 조회를 찾고, 변경·재조회 엔드포인트 쌍으로 모은다.
- * 수는 패널과 같게 두고, 무시한 엔드포인트(의도된 반복)로 다시 받은 쌍은 ignored 로 표시한다(엔드포인트 행과 같다).
+ * 요청 상세와 같은 판정(allFollowUps: 한 조회는 바로 앞 변경 요청 하나에만, 새로고침 전 기록은 빼고)으로 찾고,
+ * 변경·재조회 엔드포인트 쌍으로 모은다. 수는 패널과 같게 두고, 변경이나 재조회 쪽 엔드포인트를 무시했으면 ignored 로 표시한다.
  */
 const followUpsOf = (
   records: readonly RequestRecord[],
@@ -240,9 +268,9 @@ const followUpsOf = (
   queryOf: (record: RequestRecord) => QueryContext | undefined,
 ): FollowUpEntry[] => {
   const pairs = new Map<string, FollowUpEntry>();
-  records.filter(isMutation).forEach((m) => {
+  allFollowUps(records, (r) => queryOf(r)?.queryKey).forEach(({ mutation: m, followUps }) => {
     const mutation = endpointOf(m);
-    followUps(m, records, (r) => queryOf(r)?.queryKey).forEach((f) => {
+    followUps.forEach((f) => {
       const key = JSON.stringify([mutation, f.endpoint]);
       const prev = pairs.get(key);
       const queryKey = prev?.queryKey ?? f.queryKey;
@@ -254,13 +282,21 @@ const followUpsOf = (
         sameResponse: (prev?.sameResponse ?? 0) + f.sameResponse,
         ...(queryKey !== undefined && { queryKey }),
         ...((prev?.periodic || f.periodic) && { periodic: true as const }),
-        ...(matcher.sourceOf(f.endpoint) && { ignored: true as const }),
+        ...((matcher.sourceOf(mutation) || matcher.sourceOf(f.endpoint)) && { ignored: true as const }),
       });
     });
   });
   return Array.from(pairs.values())
     .sort((a, b) => b.sameResponse - a.sameResponse || b.count - a.count)
     .slice(0, MAX_FOLLOW_UPS);
+};
+
+/** 쓰지 않는 응답의 수와 URL 예. 없으면 필드를 두지 않는다. */
+const unusedOf = (own: readonly RequestRecord[]): { unused?: number; unusedExamples?: string[] } => {
+  const unused = own.filter((r) => r.unused);
+  return unused.length > 0
+    ? { unused: unused.length, unusedExamples: Array.from(new Set(unused.map((r) => redactUrl(r.url)))).slice(0, MAX_EXAMPLES) }
+    : {};
 };
 
 const nPlusOneEntryOf = (run: NPlusOneRun): NPlusOneEntry => {
@@ -291,36 +327,48 @@ export const buildRequestSection = (
 ): RequestSection => {
   const byEndpoint = groupBy(records, endpointOf);
   const matcher = toIgnoreMatcher(ignored);
+  const stats = getEndpointStats(records, classes);
+  const runs = nPlusOneRuns(records).filter((run) => !matcher.sourceOf(run.endpoint));
+  // 몰림의 요청 가운데 다른 항목이 이미 센 것(낭비 → 엔드포인트 행, N+1 → 그 묶음). summary 가 절감을 두 번 세지 않게 한다.
+  const endpointIndex = new Map(stats.map((st, i) => [st.endpoint, i]));
+  const runIndex = new Map(runs.flatMap((run, i) => run.records.map((r) => [r.id, i] as const)));
+  const claimOf: ClaimOf = (r) => {
+    const row = isWaste(classes.get(r.id)) ? endpointIndex.get(endpointOf(r)) : undefined;
+    if (row !== undefined) return `requests.endpoints[${row}]`;
+    const run = runIndex.get(r.id);
+    return run === undefined ? undefined : `requests.nPlusOne[${run}]`;
+  };
   return {
     total: records.length,
     dropped: getDroppedCount(),
-    endpoints: getEndpointStats(records, classes).map((s) => {
+    endpoints: stats.map((s) => {
       const own = byEndpoint.get(s.endpoint) ?? [];
-      return {
-        endpoint: s.endpoint,
-        ignored: !!matcher.sourceOf(s.endpoint),
-        count: s.count,
-        restoredCount: own.filter((r) => r.restored).length,
-        avgMs: s.avgMs,
-        duplicates: s.duplicates,
-        sameResponses: s.sameResponses,
-        failedDuplicates: s.failedDuplicates ?? 0,
-        refetchReasons: refetchReasonsOf(own, classes),
-        review: s.review,
-        renders: renders.get(s.endpoint),
-        callers: callersOf(own, queryOf, (r) => isWaste(classes.get(r.id))),
-        repeatCauses: repeatCausesOf(own),
-        wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
-          0,
-          MAX_EXAMPLES,
-        ),
-      };
+      return Object.assign(
+        {
+          endpoint: s.endpoint,
+          ignored: !!matcher.sourceOf(s.endpoint),
+          count: s.count,
+          restoredCount: own.filter((r) => r.restored).length,
+          avgMs: s.avgMs,
+          duplicates: s.duplicates,
+          sameResponses: s.sameResponses,
+          failedDuplicates: s.failedDuplicates ?? 0,
+          refetchReasons: refetchReasonsOf(own, classes),
+          review: s.review,
+          renders: renders.get(s.endpoint),
+          callers: callersOf(own, queryOf, (r) => isWaste(classes.get(r.id))),
+          repeatCauses: repeatCausesOf(own),
+          wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
+            0,
+            MAX_EXAMPLES,
+          ),
+        },
+        unusedOf(own),
+      );
     }),
-    ...burstsOf(records, classes),
+    ...burstsOf(records, classes, matcher, claimOf),
     followUps: followUpsOf(records, matcher, queryOf),
-    nPlusOne: nPlusOneRuns(records)
-      .filter((run) => !matcher.sourceOf(run.endpoint))
-      .map(nPlusOneEntryOf),
+    nPlusOne: runs.map(nPlusOneEntryOf),
     waterfalls: findWaterfalls(records, (r) => callerOf(r.sourceStack ?? r.stack)).slice(0, MAX_WATERFALLS),
   };
 };
@@ -333,10 +381,11 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   "callers.waste is how many of that caller's requests were counted as waste (duplicates or sameResponses); absent when none. summary points at the listed caller with the most waste.",
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
-  'requests.bursts lists request bursts (config.burst.count, default 5, or more requests starting within config.burst.windowMs, default 500), the same ones the timeline draws. kind entry means it came right after page entry, and reason says why: initial-load (within 3s of the page load) or navigation (a route change from 3s before the burst to 1s after its last response) — screens commonly load everything at once, so review only if it looks excessive. kind waste (reason no-entry) has no page entry nearby: find what fires these requests together. from and to are the start times (ms epoch) of the first and last request, count the requests in it, wasted how many of them were duplicates or sameResponses, route the path when the first was sent, topEndpoints the endpoints with the most requests in it. As in the timeline, repeats classed ignored (an ignored endpoint), StrictMode re-runs and requests from before a reload are not counted. Waste bursts come first, then the largest; at most 20 (burstsOmitted is how many more). summary lists each waste burst as a medium request-burst finding.',
-  'requests.followUps lists GET requests sent within 1s after a mutation (POST, PUT, PATCH, DELETE) response, grouped by mutation (method + endpoint) and refetched endpoint — by timing only, the same as the request detail panel. mutations is how many such mutations were followed by it, count the refetches, sameResponse how many got a response identical to the previous one (invalidated but nothing changed: the invalidation is broader than the change), queryKey the React Query key when known. periodic: true means the refetched endpoint is polling and may be unrelated to the mutation. ignored: true means the refetched endpoint is ignored (in the panel or config.ignore) — skip it. Sorted by sameResponse, then count; at most 20. summary lists each pair that is neither periodic nor ignored with sameResponse > 0 as a medium refetch-after-mutation finding; the same refetches are also counted on the refetched endpoint (sameResponses, or review when React Query refetched after an invalidation), so do not add the savings twice.',
+  'requests.bursts lists request bursts (config.burst.count, default 5, or more requests starting within config.burst.windowMs, default 500), the same ones the timeline and the RDX button use. kind entry means it came right after page entry, and reason says why: initial-load (within 3s of the page load) or navigation (a route change from 3s before the burst to 1s after its last response) — screens commonly load everything at once, so review only if it looks excessive. kind waste (reason no-entry) has no page entry nearby: find what fires these requests together. from and to are the start times (ms epoch) of the first and last request, count the requests in it, wasted how many of them were duplicates or sameResponses, route the path when the first was sent, topEndpoints the endpoints with the most requests in it. Requests to ignored endpoints (in the panel or config.ignore, first requests included), StrictMode re-runs and requests from before a reload are not counted. overlaps lists requests in the burst already counted by another entry (detail: requests.endpoints[i] for waste, requests.nPlusOne[j] for N+1; each request counted once). Waste bursts come first, then the largest; at most 20 (burstsOmitted is how many more). summary lists a waste burst as a medium request-burst finding ranked after the other request findings; its savings exclude requests already counted by those findings (evidence.counted, relatedFindings), and when they are half or more of the burst it is left out and added to their relatedFindings instead.',
+  "requests.followUps lists GET requests sent within 1s after a mutation (POST, PUT, PATCH, DELETE) response, grouped by mutation (method + endpoint) and refetched endpoint — by timing only, the same as the request detail panel. Each GET is attributed to only the nearest preceding mutation (the one whose response ended last before it), so a GET inside two mutations' windows is counted once. Requests from before a reload are left out, as in bursts. mutations is how many such mutations were followed by it, count the refetches, sameResponse how many got a response identical to the previous one in the same page load (invalidated but nothing changed: the invalidation is broader than the change), queryKey the React Query key when known. periodic: true means the refetched endpoint is polling and may be unrelated to the mutation. ignored: true means the mutation or the refetched endpoint is ignored (in the panel or config.ignore) — skip it. Sorted by sameResponse, then count; at most 20. summary lists each pair that is neither periodic nor ignored with sameResponse > 0 as a medium refetch-after-mutation finding; the same refetches are also counted on the refetched endpoint (sameResponses, or review when React Query refetched after an invalidation), so do not add the savings twice.",
   'requests.nPlusOne lists requests sent once per list item (N+1): config.nPlusOne.count (default 5)+ requests for different IDs to the same endpoint (an :id path segment) from the same component (or, when the component is unknown, the same caller location) within config.nPlusOne.windowMs (default 1000). count is the number of different IDs (paths), windowMs the time from the first to the last request, examples a few URLs (one per ID). Ignored endpoints are left out. Repeats of the same ID are duplicates and are not included. It is review (may be intended, e.g. a virtualized list), not waste: fetch them in one request from the list (batch endpoint, include/expand) or fetch once in the parent.',
   'requests.waterfalls lists serial request chains (up to 5, largest latency first): the response of chain[i] caused the commit in which chain[i+1].component mounted, and that component sent chain[i+1] right after (from its effect). Requests sent in parallel are not chained. depth is the number of requests in the chain, latencyMs is the sum of chain[].ms (the wait added by running them one after another), location is where each request was sent. Paths with the same endpoints and components are grouped: chain[].ms is the average response time over all grouped paths (including several list rows behind one first request), and count is the number of distinct chains, counted by their first request. If the later request does not need the earlier response, start it in parallel or prefetch it; if it does, join the data on the server or move both into a route loader. rdx does not check whether the data is actually used.',
+  `unused is how many of the endpoint's responses no component was found holding ${UNUSED_SETTLE_MS / 1000}s after they arrived (neither the same object nor a derived copy with matching field values; earlier responses of the same request count as held), with unusedExamples as their URLs. Only successful, non-empty JSON responses of non-mutating requests (not POST, PUT, PATCH, DELETE) on endpoints that are not ignored are judged, once each. It needs review rather than being waste: data used only inside effects or event handlers, or transformed into new objects, also looks unused — confirm in code that nothing reads it before removing or deferring the request. summary lists such endpoints as kind unused-response with severity medium. Absent when none.`,
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
   'requests.endpoints[].renders is what responses from this endpoint caused on screen during renders.windowSeconds: count renders and ms self render time, including both components that received the response (direct, or own state changed right after it arrived) and descendants that rendered along with them; viaParent is the portion that rendered only because an ancestor did (fix that ancestor, or memoize the children). fromSameResponse is the portion caused by a response identical to the previous one — pure waste that disappears when the refetch is removed or setState is skipped for an unchanged response; summary.topFindings[].savings.renders and renderMs for that endpoint come from it. ms is a selfBaseDuration sum from a dev build: compare it across endpoints or before vs. after a fix rather than reading it as production time; each ms is absent when none of the renders in that part had timing. Renders are counted over the same instances as renders.components (when renders.truncated is true, the dropped instances are not counted either) and only for requests still in the record (see requests.dropped). Absent when no render was linked to the endpoint.',
 ];

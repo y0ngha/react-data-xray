@@ -81,7 +81,7 @@ describe('requests.bursts (#74)', () => {
     History.prototype.replaceState.call(history, null, '', '/');
   });
 
-  it('낭비로 센 요청 수를 싣고, 무시한 엔드포인트(패널·configure)의 반복은 타임라인처럼 세지 않는다', () => {
+  it('무시한 엔드포인트(패널·configure)의 요청은 첫 요청까지 몰림에서 빼고, 타임라인·버튼도 같다', () => {
     const at = FAR + 200_000;
     const panelFirst = rec('GET', '/api/panel', at);
     const codeFirst = rec('GET', '/api/code', at + 50);
@@ -93,16 +93,22 @@ describe('requests.bursts (#74)', () => {
       rec('GET', '/api/code', at + 200, { duplicateOf: codeFirst.id }),
       rec('GET', '/api/x', at + 250),
       rec('GET', '/api/y', at + 300),
+      rec('GET', '/api/z', at + 350),
     ];
-    expect(section(records).bursts[0]).toMatchObject({ count: 7, wasted: 3 });
+    expect(section(records).bursts[0]).toMatchObject({ count: 8, wasted: 3 });
     configure({ ignore: ['GET /api/code'] });
+    // 코드 무시만 있으면 /api/code 두 건(첫 요청 포함)이 빠져 6건이다
+    const [burst] = section(records).bursts;
+    expect(burst).toMatchObject({ count: 6, wasted: 2 });
+    expect(burst.topEndpoints.map((e) => e.endpoint)).not.toContain('GET /api/code');
+    // 패널 무시까지 더하면 대부분이 무시한 엔드포인트라 남은 3건은 몰림이 아니다. 타임라인·버튼도 같은 판정이다.
     const panelIgnore = new Set(['GET /api/panel']);
-    // 무시한 반복 셋을 빼면 4건이라 몰림이 아니다. 타임라인도 같다.
     expect(section(records, panelIgnore).bursts).toEqual([]);
-    const classes = classifyRecords(records, ignoreMatcher(panelIgnore));
-    expect(analyzeBursts(records, (r) => classes.get(r.id) ?? 'ok')).toEqual([]);
-    // 코드 무시만 있으면 6건, 무시한 반복은 낭비로 세지 않는다
-    expect(section(records).bursts[0]).toMatchObject({ count: 6, wasted: 2 });
+    expect(summaryOf(section(records, panelIgnore)).topFindings.map((f) => f.kind)).not.toContain('request-burst');
+    const matcher = ignoreMatcher(panelIgnore);
+    const classes = classifyRecords(records, matcher);
+    expect(analyzeBursts(records, (r) => classes.get(r.id) ?? 'ok', matcher)).toEqual([]);
+    expect(layoutTimeline(records, [], at + 1000, 1000, (r) => classes.get(r.id) ?? 'ok', records, matcher).bursts).toEqual([]);
   });
 
   it('상한(20)을 넘는 구간은 싣지 않고 수만 남긴다', () => {
@@ -141,6 +147,46 @@ describe('requests.followUps (#74)', () => {
     expect(panel.reduce((n, f) => n + f.sameResponse, 0)).toBe(2);
   });
 
+  it('두 저장의 1초 창에 함께 든 조회는 바로 앞 저장 하나에만 센다', () => {
+    const at = base + 40_000;
+    const save1 = rec('POST', '/api/todos', at); // 응답 at+10
+    const save2 = rec('PUT', '/api/todos/1', at + 300); // 응답 at+310
+    const between = rec('GET', '/api/todos', at + 200); // save1 몫
+    const after = rec('GET', '/api/todos', at + 400, { sameResponseAs: between.id }); // 둘 다의 창이지만 save2 몫
+    const records = [save1, between, save2, after];
+    expect(section(records).followUps).toEqual([
+      { mutation: 'PUT /api/todos/:id', refetched: 'GET /api/todos', mutations: 1, count: 1, sameResponse: 1 },
+      { mutation: 'POST /api/todos', refetched: 'GET /api/todos', mutations: 1, count: 1, sameResponse: 0 },
+    ]);
+    // 요청 상세도 같다: 합이 조회 수(2)를 넘지 않는다
+    expect(followUps(save1, records).map((f) => f.count)).toEqual([1]);
+    expect(followUps(save2, records).map((f) => f.count)).toEqual([1]);
+  });
+
+  it('같은 응답은 같은 페이지 로드의 응답과 같은 것만 세고, 새로고침 전 기록은 보지 않는다', () => {
+    const at = base + 60_000;
+    const before = rec('GET', '/api/todos', at - 30_000, { load: 0, restored: true });
+    const save = rec('POST', '/api/todos', at);
+    const crossLoad = rec('GET', '/api/todos', at + 50, { sameResponseAs: before.id });
+    const restoredSave = rec('POST', '/api/old', at - 20_000, { load: 0, restored: true });
+    const restoredGet = rec('GET', '/api/old', at - 19_950, { load: 0, restored: true, sameResponseAs: before.id });
+    const records = [before, restoredSave, restoredGet, save, crossLoad];
+    expect(section(records).followUps).toEqual([
+      { mutation: 'POST /api/todos', refetched: 'GET /api/todos', mutations: 1, count: 1, sameResponse: 0 },
+    ]);
+    expect(followUps(restoredSave, records)).toEqual([]);
+  });
+
+  it('변경 요청 쪽 엔드포인트를 무시해도 ignored 로 표시하고 summary 는 짚지 않는다', () => {
+    const at = base + 80_000;
+    const save = rec('POST', '/api/track', at);
+    const records = [save, rec('GET', '/api/todos', at + 50, { sameResponseAs: 1 })];
+    const ignored = new Set(['POST /api/track']);
+    const requests = section(records, ignored);
+    expect(requests.followUps).toEqual([expect.objectContaining({ mutation: 'POST /api/track', ignored: true })]);
+    expect(summaryOf(requests).topFindings.map((f) => f.kind)).not.toContain('refetch-after-mutation');
+  });
+
   it('queryKey 와 polling·무시 여부를 싣는다', () => {
     const save = rec('POST', '/api/save', base + 20_000);
     const polls = [0, 10_000, 20_000].map((t) => rec('GET', '/api/poll', base + 20_050 + t));
@@ -173,15 +219,8 @@ describe('summary 의 몰림·변경 뒤 재조회 (#74)', () => {
     const requests = section(records);
     // 같은 응답 재조회는 엔드포인트 행(high)으로도 짚힌다. 여기서는 새 종류만 본다.
     const findings = summaryOf(requests).topFindings.filter((f) => f.kind === 'request-burst' || f.kind === 'refetch-after-mutation');
+    // 구체적인 재조회 finding 이 일반적인 몰림보다 먼저다
     expect(findings).toEqual([
-      expect.objectContaining({
-        kind: 'request-burst',
-        severity: 'medium',
-        target: { endpoint: 'GET /api/items/:id' },
-        evidence: { count: 5, spanMs: 400, wasted: 0, endpoints: 1 },
-        savings: { requests: 4 },
-        detail: 'requests.bursts[0]',
-      }),
       expect.objectContaining({
         kind: 'refetch-after-mutation',
         severity: 'medium',
@@ -190,10 +229,52 @@ describe('summary 의 몰림·변경 뒤 재조회 (#74)', () => {
         savings: { requests: 1 },
         detail: 'requests.followUps[0]',
       }),
+      expect.objectContaining({
+        kind: 'request-burst',
+        severity: 'medium',
+        target: { endpoint: 'GET /api/items/:id' },
+        evidence: { count: 5, spanMs: 400, wasted: 0, endpoints: 1 },
+        savings: { requests: 4 },
+        detail: 'requests.bursts[0]',
+      }),
     ]);
-    expect(findings[0].fix).toContain('outside page entry');
-    expect(findings[1].fix).toContain('After POST /api/todos, GET /api/todos');
+    expect(findings[1].fix).toContain('outside page entry');
+    expect(findings[0].fix).toContain('After POST /api/todos, GET /api/todos');
     expect(requests.bursts[1].kind).toBe('entry');
+  });
+
+  it('몰림의 절감은 중복 finding 이 이미 센 요청을 빼고, 그 finding 을 relatedFindings 로 가리키며 뒤에 둔다', () => {
+    const at = FAR + 750_000;
+    const first = rec('GET', '/api/same', at);
+    const records = [
+      first,
+      rec('GET', '/api/same', at + 100, { duplicateOf: first.id }),
+      rec('GET', '/api/a', at + 200),
+      rec('GET', '/api/b', at + 300),
+      rec('GET', '/api/c', at + 400),
+    ];
+    const requests = section(records);
+    expect(requests.bursts[0].overlaps).toEqual([{ detail: 'requests.endpoints[0]', requests: 1 }]);
+    const findings = summaryOf(requests).topFindings;
+    expect(findings.map((f) => f.kind)).toEqual(['duplicate', 'request-burst']);
+    expect(findings[1]).toMatchObject({
+      savings: { requests: 3 },
+      evidence: { count: 5, counted: 1 },
+      relatedFindings: ['requests.endpoints[0]'],
+    });
+  });
+
+  it('몰림의 절반 이상을 다른 finding 이 이미 셌으면 몰림은 짚지 않고 그 finding 에 몰림을 단다', () => {
+    const at = FAR + 760_000;
+    const first = rec('GET', '/api/same', at);
+    const records = [
+      first,
+      ...[100, 150, 200].map((d) => rec('GET', '/api/same', at + d, { duplicateOf: first.id })),
+      rec('GET', '/api/other', at + 300),
+    ];
+    const findings = summaryOf(section(records)).topFindings;
+    expect(findings.map((f) => f.kind)).toEqual(['duplicate']);
+    expect(findings[0].relatedFindings).toEqual(['requests.bursts[0]']);
   });
 
   it('polling 과 겹치거나 무시한 엔드포인트로의 재조회는 같은 응답이어도 짚지 않는다', () => {

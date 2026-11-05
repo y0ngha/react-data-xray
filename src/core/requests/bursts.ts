@@ -1,6 +1,8 @@
 import { hasNavigationIn } from '../capture/navigation.js';
 import type { RequestClass } from './classify.js';
 import { config } from '../config.js';
+import type { IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
+import { endpointOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
 /** 몰림을 재는 창 길이(기본 500ms, configure 의 burst.windowMs) */
@@ -91,9 +93,11 @@ const entryReasonOf = (from: number, end: number): EntryReason | undefined => {
   return hasNavigationIn(from - INITIAL_LOAD_MS, end + ENTRY_LOOKAHEAD_MS) ? 'navigation' : undefined;
 };
 
-const counted = (classOf: (r: RequestRecord) => RequestClass) => (r: RequestRecord) => {
+const counted = (classOf: (r: RequestRecord) => RequestClass, ignored: IgnoreMatcher | undefined) => (r: RequestRecord) => {
   // 새로고침 전 페이지의 기록은 이 페이지의 이동 기록과 맞춰 볼 수 없다.
   if (r.restored) return false;
+  // 무시한 엔드포인트(패널·configure)는 반복만이 아니라 첫 요청까지 세지 않는다. 의도된 반복(폴링·비콘)이 몰림을 만들지 않게.
+  if (ignored?.sourceOf(endpointOf(r))) return false;
   const c = classOf(r);
   return c !== 'ignored' && c !== 'strict-mode';
 };
@@ -151,12 +155,16 @@ const segmentsOfLoad = (records: RequestRecord[]): BurstSegment[] => {
 
 /**
  * 요청 몰림을 500ms 창 단위로 화면 진입·낭비로 가르고, 이어진 창을 판정이 바뀌는 곳에서 잘라 구간으로 돌려준다.
- * 버튼과 타임라인이 같이 써 같은 몰림을 같게 판정한다. 이유가 확실한 반복(무시·StrictMode)과 새로고침 전 기록은
- * 세지 않고, 페이지(load)마다 따로 찾는다. 끝나지 않는 반복은 진입 창을 지나면 낭비 구간이 된다.
+ * 버튼·타임라인·보고서가 같이 써 같은 몰림을 같게 판정한다. 무시한 엔드포인트(ignored)의 요청, StrictMode 반복,
+ * 새로고침 전 기록은 세지 않고, 페이지(load)마다 따로 찾는다. 끝나지 않는 반복은 진입 창을 지나면 낭비 구간이 된다.
  */
-export const analyzeBursts = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass): BurstSegment[] => {
+export const analyzeBursts = (
+  records: readonly RequestRecord[],
+  classOf: (r: RequestRecord) => RequestClass,
+  ignored?: IgnoreMatcher,
+): BurstSegment[] => {
   const byLoad = new Map<number, RequestRecord[]>();
-  for (const r of records.filter(counted(classOf))) {
+  for (const r of records.filter(counted(classOf, ignored))) {
     const load = r.load ?? 0;
     const group = byLoad.get(load);
     if (group) group.push(r);

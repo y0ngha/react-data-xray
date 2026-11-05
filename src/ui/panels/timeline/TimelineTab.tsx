@@ -25,13 +25,13 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
   useRenderMonitoring();
   const [paused, setPaused] = useState(false);
   const [hovered, setHovered] = useState<BarLayout | null>(null);
-  const { hover, classOf } = useRequestActions();
+  const { hover, classOf, ignored } = useRequestActions();
   const boxRef = useRef<HTMLDivElement>(null);
   const width = Math.max(MIN_WIDTH, useElementWidth(boxRef, DEFAULT_WIDTH));
   const now = useNow(TICK_MS, paused);
   // 몰림은 버튼과 같게 전체 기록으로 판정한다(대상으로 좁혀도 어긋나지 않게).
   const all = useRecords();
-  const layout = layoutTimeline(records, getCommits(), now, width, classOf, all);
+  const layout = layoutTimeline(records, getCommits(), now, width, classOf, all, ignored);
   const onHover = (bar: BarLayout | null) => {
     setHovered(bar);
     hover(bar?.record ?? null);
