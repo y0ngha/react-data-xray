@@ -197,7 +197,7 @@ export const requestHookSites = (fiber: Fiber): void => {
       pending.delete(key);
     }
     return true;
-  });
+  }, 'ui'); // 보고서는 withHookPathsSync 로 그 자리에서 구한다
 };
 
 // 소스맵으로 풀어낸 호출 위치. 풀기는 비동기라 처음엔 없고, 다음 요약부터 붙는다.

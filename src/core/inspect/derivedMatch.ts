@@ -6,8 +6,8 @@ import type { Origin, RequestRecord } from '../requests/types.js';
 // 이만큼의 필드 값이 같아야 같은 데이터를 가공한 객체로 본다.
 const MIN_DERIVED_FIELDS = 2;
 
-/** 우연히 같기 어려운 값만 쓴다(짧은 문자열, 작은 숫자, boolean 은 뺀다). */
-const isDistinctive = (v: unknown): v is string | number =>
+/** 우연히 같기 어려운 값만 쓴다(짧은 문자열, 작은 숫자, boolean 은 뺀다). 과다 응답 세기(visibleFields)도 같은 기준이다. */
+export const isDistinctive = (v: unknown): v is string | number =>
   (typeof v === 'string' && v.length >= 2 && v.length <= 200) || (typeof v === 'number' && Math.abs(v) >= 10);
 
 const fieldKey = (name: string, value: string | number) => `${name}\u0000${value}`;
@@ -149,27 +149,34 @@ const lookup = (segments: ReadonlyMap<RequestRecord, Segment>, key: string): { p
   return { parts, total };
 };
 
-/** 원시값 필드 이름 묶음이 같고 값도 모두 같은 응답 객체(최신 것) */
-const findByShape = (segments: ReadonlyMap<RequestRecord, Segment>, value: object): Origin | null => {
+/** 원시값 필드 이름 묶음이 같고 값도 모두 같은 응답 객체들 */
+const matchesByShape = (segments: ReadonlyMap<RequestRecord, Segment>, value: object): Origin[] => {
   const shape = shapeKeyOf(value);
-  if (!shape) return null;
+  if (!shape) return [];
   const { parts, total } = lookup(segments, shape);
-  if (total > MAX_CANDIDATES_PER_FIELD) return null;
+  if (total > MAX_CANDIDATES_PER_FIELD) return [];
   const fields = Object.entries(value).filter(([, v]) => isPrimitive(v));
   return parts
     .flat()
     .filter(({ node }) => fields.every(([k, v]) => node[k] === v))
-    .reduce<Origin | null>((best, { origin }) => (!best || origin.record.id >= best.record.id ? origin : best), null);
+    .map(({ origin }) => origin);
 };
 
+/** 원시값 필드 이름 묶음이 같고 값도 모두 같은 응답 객체(최신 것) */
+const findByShape = (segments: ReadonlyMap<RequestRecord, Segment>, value: object): Origin | null =>
+  matchesByShape(segments, value).reduce<Origin | null>(
+    (best, origin) => (!best || origin.record.id >= best.record.id ? origin : best),
+    null,
+  );
+
 /**
- * 우연히 같기 어려운 필드 값이 가장 많이 겹치는 응답 객체를 고른다.
+ * 우연히 같기 어려운 필드 값이 MIN_DERIVED_FIELDS 개 이상 겹치는 응답 객체들과 그 점수.
  * 흔한 값의 목록은 수만 개라 다 세면 느리다. 가장 드문 값 두 개를 가진 객체만 후보로 놓고 필드를 직접 비교한다.
  * shortcut: 드문 값 두 개가 모두 엉뚱한 객체와 겹치면 진짜 출처를 놓친다. 놓치는 사례가 나오면 후보 목록 수를 늘린다.
  */
-const findByFields = (segments: ReadonlyMap<RequestRecord, Segment>, value: object): Origin | null => {
+const scoredByFields = (segments: ReadonlyMap<RequestRecord, Segment>, value: object): Array<{ origin: Origin; score: number }> => {
   const fields = Object.entries(value).filter((entry): entry is [string, string | number] => isDistinctive(entry[1]));
-  if (fields.length < MIN_DERIVED_FIELDS) return null;
+  if (fields.length < MIN_DERIVED_FIELDS) return [];
   // 2개 이상 겹치는 객체는 대개 드문 값 두 개 중 하나를 가진다. 가장 짧은 목록 두 개에서만 후보를 뽑는다.
   const lists = fields
     .map(([k, v]) => lookup(segments, fieldKey(k, v)))
@@ -177,13 +184,28 @@ const findByFields = (segments: ReadonlyMap<RequestRecord, Segment>, value: obje
     .sort((a, b) => a.total - b.total)
     .slice(0, 2);
   const candidates = new Set(lists.flatMap(({ parts }) => parts.flat()));
-  let best: { origin: Origin | null; score: number } = { origin: null, score: 0 };
-  candidates.forEach(({ origin, node }) => {
-    const score = fields.filter(([k, v]) => node[k] === v).length;
-    const newer = !best.origin || origin.record.id >= best.origin.record.id;
-    if (score >= MIN_DERIVED_FIELDS && (score > best.score || (score === best.score && newer))) best = { origin, score };
-  });
-  return best.origin;
+  return Array.from(candidates, ({ origin, node }) => ({ origin, score: fields.filter(([k, v]) => node[k] === v).length })).filter(
+    ({ score }) => score >= MIN_DERIVED_FIELDS,
+  );
+};
+
+/** 그중 가장 많이 겹치는 것. 같은 점수면 최신 응답 */
+const findByFields = (segments: ReadonlyMap<RequestRecord, Segment>, value: object): Origin | null =>
+  scoredByFields(segments, value).reduce<{ origin: Origin | null; score: number }>(
+    (best, { origin, score }) =>
+      score > best.score || (score === best.score && (!best.origin || origin.record.id >= best.origin.record.id))
+        ? { origin, score }
+        : best,
+    { origin: null, score: 0 },
+  ).origin;
+
+/**
+ * 파생 기준(드문 값 2개 이상, 또는 원시값 필드 묶음과 값이 모두 같음)을 넘는 응답 객체 모두. 가장 잘 맞는 하나만 고르지 않는다.
+ * 쓰지 않는 응답 판정은 "이 요청의 객체가 하나라도 있는가"를 묻는다(다른 응답과 더 많이 겹쳐도 이 요청에서 왔을 수 있다).
+ */
+export const findDerivedOrigins = (value: object): Origin[] => {
+  const segments = getSegments();
+  return [...scoredByFields(segments, value).map(({ origin }) => origin), ...matchesByShape(segments, value)];
 };
 
 /** 파생 출처: 드문 값이 겹치는 객체, 없으면 원시값 필드 묶음과 값이 모두 같은 객체 */

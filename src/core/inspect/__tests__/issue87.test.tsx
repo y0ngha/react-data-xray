@@ -1,17 +1,22 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithActions } from '../../../testing/withActions.js';
 import { RequestsTab } from '../../../ui/panels/requests/RequestsTab.js';
 import { IGNORE_KEY } from '../../../shared/ignoredEndpoints.js';
 import { configure } from '../../config.js';
+import { nextCommitSeq } from '../../render/commitCauses.js';
 import { buildReport } from '../../report/buildReport.js';
 import { classifyRecords } from '../../requests/classify.js';
 import { getEndpointStats } from '../../requests/endpointStats.js';
 import { createRecord, finishRecord, getRecords, registerBody } from '../../requests/store.js';
 import type { RequestRecord } from '../../requests/types.js';
 import { flushQueue, isQueuePending } from '../../scheduler/idleQueue.js';
+import { getFiber } from '../../fiber/tree.js';
 import { findConsumers } from '../consumers.js';
+import { createFiberHolds } from '../holders.js';
 import { installUnusedCheck, UNUSED_SETTLE_MS } from '../unused.js';
 
 type Item = { id: number; title: string };
@@ -147,6 +152,91 @@ describe('쓰지 않는 응답 (#87)', () => {
     expect(record.unused).toBe(true);
   });
 
+  it('derived_any_origin: 가공한 객체가 다른 응답과 더 많이 겹쳐도, 이 요청의 응답과도 기준 이상 겹치면 쓰는 응답이다', () => {
+    const mine = received('/api/summary', { rows: [{ id: 501, title: 'Alpha' }] });
+    received('/api/detail-501', { row: { id: 501, title: 'Alpha', code: 'X-501' } });
+    render(<List items={[{ id: 501, title: 'Alpha', code: 'X-501' } as Item]} />);
+    settle();
+    expect(mine.unused).toBe(false);
+  });
+
+  it('other_requests_no_cap: 다른 요청의 응답 객체를 많이 들고 있어도 이 요청의 객체까지 찾는다', () => {
+    const others = Array.from({ length: 15 }, (_, i) => received(`/api/other-${i}`, { item: { id: 700 + i } }).body as { item: object });
+    const body = { item: { id: 900, title: 'mine' } };
+    const mine = received('/api/mine', body);
+    const Holder = ({ list }: { list: readonly object[] }) => <p>holder {list.length}</p>;
+    render(<Holder list={[...others.map((o) => o.item), body.item]} />);
+    settle();
+    expect(mine.unused).toBe(false);
+  });
+
+  it('batch: 함께 기다림이 끝난 응답 30건을 트리 한 번으로 함께 판정한다', () => {
+    const bodies = Array.from({ length: 30 }, (_, i) => ({ items: [{ id: 1000 + i, title: `item ${i}` }] }));
+    const records = bodies.map((body, i) => received(`/api/burst-${i}`, body));
+    render(<List items={bodies[7].items} />);
+    settle();
+    expect(records.map((r) => r.unused)).toEqual(records.map((_, i) => i !== 7));
+  });
+
+  it('no_known_root: 기억한 React 루트가 없으면 판정하지 않는다(문서 전체를 훑지 않는다)', () => {
+    const record = received('/api/no-root', { items: items() });
+    const { container } = render(<p>nothing</p>);
+    container.remove();
+    const scan = vi.spyOn(document, 'querySelectorAll');
+    settle();
+    expect(record.unused).toBeUndefined();
+    expect(scan).not.toHaveBeenCalledWith('*');
+    scan.mockRestore();
+  });
+
+  it('unstable_tree: 훑는 사이 매번 commit 이 끼면 unused 로 정하지 않고 판정을 포기한다', () => {
+    const record = received('/api/unstable', { items: items() });
+    const ticking = {
+      get seq() {
+        return nextCommitSeq();
+      },
+    };
+    const Ticker = ({ value }: { value: object }) => <p>tick {typeof value}</p>;
+    render(<Ticker value={ticking} />);
+    settle();
+    expect(record.unused).toBeUndefined();
+  });
+
+  it('stale_found: 훑는 사이 commit 으로 사라진 컴포넌트에서 찾았으면 쓰는 것으로 보지 않고 다시 훑어 판정한다', () => {
+    const body = { items: items() };
+    const record = received('/api/stale', body);
+    // 아무도 쓰지 않는 응답이 하나 더 있어야 List 를 찾은 뒤에도 Ticker 까지 훑는다
+    const other = received('/api/stale-other', { items: [{ id: 990, title: 'nobody' }] });
+    const control = { hide: (): void => {} };
+    let fired = false;
+    const trigger = {
+      get once() {
+        if (!fired) {
+          fired = true;
+          flushSync(control.hide); // 앞에서 찾은 List 를 지우는 commit
+        }
+        return 1;
+      },
+    };
+    const Ticker = ({ value }: { value: object }) => <p>tick {typeof value}</p>;
+    const Page = () => {
+      const [shown, setShown] = useState(true);
+      useEffect(() => {
+        control.hide = () => setShown(false);
+      });
+      return (
+        <div>
+          {shown && <List items={body.items} />}
+          <Ticker value={trigger} />
+        </div>
+      );
+    };
+    render(<Page />);
+    settle();
+    expect(fired).toBe(true);
+    expect([record.unused, other.unused]).toEqual([true, true]);
+  });
+
   it('report: endpoints[].unused 와 unusedExamples, summary 의 unused-response(medium) 로 싣는다', () => {
     received('/api/unused?x=1', { items: items() });
     const body = { items: [{ id: 201, title: 'kept' }] };
@@ -188,7 +278,7 @@ describe('쓰지 않는 응답 판정의 비용 (#87)', () => {
   const ROWS = 2000;
   const Cell = ({ value }: { value: { id: number; name: string; meta: { owner: string } } }) => <li>{value.name}</li>;
 
-  const renderRows = (): RequestRecord => {
+  const renderRows = (responses = 1): RequestRecord[] => {
     const rows = Array.from({ length: ROWS }, (_, i) => ({ id: 10_000 + i, name: `row ${i}`, meta: { owner: `owner ${i}` } }));
     render(
       <ul>
@@ -197,10 +287,14 @@ describe('쓰지 않는 응답 판정의 비용 (#87)', () => {
         ))}
       </ul>,
     );
-    const record = received('/api/never-rendered', { items: Array.from({ length: 500 }, (_, i) => ({ id: 90_000 + i, code: `c-${i}` })) });
+    const records = Array.from({ length: responses }, (__, n) =>
+      received(`/api/never-rendered-${n}`, {
+        items: Array.from({ length: 500 }, (_, i) => ({ id: 90_000 + n * 1000 + i, code: `c-${n}-${i}` })),
+      }),
+    );
     flushQueue(); // 출처 등록과 판정 예약
     vi.advanceTimersByTime(UNUSED_SETTLE_MS);
-    return record;
+    return records;
   };
 
   /** 배경 구동이 하듯 4ms 조각을 되풀이하며 조각마다 걸린 시간을 잰다. */
@@ -215,7 +309,7 @@ describe('쓰지 않는 응답 판정의 비용 (#87)', () => {
   };
 
   it('chunked: 큰 트리도 조각마다 큐 예산(4ms) + step 하나(1ms) 안에서 끊어 훑고, 끝까지 판정한다', () => {
-    const record = renderRows();
+    const [record] = renderRows();
     // 벽시계는 coverage·병렬 실행에서 몇 배씩 흔들려 예산을 지켰는지 가를 수 없다. 시계를 부를 때마다 조금씩 가는 가상 시계로
     // "시간을 보며 끊는가"만 본다. 한 번에 다 훑는 코드(시계를 보지 않음)는 조각 하나로 끝나 실패한다.
     let now = 0;
@@ -230,15 +324,34 @@ describe('쓰지 않는 응답 판정의 비용 (#87)', () => {
     }
   });
 
-  it('cost: 실제 시간을 재 남긴다(판정 하나의 유휴 시간과 조각 수)', () => {
-    const record = renderRows();
+  it('fiber_yields: 큰 목록을 든 fiber 하나도 객체 32개마다, 파생 후보마다 멈춰 한 조각을 넘지 않는다', () => {
+    const big = Array.from({ length: 100 }, (_, i) => Array.from({ length: 100 }, (__, j) => ({ id: i * 100 + j })));
+    const Big = ({ rows }: { rows: object[][] }) => <p>big {rows.length}</p>;
+    render(<Big rows={big} />);
+    const fiber = getFiber(screen.getByText('big 100'))!.return!;
+    const count = (work: Generator<void, unknown, void>): number => {
+      let yields = 0;
+      while (!work.next().done) yields++;
+      return yields;
+    };
+    // props → rows → 100 줄 → 줄마다 100 객체(깊이 3)
+    expect(count(createFiberHolds('exact')(fiber, new Set(['x'])))).toBeGreaterThanOrEqual(10_000 / 32);
+    expect(count(createFiberHolds('derived')(fiber, new Set(['x'])))).toBeGreaterThanOrEqual(30); // 값 하나에서 후보 30개
+  });
+
+  /** 조각을 돌려 비용을 남긴다. 모두 unused 로 정했고 여러 조각에 나눠 했으면 true */
+  const measure = (label: string, records: readonly RequestRecord[]): boolean => {
     const slices = runSlices();
     const sorted = [...slices].sort((a, b) => a - b);
     const total = slices.reduce((n, t) => n + t, 0);
     console.info(
-      `[#87] ${ROWS * 2}+ fibers: ${slices.length} slices, total ${total.toFixed(1)}ms, median ${sorted[Math.floor(sorted.length / 2)].toFixed(2)}ms, max ${sorted.at(-1)!.toFixed(2)}ms`,
+      `[#87] ${label}: ${slices.length} slices, total ${total.toFixed(1)}ms, median ${sorted[Math.floor(sorted.length / 2)].toFixed(2)}ms, max ${sorted.at(-1)!.toFixed(2)}ms`,
     );
-    expect(record.unused).toBe(true);
-    expect(slices.length).toBeGreaterThan(1);
-  });
+    return records.every((r) => r.unused) && slices.length > 1;
+  };
+
+  it('cost: 실제 시간을 재 남긴다(응답 1건)', () => expect(measure(`${ROWS * 2}+ fibers, 1 response`, renderRows())).toBe(true));
+
+  it('cost_burst: 함께 기다림이 끝난 응답 30건을 한 번에 판정하는 비용을 남긴다', () =>
+    expect(measure(`${ROWS * 2}+ fibers, 30 responses`, renderRows(30))).toBe(true));
 });
