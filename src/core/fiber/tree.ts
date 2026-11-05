@@ -46,8 +46,19 @@ export const getComponentName = (fiber: Pick<Fiber, 'type'>): string => {
 /** 파일 경로·모듈 주소를 src/... 부터로 줄인다(번들러가 붙인 쿼리는 뗀다). */
 const shortPath = (path: string): string => path.split('?')[0].replace(/^.*?\/(src|app|pages|components)\//, '$1/');
 
-// React·라이브러리 프레임(사전 번들, Turbopack 의 node_modules_… 청크 포함)과 React 19 가 스택 맨 위에 붙이는 표식 프레임
-const isLibraryOrMarkerFrame = (line: string): boolean => line.includes('react-stack-top-frame') || isLibraryFrame(line);
+// React 19 의 _debugStack 맨 위에 있는 React 런타임 프레임(jsx 를 부른 쪽이 아니다).
+// 경로로 모를 때(Turbopack 은 런타임을 next 청크에 넣는다)를 위해 함수 이름 jsxDEV·jsx·jsxs 로도 알아본다.
+// 서버 컴포넌트가 만든 element 는 RSC 클라이언트가 JSX 자리를 흉내 낸 fakeJSXCallSite 가 맨 위에 온다.
+const JSX_RUNTIME_CALL = /(?:^|[\s.])(?:jsx(?:DEV|s)?|fakeJSXCallSite)(?: \(|@)/;
+const RUNTIME_FRAME = new RegExp(
+  `react-stack-top-frame|jsx-dev-runtime|jsx-runtime|react_jsx|\\/react\\/|\\/react-dom\\/|${JSX_RUNTIME_CALL.source}`,
+);
+
+// React·라이브러리 프레임(사전 번들, Turbopack 의 node_modules_… 청크 포함)과 React 19 가 스택 맨 위에 붙이는 표식 프레임.
+// Turbopack 은 런타임을 해시만 있는 청크(_0w60gtwn3b3v_._.js)에도 넣으므로 런타임 프레임도 함께 건너뛴다(#116).
+// 경로 패턴(/react/ 등)은 앱 폴더 이름과 겹칠 수 있어 함수 이름만 본다.
+const isLibraryOrMarkerFrame = (line: string): boolean =>
+  line.includes('react-stack-top-frame') || JSX_RUNTIME_CALL.test(line) || isLibraryFrame(line);
 // V8 "at fn (url:1:2)"·"at url:1:2", Firefox·Safari "fn@url:1:2" 의 주소와 줄
 const FRAME_LOCATION = /(?:\(|@|at )((?:[a-z]+:\/\/)?[^\s()@]+):(\d+):\d+\)?$/;
 
@@ -74,12 +85,6 @@ export const jsxLocationOf = (fiber: Fiber): string | undefined => {
   const frame = jsxFrameOf(fiber);
   return frame && locationOfFrame(frame);
 };
-
-// React 19 의 _debugStack 맨 위에 있는 React 런타임 프레임(jsx 를 부른 쪽이 아니다).
-// 경로로 모를 때(Turbopack 은 런타임을 next 청크에 넣는다)를 위해 함수 이름 jsxDEV·jsx·jsxs 로도 알아본다.
-// 서버 컴포넌트가 만든 element 는 RSC 클라이언트가 JSX 자리를 흉내 낸 fakeJSXCallSite 가 맨 위에 온다.
-const RUNTIME_FRAME =
-  /react-stack-top-frame|jsx-dev-runtime|jsx-runtime|react_jsx|\/react\/|\/react-dom\/|(?:^|[\s.])(?:jsx(?:DEV|s)?|fakeJSXCallSite)(?: \(|@)/;
 
 // Turbopack dev 청크: 경로의 / 를 _ 로 바꾸고 해시를 붙인 이름(node_modules_%40scope_pkg_build_<hash>._.js)
 const TURBOPACK_CHUNK = /\/_next\/static\/chunks\/[^/]*node_modules_([^/?:]+)_[^_/?:]+\._\.js/;

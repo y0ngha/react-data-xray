@@ -175,6 +175,23 @@ describe('React 19 의 JSX 위치(_debugStack)', () => {
     expect(jsxLocationOf(fiber)).toBe(`${TURBOPACK}/src_07-h1l2e_fir4._.js:8446`);
   });
 
+  it('JSX 런타임이 해시만 있는 청크에 들어가도 함수 이름(jsxDEV)으로 건너뛴다 (#116)', () => {
+    const fiber = fiberWithStack([
+      `at exports.jsxDEV (${TURBOPACK}/_0w60gtwn3b3v_._.js:233:33)`,
+      `at SymbolPageClient (${TURBOPACK}/src_15a7htwpb9fxi._.js:8446:242)`,
+    ]);
+    expect(jsxLocationOf(fiber)).toBe(`${TURBOPACK}/src_15a7htwpb9fxi._.js:8446`);
+    expect(libraryPackageOf(fiber)).toBeUndefined();
+  });
+
+  it('앱 폴더 이름이 react 여도 그 프레임을 JSX 위치로 고른다', () => {
+    const fiber = fiberWithStack([
+      'at exports.jsxDEV (http://l/node_modules/.vite/deps/react_jsx-dev-runtime.js:1:1)',
+      'at Card (http://l/src/react/Card.tsx:4:2)',
+    ]);
+    expect(jsxLocationOf(fiber)).toBe('src/react/Card.tsx:4');
+  });
+
   it('Turbopack 청크의 앱 컴포넌트는 라이브러리가 아니고, 라이브러리 청크에서는 패키지 이름을 읽는다 (#116)', () => {
     const app = fiberWithStack([
       `at exports.jsxDEV (${TURBOPACK}/node_modules_next_0xwmtz0bm-kxf._.js:1508:33)`,
