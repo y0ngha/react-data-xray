@@ -12,6 +12,7 @@ import { enqueue } from '../scheduler/idleQueue.js';
 import { listenToCommits } from './devtoolsHook.js';
 import { getMountStats, recordMounts, remountAt, resetMounts, type MountRef } from './mounts.js';
 import { drain, groupRendersSteps, type RenderGroup } from './groups.js';
+import { countEndpointRendersSteps, type EndpointRenders, type EndpointRendersOptions } from './endpointRenders.js';
 import { causeOf } from './networkCause.js';
 import { reasonOf } from './renderReason.js';
 import { nextCommitSeq, noteCommitCause, resetCommitCauses } from './commitCauses.js';
@@ -464,3 +465,23 @@ export const getRenderGroups = (
   sinceMs = WINDOW_MS,
   keep: (entry: RenderEntry) => boolean = () => true,
 ): RenderGroupsResult => drain(renderGroupsSteps(now, sinceMs, keep));
+
+/**
+ * 엔드포인트별로, 그 응답이 일으킨 렌더 수·시간(직접 + 부모를 따라)과 그중 같은 응답으로 일어난 것(#84).
+ * 구간은 렌더 탭·보고서와 같다(windowMs). keep 으로 분석 대상 안의 컴포넌트만 셀 수 있다.
+ */
+export function* endpointRendersSteps(
+  now = Date.now(),
+  windowMs = WINDOW_MS,
+  options: Omit<EndpointRendersOptions, 'maxInstances'> = {},
+): Generator<void, Map<string, EndpointRenders>> {
+  // 렌더 그룹(renderGroupsSteps)과 같은 인스턴스 상한을 써서 렌더 탭·보고서의 합과 맞춘다.
+  return yield* countEndpointRendersSteps(Array.from(active), now - windowMs, { ...options, maxInstances: MAX_GROUPED_INSTANCES });
+}
+
+/** 한 번에 끝까지 돈다(보고서). 주기 화면은 endpointRendersSteps 를 큐에서 돌린다. */
+export const getEndpointRenders = (
+  now = Date.now(),
+  windowMs = WINDOW_MS,
+  options: Omit<EndpointRendersOptions, 'maxInstances'> = {},
+): Map<string, EndpointRenders> => drain(endpointRendersSteps(now, windowMs, options));

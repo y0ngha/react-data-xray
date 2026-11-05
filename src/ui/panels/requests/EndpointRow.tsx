@@ -1,6 +1,8 @@
 import { Fragment } from 'react';
 
-import { isWastefulStat, type EndpointStat } from '../../../core/requests/endpointStats.js';
+import type { EndpointRenders, RenderCost } from '../../../core/render/endpointRenders.js';
+import { isWastefulStat, type EndpointStat, type NPlusOneSender } from '../../../core/requests/endpointStats.js';
+import { nPlusOneHint } from '../../../core/requests/nPlusOne.js';
 import { useReveal } from '../../hooks/useReveal.js';
 import type { IgnoreSource } from '../../../shared/ignoredEndpoints.js';
 import type { FocusRequest } from '../../viewState.js';
@@ -11,6 +13,8 @@ import { color, plainButtonStyle, rowStyle } from '../../theme.js';
 
 interface EndpointRowProps {
   stat: EndpointStat;
+  /** 이 엔드포인트의 응답이 일으킨 렌더(렌더 탭과 같은 구간). 이어진 렌더가 없으면 없다 */
+  renders?: EndpointRenders;
   /** 무시한 곳. code(configure 의 ignore)는 패널에서 풀 수 없다. 무시하지 않으면 없다 */
   ignored: IgnoreSource | undefined;
   /** 주면 이 경로에서 보낸 건수만 보인다 */
@@ -38,8 +42,33 @@ interface Segment {
   bold?: boolean;
 }
 
+const costText = (c: RenderCost): string => `${c.count}${c.ms !== undefined ? ` · ${c.ms}ms` : ''}`;
+
+// ms 는 dev 빌드의 selfBaseDuration 합이라 절대 시간보다 엔드포인트끼리·고치기 전후로 견준다.
+const DEV_MS = 'ms is self render time in a dev build (selfBaseDuration): compare, do not read as production time';
+
+/** 응답이 일으킨 렌더와 그중 같은 응답으로 일어난 것(#84) */
+const renderSegments = (r: EndpointRenders | undefined): Array<Segment | null> =>
+  r
+    ? [
+        {
+          text: `renders ${costText(r)}`,
+          title: `Renders caused by responses from this endpoint: ${r.count - r.viaParent.count} direct, ${r.viaParent.count} following a parent. ${DEV_MS}`,
+        },
+        r.fromSameResponse.count > 0
+          ? {
+              text: `same-resp renders ${costText(r.fromSameResponse)}`,
+              title: `Renders caused by a response identical to the previous one; they go away with the refetch. ${DEV_MS}`,
+              color: color.warn,
+            }
+          : null,
+      ]
+    : [];
+
+const senderLabel = (sender: NPlusOneSender): string => (sender.component ? `<${sender.component}>` : 'same caller');
+
 /** 요약 줄의 조각들. 없는 지표는 뺀다. */
-const segments = (stat: EndpointStat): Segment[] => {
+const segments = (stat: EndpointStat, ignored: boolean, renders: EndpointRenders | undefined): Segment[] => {
   const all: Array<Segment | null> = [
     { text: `×${stat.count}` },
     { text: `avg ${stat.avgMs}ms` },
@@ -53,13 +82,20 @@ const segments = (stat: EndpointStat): Segment[] => {
       : null,
     stat.review > 0 ? { text: `review: ${stat.review}`, color: color.review } : null,
     stat.unused ? { text: `unused: ${stat.unused}`, color: color.review, title: UNUSED_TITLE } : null,
+    // 무시한 엔드포인트는 보고서처럼 N+1 로 보이지 않는다
+    ...(ignored ? [] : (stat.nPlusOne ?? [])).map((sender) => ({
+      text: `N+1: ${senderLabel(sender)}×${sender.count}`,
+      title: sender.location ? `${nPlusOneHint()}\n${sender.location}` : nPlusOneHint(),
+      color: color.review,
+    })),
     stat.explained > 0 ? { text: `expected: ${stat.explained}` } : null,
+    ...renderSegments(renders),
   ];
   return all.filter((seg): seg is Segment => seg !== null);
 };
 
 /** 엔드포인트 한 줄: 호출 수와 낭비 지표. 이름을 누르면 그 엔드포인트의 요청 목록으로 간다. */
-export const EndpointRow = ({ stat, ignored, route, focus, onSelect, onToggleIgnore }: EndpointRowProps) => {
+export const EndpointRow = ({ stat, renders, ignored, route, focus, onSelect, onToggleIgnore }: EndpointRowProps) => {
   const row = useReveal(focus);
   return (
     <div ref={row} tabIndex={-1} style={rowStyle}>
@@ -89,7 +125,7 @@ export const EndpointRow = ({ stat, ignored, route, focus, onSelect, onToggleIgn
       </div>
       <Muted>
         {/* 조각 사이의 공백은 nowrap 밖에 두어 조각 사이에서만 줄이 바뀐다 */}
-        {segments(stat).map((seg, i) => (
+        {segments(stat, !!ignored, renders).map((seg, i) => (
           <Fragment key={seg.text}>
             {i > 0 && ' · '}
             <span title={seg.title} style={{ whiteSpace: 'nowrap', color: seg.color, fontWeight: seg.bold ? 600 : undefined }}>

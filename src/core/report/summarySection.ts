@@ -1,3 +1,4 @@
+import { N_PLUS_ONE_FIX } from '../requests/nPlusOne.js';
 import { countProblems, type RenderStorm } from '../problems.js';
 import type { CacheFindingKind } from '../reactQuery/cacheAudit.js';
 import { WINDOW_MS } from '../render/summary.js';
@@ -12,6 +13,7 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 export type FindingKind =
   | 'duplicate'
   | 'same-response'
+  | 'n-plus-one'
   | 'unused-response'
   | 'react-query'
   | 'render-storm'
@@ -31,8 +33,11 @@ export interface TopFinding {
   target: { endpoint?: string; component?: string; library?: string; queryKeys?: string[]; location?: string };
   /** 판단 근거 수치 */
   evidence: Record<string, number>;
-  /** 고치면 줄어들 것으로 보는 양. ms 는 dev 빌드에서 잰 값이다 */
-  savings?: { requests?: number; renders?: number; ms?: number };
+  /**
+   * 고치면 줄어들 것으로 보는 양. 요청 finding 의 ms 는 요청 시간, renders·renderMs 는 그 엔드포인트의 같은 응답이 일으킨 렌더다
+   * (requests.endpoints[].renders.fromSameResponse). 렌더 finding 의 ms 와 renderMs 는 dev 빌드에서 잰 값이다
+   */
+  savings?: { requests?: number; renders?: number; ms?: number; renderMs?: number };
   fix?: string;
   /** 상세 항목의 경로(예: requests.endpoints[0]). 보고서 범위 밖이라 상세 행이 없으면 두지 않는다 */
   detail?: string;
@@ -53,6 +58,7 @@ export interface ReportSummary {
 const KIND_ORDER: Record<FindingKind, number> = {
   duplicate: 0,
   'same-response': 0,
+  'n-plus-one': 0,
   'unused-response': 0,
   'react-query': 1,
   'render-storm': 2,
@@ -82,6 +88,9 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
     const caller = wastefulCaller(e);
     const component = caller?.component ?? caller?.observer;
     const ms = Math.round(wasted * e.avgMs);
+    // 같은 응답 재요청을 없애면 그 응답이 일으킨 렌더(부모를 따라 렌더된 자손까지)도 사라진다(#84).
+    const same = e.renders?.fromSameResponse;
+    const renders = same && same.count > 0 ? same : undefined;
     return [
       {
         kind: e.duplicates >= e.sameResponses ? 'duplicate' : 'same-response',
@@ -92,14 +101,31 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
           duplicates: e.duplicates,
           sameResponses: e.sameResponses,
           ...(e.failedDuplicates > 0 && { failedDuplicates: e.failedDuplicates }),
+          ...(renders && { sameResponseRenders: renders.count }),
         },
-        savings: { requests: wasted, ms },
+        savings: {
+          requests: wasted,
+          ms,
+          ...(renders && { renders: renders.count, ...(renders.ms !== undefined && { renderMs: renders.ms }) }),
+        },
         detail: `requests.endpoints[${i}]`,
         rank: [wasted, ms, e.count],
       },
     ];
   });
 
+/** 항목마다 보낸 요청(N+1). 의도된 경우(가상화 목록)도 있어 배지는 세지 않는다(medium). 한 번에 받으면 나머지 요청이 준다 */
+const nPlusOneFindings = (entries: RequestSection['nPlusOne']): Ranked[] =>
+  entries.map((n, i) => ({
+    kind: 'n-plus-one',
+    severity: 'medium',
+    target: { endpoint: n.endpoint, ...(n.component && { component: n.component }), ...(n.location && { location: n.location }) },
+    evidence: { count: n.count, windowMs: n.windowMs },
+    savings: { requests: n.count - 1 },
+    fix: N_PLUS_ONE_FIX,
+    detail: `requests.nPlusOne[${i}]`,
+    rank: [n.count - 1, 0, n.count],
+  }));
 /**
  * 응답을 쓰는 컴포넌트를 못 찾은 엔드포인트(무시한 것은 뺀다). 배지는 세지 않는다(medium): effect·핸들러에서만 쓰거나 가공한 데이터도 이렇게 보인다.
  * 보낸 위치는 가장 많이 보낸 caller 다(쓰지 않는 요청만 따로 세지 않는다).
@@ -287,6 +313,7 @@ export const buildSummary = (
   const problems = countProblems(requests.endpoints, storms);
   const all = [
     ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
+    ...nPlusOneFindings(requests.nPlusOne),
     ...unusedFindings(requests.endpoints),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),

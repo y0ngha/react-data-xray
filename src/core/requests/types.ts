@@ -62,6 +62,11 @@ export interface RequestRecord {
   sameResponseAs?: number;
   /** 새로고침 전 페이지에서 기록해 되살린 요청. 응답 객체(body)는 없고 원문만 있다. */
   restored?: boolean;
+  /**
+   * 목록의 항목마다 보낸 요청(N+1)으로 짚은 요청. 1초 안에 같은 엔드포인트(ID 를 묶은 경로)로 같은 보낸 곳에서 서로 다른 ID 5건 이상이 나갔다.
+   * 보낸 곳은 컴포넌트(component), 모르면 호출 위치(stack 앞쪽 3줄)다. 유휴 큐가 정한다(nPlusOne.ts).
+   */
+  nPlusOne?: { component?: string; location?: string };
   /** 같은 탭에서 몇 번째로 연 페이지의 요청인지. 주기 판정은 같은 페이지 안에서만 한다(새로고침 사이 간격은 주기가 아니다). */
   load?: number;
 }

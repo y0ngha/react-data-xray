@@ -1,8 +1,11 @@
 import { UNUSED_SETTLE_MS } from '../inspect/unused.js';
+import type { EndpointRenders } from '../render/endpointRenders.js';
 import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
-import { endpointOf } from '../requests/requestKey.js';
+import { callerOf } from '../requests/callerFrames.js';
+import { nPlusOneRuns, type NPlusOneRun } from '../requests/nPlusOne.js';
+import { endpointOf, pathOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
@@ -46,6 +49,12 @@ export interface RequestSection {
     /** 같은 응답 재조회의 React Query 원인별 수(staleTime 경과·staleTime 0·무효화 후). 알 수 있는 것만 있다 */
     refetchReasons?: Partial<Record<RefetchReason, number>>;
     review: number;
+    /**
+     * 이 엔드포인트의 응답이 렌더 구간(renders.windowSeconds) 안에 일으킨 렌더 수·자기 렌더 시간 합(ms, dev 빌드의 selfBaseDuration).
+     * 직접 렌더와 부모를 따라 렌더된 자손을 모두 세고, viaParent 는 그중 부모를 따라 렌더된 것, fromSameResponse 는 직전과 똑같은 응답으로 일어난 것이다.
+     * 원인으로 이어진 렌더가 없으면 없다. ms 는 시간 기록이 없으면 없다
+     */
+    renders?: EndpointRenders;
     /** 요청을 보낸 앱 코드 위치(호출 스택 앞쪽 3줄)와 그 위치에서 보낸 수. route·component 는 알 때만 있다 */
     callers: Caller[];
     /** 중복 요청이 다시 나간 이유별 수(의존성 변경·재마운트·StrictMode). 알 수 있는 것만 있다 */
@@ -57,6 +66,22 @@ export interface RequestSection {
     /** 그 요청의 URL 예(쿼리 포함) */
     unusedExamples?: string[];
   }>;
+  /** 목록의 항목마다 보낸 요청(N+1) 묶음. 요청이 많은 순. 무시한 엔드포인트는 뺀다 */
+  nPlusOne: NPlusOneEntry[];
+}
+
+export interface NPlusOneEntry {
+  endpoint: string;
+  /** 보낸 컴포넌트. 모르면 없고, 그때 묶은 기준은 location 이다 */
+  component?: string;
+  /** 보낸 코드 위치(첫 요청의 호출 스택 앞쪽 3줄, 소스맵으로 바꾼 것) */
+  location?: string;
+  /** 서로 다른 ID(경로) 수 */
+  count: number;
+  /** 첫 요청부터 마지막 요청까지의 시작 시각 간격(ms) */
+  windowMs: number;
+  /** 요청 URL 예(쿼리 포함) */
+  examples: string[];
 }
 
 /** 순서는 buildReport 가 다른 섹션 줄과 맞춘다. */
@@ -72,21 +97,6 @@ export const REQUEST_HOW_TO_READ = {
   dropped:
     'When requests.dropped is greater than 0, the record limit (200) was exceeded and older requests were dropped. Split the scenario into shorter segments and measure again.',
 };
-
-// 첫 줄은 대개 앱의 공통 fetch 함수라 그것만으로는 어디서 보냈는지 모른다. 바깥으로 몇 줄 더 본다.
-const CALLER_FRAMES = 3;
-
-/** 호출 스택의 앞쪽 몇 줄(rdx 프레임은 기록할 때 이미 뺐다) */
-const callerOf = (stack: string | undefined): string | undefined =>
-  stack
-    ?.split('\n')
-    .map((line) => line.trim())
-    // V8: "at fn (url:1:2)", Firefox·Safari: "fn@url:1:2"
-    .filter((line) => line.startsWith('at ') || /@.+:\d+:\d+$/.test(line))
-    .slice(0, CALLER_FRAMES)
-    // dev 서버가 파일을 고칠 때마다 붙이는 ?t=·?v= 를 뗀다. 그래야 같은 호출 위치가 고칠 때마다 갈라지지 않는다.
-    .map((line) => line.replace(/\?[^\s:)]*(?=:\d+:\d+)/g, ''))
-    .join(' <- ') || undefined;
 
 /**
  * 같은 호출 위치(frame)에서 보낸 것끼리 센다. route·component·queryKey 로 더 쪼개면 상위 3 자르기가 순위를 왜곡하므로 첫 기록의 것을 붙인다.
@@ -153,6 +163,20 @@ const unusedOf = (own: readonly RequestRecord[]): { unused?: number; unusedExamp
     : {};
 };
 
+const nPlusOneEntryOf = (run: NPlusOneRun): NPlusOneEntry => {
+  const first = run.records[0];
+  const location = callerOf(first.sourceStack ?? first.stack);
+  return {
+    endpoint: run.endpoint,
+    ...(run.component && { component: run.component }),
+    ...(location && { location }),
+    count: run.distinct,
+    windowMs: (run.records.at(-1)?.startedAt ?? first.startedAt) - first.startedAt,
+    // 같은 ID 의 다른 쿼리는 예로 겹쳐 싣지 않는다
+    examples: [...new Map(run.records.map((r) => [pathOf(r.url), r.url])).values()].slice(0, MAX_EXAMPLES).map(redactUrl),
+  };
+};
+
 /**
  * queryOf 는 요청의 React Query 문맥을 찾는 함수다. 기본은 fiber 트리를 걸어 찾는다(사용자가 요청한 보고서).
  * 5초 주기 업로드처럼 앱 경로 가까이서 돌 때는 knownQueryContextOf 를 넘겨 이미 찾아 둔 것만 쓴다.
@@ -162,6 +186,8 @@ export const buildRequestSection = (
   classes: ReadonlyMap<number, RequestClass>,
   ignored: IgnoreMatcher | ReadonlySet<string>,
   queryOf: (record: RequestRecord) => QueryContext | undefined = queryContextOf,
+  /** 엔드포인트별 렌더 비용(render/monitor 의 getEndpointRenders). 렌더 감시가 꺼져 있었으면 비어 있다 */
+  renders: ReadonlyMap<string, EndpointRenders> = new Map(),
 ): RequestSection => {
   const byEndpoint = groupBy(records, endpointOf);
   const matcher = toIgnoreMatcher(ignored);
@@ -182,6 +208,7 @@ export const buildRequestSection = (
           failedDuplicates: s.failedDuplicates ?? 0,
           refetchReasons: refetchReasonsOf(own, classes),
           review: s.review,
+          renders: renders.get(s.endpoint),
           callers: callersOf(own, queryOf, (r) => isWaste(classes.get(r.id))),
           repeatCauses: repeatCausesOf(own),
           wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
@@ -192,6 +219,9 @@ export const buildRequestSection = (
         unusedOf(own),
       );
     }),
+    nPlusOne: nPlusOneRuns(records)
+      .filter((run) => !matcher.sourceOf(run.endpoint))
+      .map(nPlusOneEntryOf),
   };
 };
 
@@ -203,6 +233,8 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   "callers.waste is how many of that caller's requests were counted as waste (duplicates or sameResponses); absent when none. summary points at the listed caller with the most waste.",
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
+  'requests.nPlusOne lists requests sent once per list item (N+1): config.nPlusOne.count (default 5)+ requests for different IDs to the same endpoint (an :id path segment) from the same component (or, when the component is unknown, the same caller location) within config.nPlusOne.windowMs (default 1000). count is the number of different IDs (paths), windowMs the time from the first to the last request, examples a few URLs (one per ID). Ignored endpoints are left out. Repeats of the same ID are duplicates and are not included. It is review (may be intended, e.g. a virtualized list), not waste: fetch them in one request from the list (batch endpoint, include/expand) or fetch once in the parent.',
   `unused is how many of the endpoint's responses no component was found holding ${UNUSED_SETTLE_MS / 1000}s after they arrived (neither the same object nor a derived copy with matching field values; earlier responses of the same request count as held), with unusedExamples as their URLs. Only successful, non-empty JSON responses of non-mutating requests (not POST, PUT, PATCH, DELETE) on endpoints that are not ignored are judged, once each. It needs review rather than being waste: data used only inside effects or event handlers, or transformed into new objects, also looks unused — confirm in code that nothing reads it before removing or deferring the request. summary lists such endpoints as kind unused-response with severity medium. Absent when none.`,
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
+  'requests.endpoints[].renders is what responses from this endpoint caused on screen during renders.windowSeconds: count renders and ms self render time, including both components that received the response (direct, or own state changed right after it arrived) and descendants that rendered along with them; viaParent is the portion that rendered only because an ancestor did (fix that ancestor, or memoize the children). fromSameResponse is the portion caused by a response identical to the previous one — pure waste that disappears when the refetch is removed or setState is skipped for an unchanged response; summary.topFindings[].savings.renders and renderMs for that endpoint come from it. ms is a selfBaseDuration sum from a dev build: compare it across endpoints or before vs. after a fix rather than reading it as production time; each ms is absent when none of the renders in that part had timing. Renders are counted over the same instances as renders.components (when renders.truncated is true, the dropped instances are not counted either) and only for requests still in the record (see requests.dropped). Absent when no render was linked to the endpoint.',
 ];
