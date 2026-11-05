@@ -45,6 +45,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
    Then `requests.waterfalls`: serial request chains (a response mounted the component that sent the next request), largest `latencyMs` first.
 3. `reactQuery.findings`: follow each item's `fix`.
 4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
+5. `layoutShifts` (Chrome/Edge only; absent in Safari and Firefox): largest shift first. `cause.component` is usually where to reserve the space; `cause.endpoint` is the response whose arrival moved the screen.
 
 ## 4. Confirm the root cause (required before fixing)
 
@@ -68,6 +69,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 | Context change | Split frequently-changing and stable values into separate contexts; `useMemo` for Provider value |
 | Request waterfall (`requests.waterfalls`: a response mounts the component that sends the next request) | Open the later request's `location` and check whether it uses the earlier response. If it does not, start it in parallel (lift it next to the first request) or prefetch it. If it does, join the data on the server (one endpoint) or move both requests into a route loader. rdx does not check the data dependency — confirm it in code |
 | React Query key problem | Follow `reactQuery.findings[].fix` |
+| Layout shift after a response (`layoutShifts[].cause`) | Reserve the space before the data arrives: make the loading skeleton the final size, set `min-height` on the container, and give images `width`/`height` (or `aspect-ratio`). Re-measure that the shift score drops |
 | Unused response (`requests.endpoints[].unused`, summary kind `unused-response`) | Confirm in code that nothing reads the data — not in effects, event handlers, refs, or transformed copies. If truly unused, remove the request or fetch it only when needed (`enabled` condition, on interaction). Otherwise leave it: this flag is a review hint, not proof of waste |
 
 ## 6. Constraints
@@ -79,7 +81,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 ## 7. Re-measure and report
 
 1. Run the same scenario again following the same steps as section 2, then save with `snapshot('after-<scenario>')` (or `npx react-data-xray snapshot after-<scenario>`).
-2. Compare before and after: `npx react-data-xray compare before-<scenario> after-<scenario>` (reads the two files, so it works across tabs and reloads; `window.__RDX__.compare` only sees snapshots saved in that tab). Look at `count` · `duplicates` · `sameResponses` per endpoint, `renders` · `avoidable` per component, and `warnings`.
+2. Compare before and after: `npx react-data-xray compare before-<scenario> after-<scenario>` (reads the two files, so it works across tabs and reloads; `window.__RDX__.compare` only sees snapshots saved in that tab). Look at `count` · `duplicates` · `sameResponses` per endpoint, `renders` · `avoidable` per component, `layoutShifts[].value` per component (compare does not diff it — read both reports), and `warnings`.
 3. If a metric did not improve, revert that change.
 4. Report to the user in a table: what was fixed and why (code location), before/after numbers, and anything that could not be confirmed.
 

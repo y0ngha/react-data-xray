@@ -108,7 +108,7 @@ describe('requests.bursts (#74)', () => {
     const matcher = ignoreMatcher(panelIgnore);
     const classes = classifyRecords(records, matcher);
     expect(analyzeBursts(records, (r) => classes.get(r.id) ?? 'ok', matcher)).toEqual([]);
-    expect(layoutTimeline(records, [], at + 1000, 1000, (r) => classes.get(r.id) ?? 'ok', records, matcher).bursts).toEqual([]);
+    expect(layoutTimeline(records, [], at + 1000, 1000, (r) => classes.get(r.id) ?? 'ok', records, [], matcher).bursts).toEqual([]);
   });
 
   it('상한(20)을 넘는 구간은 싣지 않고 수만 남긴다', () => {

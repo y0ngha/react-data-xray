@@ -1,6 +1,7 @@
 import { analyzeBursts, burstWindowMs } from '../../../core/requests/bursts.js';
 import type { RequestClass } from '../../../core/requests/classify.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
+import type { LayoutShift } from '../../../core/render/layoutShifts.js';
 import type { Commit } from '../../../core/render/types.js';
 import type { IgnoreMatcher } from '../../../shared/ignoredEndpoints.js';
 
@@ -12,6 +13,9 @@ const COMMIT_H = 40;
 const AXIS_H = 20;
 const MIN_BAR_W = 3;
 const TICK_SECONDS = [0, 5, 10, 15, 20];
+// 이 점수면 이동 표시가 렌더 영역 높이를 다 채운다(web-vitals 가 CLS 를 "나쁨"으로 보는 값).
+const FULL_SHIFT = 0.25;
+const MIN_SHIFT_H = 4;
 
 export interface BarLayout {
   record: RequestRecord;
@@ -37,6 +41,13 @@ interface CommitLayout {
   count: number;
 }
 
+interface ShiftLayout {
+  key: number;
+  x: number;
+  height: number;
+  shift: LayoutShift;
+}
+
 /** 워터폴 화살표: 앞 요청 막대의 끝(응답)에서, 그 응답이 마운트한 컴포넌트가 보낸 요청 막대의 시작으로 */
 export interface LinkLayout {
   key: number;
@@ -60,6 +71,8 @@ export interface TimelineLayout {
   links: LinkLayout[];
   bursts: BurstLayout[];
   commits: CommitLayout[];
+  /** 레이아웃 이동. 렌더 영역 위에서 아래로 점수만큼 내려 그린다 */
+  shifts: ShiftLayout[];
   ticks: Array<{ seconds: number; x: number }>;
 }
 
@@ -120,7 +133,7 @@ const visibleBursts = (
 };
 
 /**
- * 최근 20초의 요청 막대, 워터폴 화살표, 요청 몰림 구간, 렌더 commit 눈금을 화면 좌표로 계산한다.
+ * 최근 20초의 요청 막대, 워터폴 화살표, 요청 몰림 구간, 렌더 commit 눈금, 레이아웃 이동을 화면 좌표로 계산한다.
  * records 는 그릴 요청(대상으로 좁혔으면 그 안), all 은 몰림 판정에 쓸 전체 기록, ignored 는 몰림에서 뺄 무시 판정이다.
  */
 export const layoutTimeline = (
@@ -130,6 +143,7 @@ export const layoutTimeline = (
   width: number,
   classOf: (r: RequestRecord) => RequestClass,
   all: readonly RequestRecord[] = records,
+  shifts: readonly LayoutShift[] = [],
   ignored?: IgnoreMatcher,
 ): TimelineLayout => {
   const from = now - TIMELINE_MS;
@@ -167,6 +181,14 @@ export const layoutTimeline = (
       time: c.time,
       count: c.count,
     })),
+    shifts: shifts
+      .filter((s) => s.time >= from)
+      .map((shift) => ({
+        key: shift.id,
+        x: x(shift.time),
+        height: Math.max(MIN_SHIFT_H, Math.min(1, shift.value / FULL_SHIFT) * COMMIT_H),
+        shift,
+      })),
     ticks: TICK_SECONDS.map((seconds) => ({ seconds, x: Math.min(width - 24, x(now - seconds * 1000)) })),
   };
 };
