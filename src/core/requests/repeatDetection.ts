@@ -1,8 +1,8 @@
+import { config } from '../config.js';
 import { requestKeyOf } from './requestKey.js';
 import { sameDigest, type ResponseDigest } from './responseHash.js';
 import type { RequestRecord } from './types.js';
 
-const DUPLICATE_WINDOW_MS = 2000;
 // 요청 기록(200건)과 달리 요청 키마다 하나씩 남으므로, 매번 URL 이 다른 앱(?_t=시각, 검색 자동완성)에서 끝없이 커지지 않게 한다.
 const MAX_KEYS = 500;
 
@@ -33,13 +33,13 @@ export const sameResponseMemory = (): { keys: number; retainedChars: number } =>
   retainedChars: [...lastResponseByRequest.values()].reduce((n, entry) => n + charsIn(entry), 0),
 });
 
-/** 2초 안에 같은 요청이 다시 나갔으면 앞선 요청(id 와 그 요청을 만들 때의 commit 순번). payload 를 모르면 판정하지 않는다. */
+/** 중복 창(기본 2초, configure 의 dedupeWindowMs) 안에 같은 요청이 다시 나갔으면 앞선 요청(id 와 그 요청을 만들 때의 commit 순번). payload 를 모르면 판정하지 않는다. */
 export const detectDuplicate = (record: RequestRecord): { id: number; commitSeq?: number } | undefined => {
   if (record.bodyUnreadable) return undefined;
   const key = requestKeyOf(record);
   const last = lastStartByRequest.get(key);
   remember(lastStartByRequest, key, { id: record.id, startedAt: record.startedAt, commitSeq: record.commitSeq });
-  return last && record.startedAt - last.startedAt <= DUPLICATE_WINDOW_MS ? { id: last.id, commitSeq: last.commitSeq } : undefined;
+  return last && record.startedAt - last.startedAt <= config().dedupeWindowMs ? { id: last.id, commitSeq: last.commitSeq } : undefined;
 };
 
 /** 같은 요청의 직전 응답과 본문(길이·해시)이 똑같으면 직전 요청의 id */
