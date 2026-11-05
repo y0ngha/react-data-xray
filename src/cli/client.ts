@@ -111,9 +111,18 @@ const NO_TAB_HINT =
 
 const TOKEN_HINT = `The dev server rejected the token in ${SERVER_FILE}. Run this in the app folder (or pass --dir to the plugin's report folder), and make sure --url points to this app's dev server.`;
 
+/**
+ * 주소의 경로 밑에 명령 경로를 붙인다. `new URL('/__rdx/command', base)` 는 base 의 경로를 버리므로, Next.js basePath 처럼
+ * `--url http://localhost:3000/docs` 로 준 경로가 빠진다. dev 서버가 적어 둔 주소는 경로가 없어 그대로다.
+ */
+export const commandUrl = (base: string, path: string): URL => {
+  const url = new URL(base);
+  return new URL(`${url.pathname.replace(/\/+$/, '')}${path}`, url.origin);
+};
+
 const send = async (server: Server, path: string, init: RequestInit = {}) => {
   const headers = { ...(init.headers as Record<string, string>), ...(server.token && { [TOKEN_HEADER]: server.token }) };
-  return fetch(new URL(path, server.base), { ...init, headers }).catch((error: unknown) => {
+  return fetch(commandUrl(server.base, path), { ...init, headers }).catch((error: unknown) => {
     throw new CliError(
       `Could not reach the dev server at ${server.base} (${error instanceof Error ? error.message : String(error)}). Is it running? Pass --url if it moved.`,
       EXIT.server,

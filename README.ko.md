@@ -232,12 +232,14 @@ React 18 + Vite 로 된 서비스(레거시 `fetch` 와 React Query 혼용)에 r
 
 ## AI 에이전트와 함께 쓰기
 
-rdx 보고서를 AI 가 읽게 내보내면, AI 가 측정 → 원인 확인 → 수정 → 다시 측정 순서로 일합니다. 브라우저 콘솔이나 AI 도구에서 아래 세 단계를 씁니다.
+rdx 보고서를 AI 가 읽게 내보내면, AI 가 측정 → 원인 확인 → 수정 → 다시 측정 순서로 일합니다. 브라우저 콘솔이나 AI 도구에서 아래 순서로 씁니다.
 
 ```js
 window.__RDX__.reset();                  // 기록을 지우고 측정 새로 시작
 // … 화면을 조작합니다 …
 await window.__RDX__.snapshot('before'); // .rdx/before.json 으로 저장
+// … 고친 뒤 reset → 같은 조작 → snapshot('after') …
+await window.__RDX__.compare('before', 'after'); // 나아진 것·나빠진 것, .rdx/compare-before-after.json 에도 저장
 ```
 
 브라우저 도구가 없어도 됩니다. dev 서버 플러그인을 붙이고 앱을 탭에 열어 두면 같은 단계를 터미널에서 부릅니다: `npx react-data-xray reset`, `npx react-data-xray snapshot before`, `npx react-data-xray compare before after`. `npx react-data-xray mcp` 는 같은 동작을 MCP 도구로 냅니다(`claude mcp add rdx -- npx react-data-xray mcp`).

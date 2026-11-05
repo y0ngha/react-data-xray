@@ -232,4 +232,35 @@ describe('rdx CLI(#69)', { timeout: 20_000 }, () => {
       await new Promise<void>((resolve) => plain.close(() => resolve()));
     }
   });
+
+  it('--url 의 경로(Next.js basePath) 밑에 명령 경로를 붙인다', async () => {
+    const prefixed = await mkdtemp(join(tmpdir(), 'rdx-cli-base-'));
+    const handle = rdxReportMiddleware(prefixed);
+    const seen: string[] = [];
+    // basePath 를 떼고 rdx 처리기에 넘기는 서버(Next 가 <basePath>/__rdx/... 를 route 에 넘기는 것과 같다)
+    const docs = createServer((req, res) => {
+      seen.push(req.url ?? '');
+      if (!req.url?.startsWith('/docs/')) return void ((res.statusCode = 404), res.end());
+      req.url = req.url.slice('/docs'.length);
+      handle(req, res, () => ((res.statusCode = 404), res.end()));
+    });
+    await new Promise<void>((resolve) => docs.listen(0, resolve));
+    try {
+      const a = docs.address();
+      const url = `http://localhost:${typeof a === 'object' && a ? a.port : 0}/docs/`;
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      let err = '';
+      stderr.on('data', (d) => (err += String(d)));
+      const code = await main(['tabs', '--url', url], { stdout, stderr, stdin: new PassThrough(), cwd: prefixed, env: {} });
+      // rdx 처리기까지 닿았고(토큰 다시 읽기 포함) 열린 탭만 없다
+      expect(code).toBe(4);
+      expect(err).toContain('No browser tab');
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((u) => u.startsWith('/docs/__rdx/command'))).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => docs.close(() => resolve()));
+      await rm(prefixed, { recursive: true, force: true });
+    }
+  });
 });
