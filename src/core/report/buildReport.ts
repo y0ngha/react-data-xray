@@ -85,8 +85,10 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true,
   // 패널에서 "의도된 반복"으로 지정한 엔드포인트는 보고서에서도 낭비로 세지 않는다.
   const ignored = readIgnoredEndpoints();
   const classes = classifyRecords(records, ignored);
-  // 엔드포인트별 렌더 비용은 렌더 섹션과 같은 구간에서, 이미 기록된 렌더를 세기만 한다(#84).
-  const endpointRenders = getEndpointRenders(now, reportWindowMs(now));
+  // 엔드포인트별 렌더 비용은 렌더 섹션과 같은 구간·인스턴스 상한에서, 이미 기록된 렌더를 세기만 한다(#84).
+  // 기록 상한으로 빠진 요청이 일으킨 렌더는 세지 않는다(엔드포인트 건수와 같은 요청끼리 맞춘다).
+  const shown = new Set(records);
+  const endpointRenders = getEndpointRenders(now, reportWindowMs(now), { include: (r) => shown.has(r) });
   const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf, endpointRenders);
   const reactQuery = buildReactQuerySection(records, classes);
   const renders = buildRenderSection(monitoring, now);

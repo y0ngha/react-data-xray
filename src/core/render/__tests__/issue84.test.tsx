@@ -1,16 +1,20 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useEffect, useState } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_BODY, flush } from '../../../testing/fetchMock.js';
 import { buildReport } from '../../report/buildReport.js';
+import { getEndpointStats } from '../../requests/endpointStats.js';
+import { getRecords } from '../../requests/store.js';
 import type { RequestRecord } from '../../requests/types.js';
 import { flushQueue } from '../../scheduler/idleQueue.js';
 import { countEndpointRendersSteps } from '../endpointRenders.js';
 import { drain } from '../groups.js';
-import { getEndpointRenders, resetRenderStats, setRenderMonitoring } from '../monitor.js';
+import { getEndpointRenders, ignoreComponent, resetRenderStats, setRenderMonitoring } from '../monitor.js';
 import type { RenderEntry, RenderEvent } from '../types.js';
 import { EndpointRow } from '../../../ui/panels/requests/EndpointRow.js';
+import { RequestsTab } from '../../../ui/panels/requests/RequestsTab.js';
+import { renderWithActions } from '../../../testing/withActions.js';
 
 beforeEach(() => setRenderMonitoring(true));
 afterEach(() => setRenderMonitoring(false));
@@ -125,19 +129,63 @@ describe('countEndpointRendersSteps (#84)', () => {
     expect(result.get('GET /api/b')).toEqual({ count: 1, viaParent: { count: 0 }, fromSameResponse: { count: 0 } });
   });
 
-  it('keep 으로 거른 컴포넌트는 세지 않고, 기록이 많으면 조각마다 쉰다', () => {
-    const many = entry(Array.from({ length: 5000 }, (_, i) => ev(i, { record: b, via: 'direct' }, 0.1)));
-    const other = { ...entry([ev(4999, { record: a, via: 'direct' })]), name: 'Other' };
-    const steps = countEndpointRendersSteps([many, other], 0, (e) => e.name === 'X');
+  it('bucket_timed: 묶음마다 시간 기록 여부를 따로 본다(그 묶음의 렌더에 시간이 없으면 ms 를 두지 않는다)', () => {
+    const result = drain(
+      countEndpointRendersSteps([entry([ev(10, { record: a, via: 'direct' }, 1), ev(11, { record: a2, via: 'parent' })])], 0),
+    );
+    expect(result.get('GET /api/a/:id')).toEqual({ count: 2, ms: 1, viaParent: { count: 1 }, fromSameResponse: { count: 1 } });
+  });
+
+  it('keep·include 로 거른 것은 세지 않고, 인스턴스 상한을 넘으면 구간 렌더가 적은 인스턴스를 뺀다', () => {
+    const busy = entry(Array.from({ length: 5 }, (_, i) => ev(i, { record: b, via: 'direct' }, 0.1)));
+    const quiet = entry([ev(4, { record: a, via: 'direct' })]);
+    const other = { ...entry([ev(4, { record: a, via: 'direct' })]), name: 'Other' };
+    const kept = drain(countEndpointRendersSteps([quiet, busy, other], 0, { keep: (e) => e.name === 'X', maxInstances: 1 }));
+    expect([...kept.keys()]).toEqual(['GET /api/b']);
+    expect(kept.get('GET /api/b')).toMatchObject({ count: 5, ms: 0.5 });
+    const included = drain(countEndpointRendersSteps([quiet, busy], 0, { include: (r) => r !== b }));
+    expect([...included.keys()]).toEqual(['GET /api/a/:id']);
+  });
+
+  /** 구간 안 렌더 10개씩인 인스턴스 n 개 */
+  const crowd = (n: number) =>
+    Array.from({ length: n }, () => entry(Array.from({ length: 10 }, (_, i) => ev(100 + i, { record: b, via: 'direct' }))));
+  const run = (steps: Generator<void, Map<string, unknown>>, between: () => void) => {
     let yields = 0;
     let r = steps.next();
     while (!r.done) {
       yields++;
+      between();
       r = steps.next();
     }
-    expect(yields).toBeGreaterThan(1);
-    expect(r.value.get('GET /api/b')).toMatchObject({ count: 5000, ms: 500 });
-    expect(r.value.has('GET /api/a/:id')).toBe(false);
+    return { yields, value: r.value };
+  };
+
+  it('outer_yield: 구간 밖이라 거른 인스턴스도 일로 세어 쉰다', () => {
+    const stale = Array.from({ length: 3000 }, () => entry([ev(1, { record: b, via: 'direct' })]));
+    expect(run(countEndpointRendersSteps(stale, 50), () => undefined).yields).toBeGreaterThan(1);
+  });
+
+  it('mutated_between_steps: 쉬는 사이 기록이 밀려나도(200개 상한의 push·shift) 인스턴스마다 한 번만 센다', () => {
+    const entries = crowd(400);
+    const { yields, value } = run(countEndpointRendersSteps(entries, 100), () =>
+      entries.forEach((e) => {
+        e.events.push(ev(e.events[e.events.length - 1].time + 1, { record: b, via: 'direct' }));
+        e.events.shift();
+      }),
+    );
+    expect(yields).toBeGreaterThan(2);
+    expect(value.get('GET /api/b')).toMatchObject({ count: 4000 });
+  });
+
+  it('reset_between_steps: 쉬는 사이 reset 이 기록을 비워도 던지지 않고 남은 것만 센다', () => {
+    const entries = crowd(400);
+    let first = true;
+    const { value } = run(countEndpointRendersSteps(entries, 100), () => {
+      if (first) entries.forEach((e) => (e.events.length = 0));
+      first = false;
+    });
+    expect(value.has('GET /api/b')).toBe(false);
   });
 });
 
@@ -155,5 +203,42 @@ describe('네트워크 탭 엔드포인트 행 (#84)', () => {
     );
     expect(screen.getByText('renders 8 · 4.2ms').title).toContain('6 direct, 2 following a parent');
     expect(screen.getByText('same-resp renders 4 · 2.1ms')).toBeTruthy();
+  });
+});
+
+describe('네트워크 탭의 엔드포인트별 렌더 (#84)', () => {
+  // 실제 패널처럼 탭 자신의 렌더는 세지 않는다(RdxDevtools 가 패널을 ignoreComponent 로 뺀다).
+  beforeEach(() => ignoreComponent(RequestsTab));
+  const tab = (records: readonly RequestRecord[]) => (
+    <RequestsTab
+      records={records}
+      stats={getEndpointStats(records, new Map())}
+      ignored={new Set()}
+      onToggleIgnore={vi.fn<(e: string) => void>()}
+    />
+  );
+
+  it('this_route: 경로 필터 중에는 보이는 요청이 일으킨 렌더만 센다', async () => {
+    history.pushState({}, '', '/');
+    resetRenderStats();
+    await loadTwice();
+    const records = getRecords().filter((r) => r.url === '/api/items');
+    records[1].route = '/other'; // 같은 응답을 받은 두 번째 요청은 다른 경로에서 보냈다
+    renderWithActions(tab(records));
+    act(() => void flushQueue());
+    expect(screen.getByText(/^renders 8/)).toBeTruthy();
+    fireEvent.click(screen.getByText('This route'));
+    act(() => void flushQueue());
+    expect(screen.getByText(/^renders 4/)).toBeTruthy();
+    expect(screen.queryByText(/^same-resp renders/)).toBeNull();
+  });
+
+  it('hidden_behind_detail: 요청 상세가 덮어 숨은 동안에는 세지 않는다', async () => {
+    resetRenderStats();
+    await loadTwice();
+    const records = getRecords().filter((r) => r.url === '/api/items');
+    renderWithActions(<div style={{ display: 'none' }}>{tab(records)}</div>);
+    act(() => void flushQueue());
+    expect(screen.queryByText(/^renders \d/)).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import type { Fiber } from '../../../core/fiber/types.js';
 import { getEndpointStats, type EndpointStat } from '../../../core/requests/endpointStats.js';
@@ -9,7 +9,6 @@ import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { useRequestActions } from '../../contexts.js';
 import { useNow } from '../../hooks/useNow.js';
-import { useRenderMonitoring } from '../../hooks/useRenderMonitoring.js';
 import { useFocusedItem } from '../../viewState.js';
 import { color } from '../../theme.js';
 import { CacheAuditView } from './CacheAuditView.js';
@@ -64,13 +63,44 @@ const UnseenIgnored = ({
   );
 };
 
+interface EndpointListProps {
+  stats: readonly EndpointStat[];
+  /** 지금 보이는 요청(경로 필터 중이면 그 경로의 것). 엔드포인트별 렌더도 이 요청이 원인인 것만 센다 */
+  records: readonly RequestRecord[];
+  route: string | undefined;
+  scope: Fiber | null;
+  ignored: IgnoreMatcher;
+  focus: ReturnType<typeof useFocusedItem>;
+  onSelect: (endpoint: string) => void;
+  onToggleIgnore: (endpoint: string) => void;
+}
+
+/** 엔드포인트별 행. 응답이 일으킨 렌더(#84)를 1초마다 유휴 큐에서 세므로, 다른 보기가 매초 다시 렌더하지 않게 이 보기에만 둔다. */
+const EndpointList = ({ stats, records, route, scope, ignored, focus, onSelect, onToggleIgnore }: EndpointListProps) => {
+  const now = useNow(REFRESH_MS);
+  const host = useRef<HTMLDivElement>(null);
+  const renders = useEndpointRenders(now, scope, records, route, host);
+  return (
+    <div ref={host}>
+      {stats.map((stat) => (
+        <EndpointRow
+          key={stat.endpoint}
+          stat={stat}
+          renders={renders?.get(stat.endpoint)}
+          ignored={ignored.sourceOf(stat.endpoint)}
+          route={route}
+          focus={focus?.key === stat.endpoint ? focus : undefined}
+          onSelect={onSelect}
+          onToggleIgnore={onToggleIgnore}
+        />
+      ))}
+    </div>
+  );
+};
+
 /** 네트워크 › 요청: 엔드포인트별 지표와 전체 기록. 엔드포인트를 누르면 그 요청만 기록에 보여 준다. */
 export const RequestsTab = ({ records, stats, ignored: ignoredInput, onToggleIgnore, scope = null }: RequestsTabProps) => {
   const ignored = toIgnoreMatcher(ignoredInput);
-  // 엔드포인트마다 그 응답이 일으킨 렌더를 보이려면 렌더 감시가 켜져 있어야 한다(#84). 세기는 유휴 큐에서 한다.
-  useRenderMonitoring();
-  const now = useNow(REFRESH_MS);
-  const renders = useEndpointRenders(now, scope);
   const [view, setView] = useState<View>('endpoints');
   const [filter, setFilter] = useState<string | null>(null);
   const [currentOnly, setCurrentOnly] = useState(false);
@@ -78,11 +108,11 @@ export const RequestsTab = ({ records, stats, ignored: ignoredInput, onToggleIgn
   const logs = [...records].reverse().filter((r) => (!filter || endpointOf(r) === filter) && (route === undefined || r.route === route));
   const { classOf } = useRequestActions();
   // 경로 필터 중에는 그 경로에서 보낸 요청만으로 건수·낭비를 다시 센다(전 경로 합계를 보이지 않는다). 분류는 전체 기록 기준 그대로다.
-  const shownStats = useMemo(() => {
-    if (route === undefined) return stats;
-    const own = records.filter((r) => r.route === route);
-    return getEndpointStats(own, new Map(own.map((r) => [r.id, classOf(r)])));
-  }, [route, stats, records, classOf]);
+  const shownRecords = useMemo(() => (route === undefined ? records : records.filter((r) => r.route === route)), [route, records]);
+  const shownStats = useMemo(
+    () => (route === undefined ? stats : getEndpointStats(shownRecords, new Map(shownRecords.map((r) => [r.id, classOf(r)])))),
+    [route, stats, shownRecords, classOf],
+  );
   const focus = useFocusedItem('requests');
   // 배지 내역에서 엔드포인트를 골라 왔으면 엔드포인트별 보기로 돌린다(그 줄이 보이게).
   const [seenFocus, setSeenFocus] = useState(focus);
@@ -121,19 +151,18 @@ export const RequestsTab = ({ records, stats, ignored: ignoredInput, onToggleIgn
         <span style={{ color: color.muted, marginLeft: 'auto' }}>{records.length} req</span>
       </div>
       {view === 'cache' && <CacheAuditView records={records} />}
-      {view === 'endpoints' &&
-        shownStats.map((stat) => (
-          <EndpointRow
-            key={stat.endpoint}
-            stat={stat}
-            renders={renders?.get(stat.endpoint)}
-            ignored={ignored.sourceOf(stat.endpoint)}
-            route={route}
-            focus={focus?.key === stat.endpoint ? focus : undefined}
-            onSelect={showEndpoint}
-            onToggleIgnore={onToggleIgnore}
-          />
-        ))}
+      {view === 'endpoints' && (
+        <EndpointList
+          stats={shownStats}
+          records={shownRecords}
+          route={route}
+          scope={scope}
+          ignored={ignored}
+          focus={focus}
+          onSelect={showEndpoint}
+          onToggleIgnore={onToggleIgnore}
+        />
+      )}
       {view === 'endpoints' && <UnseenIgnored ignored={ignored} stats={stats} onToggleIgnore={onToggleIgnore} />}
       {view === 'log' && logs.map((record) => <RequestLogRow key={record.id} record={record} />)}
     </div>
