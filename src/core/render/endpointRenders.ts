@@ -1,4 +1,5 @@
 import { endpointOf } from '../requests/requestKey.js';
+import { round1 } from '../../shared/format.js';
 import type { RequestRecord } from '../requests/types.js';
 import type { RenderEntry } from './types.js';
 
@@ -21,7 +22,6 @@ export interface EndpointRenders extends RenderCost {
 const WORK_CHUNK = 2000;
 // 컴포넌트 하나를 보는(구간 확인·거르기) 일을 렌더 기록 몇 개 보는 것으로 칠지
 const ENTRY_WORK = 10;
-const round1 = (n: number): number => Math.round(n * 10) / 10;
 
 /** 묶음 하나(전체·부모를 따라·같은 응답)의 합. 시간이 기록된 렌더 수는 묶음마다 센다. */
 interface Bucket {

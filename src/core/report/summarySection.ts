@@ -1,5 +1,6 @@
 import { round3 } from '../../shared/format.js';
 import { N_PLUS_ONE_FIX } from '../requests/nPlusOne.js';
+import { round1 } from '../../shared/format.js';
 import { countProblems, type RenderStorm } from '../problems.js';
 import type { CacheFindingKind } from '../reactQuery/cacheAudit.js';
 import { WINDOW_MS } from '../render/summary.js';
@@ -10,7 +11,6 @@ import { MAX_RENDER_GROUPS, type RenderSection } from './renderSection.js';
 import type { RequestSection } from './requestSection.js';
 
 const MAX_TOP_FINDINGS = 10;
-const round1 = (n: number): number => Math.round(n * 10) / 10;
 
 export type FindingKind =
   | 'duplicate'

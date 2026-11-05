@@ -9,11 +9,16 @@ export interface ReactQuerySection {
   findings: Array<CacheFinding & { title: string; fix: string }>;
   /** React Query 요청의 fetch 원인(관찰자·queryKey·원인별로 묶음). 없으면 필드를 두지 않는다. */
   fetchCauses?: Array<Omit<FetchCauseInfo, 'label'> & { causeLabel: string; count: number }>;
+  /** fetchCauses 상한(MAX_FETCH_CAUSES 묶음) 밖으로 빠진 묶음 수. 빠진 것이 없으면 0. compare 가 상한 때문에 빠진 묶음을 사라진 것으로 보지 않게 한다 */
+  fetchCausesOmitted: number;
 }
 
-const MAX_FETCH_CAUSES = 20;
+export const MAX_FETCH_CAUSES = 20;
 
-const fetchCausesOf = (records: readonly RequestRecord[], classes: ReadonlyMap<number, RequestClass>): ReactQuerySection['fetchCauses'] => {
+const fetchCausesOf = (
+  records: readonly RequestRecord[],
+  classes: ReadonlyMap<number, RequestClass>,
+): Pick<ReactQuerySection, 'fetchCauses' | 'fetchCausesOmitted'> => {
   const groups = new Map<string, NonNullable<ReactQuerySection['fetchCauses']>[number]>();
   records.forEach((r) => {
     const info = describeFetchCause(r, classes.get(r.id) === 'same-response');
@@ -24,10 +29,9 @@ const fetchCausesOf = (records: readonly RequestRecord[], classes: ReadonlyMap<n
     if (g) g.count += 1;
     else groups.set(id, { ...rest, causeLabel: label, count: 1 });
   });
-  const list = Array.from(groups.values())
-    .sort((a, b) => b.count - a.count)
-    .slice(0, MAX_FETCH_CAUSES);
-  return list.length > 0 ? list : undefined;
+  const all = Array.from(groups.values()).sort((a, b) => b.count - a.count);
+  const list = all.slice(0, MAX_FETCH_CAUSES);
+  return { fetchCauses: list.length > 0 ? list : undefined, fetchCausesOmitted: all.length - list.length };
 };
 
 export const REACT_QUERY_HOW_TO_READ =
@@ -43,7 +47,7 @@ export const buildReactQuerySection = (
     findings: auditQueryCache((r) => classes.get(r.id) ?? 'ok', records, clients).map((f) =>
       Object.assign({}, f, CACHE_FINDING_TEXT[f.kind]),
     ),
-    fetchCauses: fetchCausesOf(records, classes),
+    ...fetchCausesOf(records, classes),
   };
 };
 
@@ -51,4 +55,5 @@ export const buildReactQuerySection = (
 export const REACT_QUERY_HOW_TO_READ_EXTRA: readonly string[] = [
   'reactQuery.findings: invalidate-unloaded means the key shape matched but the specific query does not exist yet — a valid invalidation, nothing to fix. double-invalidate means overlapping invalidations where the second cancelled the first refetch; remove one of the two call sites in stacks (requests shows the cancelled request). count is the number of occurrences grouped at the same call site (for invalidate-* it is the number of keys, so keys shows a prefix; for double-invalidate it is the overlap count).',
   'reactQuery.fetchCauses explains why each React Query request was issued (cause: initial — first fetch, mount/enabled — observer mounted or enabled turned on while stale, key-change — observer queryKey changed, invalidate — invalidation, focus — window focus or reconnect, interval — polling). observer is the component that renders the useQuery call, evidence shows the staleTime and time since last update at that moment. When fix is present the same response was fetched again wastefully; follow the prescribed fix (e.g., increase staleTime).',
+  `reactQuery.fetchCauses lists at most ${MAX_FETCH_CAUSES} groups (most fetches first); fetchCausesOmitted is how many more groups were left out by that limit.`,
 ];

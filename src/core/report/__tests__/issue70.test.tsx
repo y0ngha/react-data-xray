@@ -23,7 +23,7 @@ import { installReportApi } from '../reportApi.js';
 import { buildSummary } from '../summarySection.js';
 
 // howToRead 문구(와 문구에 들어가는 RENDER_STORM·WINDOW_MS)가 바뀌면 이 두 값을 함께 고친다. 판은 하나 올린다.
-const EXPECTED_HOW_TO_READ = { version: 12, hash: '86032e1cdedb' };
+const EXPECTED_HOW_TO_READ = { version: 13, hash: '50fcb46c0f55' };
 
 type Endpoint = RequestSection['endpoints'][number];
 type Component = RenderSection['components'][number];
@@ -71,9 +71,10 @@ const renders = (components: Component[], monitoring = true): RenderSection => (
   windowSeconds: 10,
   truncated: false,
   droppedInstances: 0,
+  omitted: { components: 0, renders: 0, avoidable: 0 },
   components,
 });
-const noQuery: ReactQuerySection = { found: false, findings: [] };
+const noQuery: ReactQuerySection = { found: false, findings: [], fetchCausesOmitted: 0 };
 const storms = (...list: RenderStorm[]): Map<string, RenderStorm> =>
   new Map(list.map((s) => [JSON.stringify([s.package, s.name, s.location, s.owner]), s]));
 const label = (f: ReturnType<typeof buildSummary>['topFindings'][number]) =>
@@ -83,6 +84,7 @@ describe('보고서 summary (#70)', () => {
   it('summary_rank: 배지가 세는 것(high)을 먼저, 그 안에서 요청 → React Query → 렌더 → 재마운트, 그다음 절감 큰 순으로 놓고 상세 경로를 가리킨다', () => {
     const rq: ReactQuerySection = {
       found: true,
+      fetchCausesOmitted: 0,
       findings: [
         { kind: 'invalidate-unloaded', keys: ['["x"]'], requests: [], title: '', fix: '' },
         { kind: 'stale-zero', keys: ['["todos"]'], requests: ['GET /api/todos'], title: 't', fix: 'Increase staleTime.' },
@@ -294,6 +296,15 @@ describe('howToRead 판과 빼기 (#70)', () => {
 
   it('compare_ignores_summary: 비교용 보고서에는 summary·howToRead 가 들어가지 않는다', () => {
     const c = toComparable(buildReport(false, 0, false));
-    expect(Object.keys(c).sort()).toEqual(['complete', 'config', 'incompleteReasons', 'reactQuery', 'renders', 'requests', 'resetAt']);
+    expect(Object.keys(c).sort()).toEqual([
+      'complete',
+      'config',
+      'incompleteReasons',
+      'page',
+      'reactQuery',
+      'renders',
+      'requests',
+      'resetAt',
+    ]);
   });
 });

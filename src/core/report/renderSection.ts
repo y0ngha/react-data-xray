@@ -1,13 +1,15 @@
 import { renderAdvice } from '../render/advice.js';
-import { sortRenderGroups } from '../render/groups.js';
+import { sortRenderGroups, type RenderGroup } from '../render/groups.js';
 import { getCommits, getRenderGroups, MAX_GROUPED_INSTANCES, reportWindowMs } from '../render/monitor.js';
 import { withHookPathsSync } from '../render/summary.js';
 import { RENDER_REASONS } from '../render/types.js';
 import { endpointOf } from '../requests/requestKey.js';
+import { round1 } from '../../shared/format.js';
 
 export const MAX_RENDER_GROUPS = 30;
+/** compare 용으로 남기는 렌더 행의 상한(보고서 행 포함). 스냅샷 6개를 sessionStorage 에 두므로 행 수를 묶는다 */
+export const MAX_COMPARABLE_RENDER_ROWS = 200;
 const MAX_HEAVIEST_COMMITS = 3;
-const round1 = (n: number): number => Math.round(n * 10) / 10;
 
 export interface RenderSection {
   monitoring: boolean;
@@ -16,6 +18,11 @@ export interface RenderSection {
   /** 인스턴스가 너무 많아 렌더 적은 인스턴스를 센 대상에서 뺐는지와 그 수 */
   truncated: boolean;
   droppedInstances: number;
+  /**
+   * components 상한(MAX_RENDER_GROUPS 행) 밖으로 빠진 컴포넌트 행 수와 그 행들의 렌더·줄일 수 있는 렌더·렌더 시간 합.
+   * 빠진 행이 없으면 모두 0 이다. compare 는 이 값으로 합계를 맞추고, 상한 때문에 빠진 행을 사라진 것으로 보지 않는다
+   */
+  omitted: { components: number; renders: number; avoidable: number; totalMs?: number };
   /** 구간 안에서 렌더 시간이 가장 큰 commit 몇 개(시간 기록이 있을 때만) */
   heaviestCommits?: Array<{ ms: number; components: number; startedBy?: string; secondsAgo: number }>;
   components: Array<{
@@ -91,19 +98,80 @@ export const RENDER_HOW_TO_READ = {
 const nonZero = (reasons: Record<string, number>): Record<string, number> =>
   Object.fromEntries(Object.entries(reasons).filter(([, n]) => n > 0));
 
-export const buildRenderSection = (monitoring: boolean, now: number): RenderSection => {
+/** compare 가 행을 맞춰 보는 데 쓰는 값만 담은 렌더 행 */
+export interface RenderRowTally {
+  name: string;
+  renders: number;
+  avoidable: number;
+  renderedAt?: string;
+  package?: string;
+  totalMs?: number;
+}
+
+type RenderTime = NonNullable<RenderSection['components'][number]['time']>;
+
+/** 보고서 행의 time 과 상한 밖 행의 totalMs 가 함께 쓰는 값. dev 빌드가 시간을 주지 않으면 없다 */
+const timeOf = (g: RenderGroup): RenderTime | undefined =>
+  (g.timed ?? 0) > 0 ? { totalMs: round1(g.ms), avgMs: round1(g.ms / g.timed!), avoidableMs: round1(g.avoidableMs ?? 0) } : undefined;
+
+/** tallyOf 가 읽는 행의 모양. 보고서 행(파일에서 읽은 것 포함)도 이 모양이다 */
+export type TallySource = Pick<RenderSection['components'][number], 'name' | 'renders' | 'avoidable' | 'renderedAt' | 'package'> & {
+  time?: Pick<RenderTime, 'totalMs'>;
+};
+
+/** 보고서 행과 상한 밖 행을 compare 용 행으로 줄인다(두 행이 같은 함수를 거친다). */
+export const tallyOf = (c: TallySource): RenderRowTally => ({
+  name: c.name,
+  renders: c.renders,
+  avoidable: c.avoidable,
+  renderedAt: c.renderedAt,
+  package: c.package,
+  totalMs: c.time?.totalMs,
+});
+
+const sourceOf = (g: RenderGroup): TallySource => ({
+  name: g.name,
+  renders: g.recent,
+  avoidable: g.avoidable,
+  renderedAt: g.location,
+  package: g.package,
+  time: timeOf(g),
+});
+
+const omittedOf = (rest: readonly RenderGroup[]): RenderSection['omitted'] => {
+  const timed = rest.flatMap((g) => timeOf(g)?.totalMs ?? []);
+  return {
+    components: rest.length,
+    renders: rest.reduce((n, g) => n + g.recent, 0),
+    avoidable: rest.reduce((n, g) => n + g.avoidable, 0),
+    ...(timed.length > 0 && { totalMs: round1(timed.reduce((n, ms) => n + ms, 0)) }),
+  };
+};
+
+/** 렌더 섹션과, 원하면 보고서 상한 밖 행(compare 용, 많아야 MAX_COMPARABLE_RENDER_ROWS - 보고서 행 수) */
+export interface RenderSectionParts {
+  section: RenderSection;
+  /** withBeyondCap 일 때만 있다. 보고서 JSON 에는 싣지 않고 스냅샷의 비교용 부분에만 남긴다 */
+  beyondCap?: RenderRowTally[];
+}
+
+/** 지금의 렌더 섹션. snapshot 처럼 비교용으로 저장할 때만 withBeyondCap 으로 상한 밖 행을 더 만든다(주기 업로드는 만들지 않는다). */
+export const buildRenderSectionParts = (monitoring: boolean, now: number, withBeyondCap: boolean): RenderSectionParts => {
   const windowMs = reportWindowMs(now);
   const { groups: all, truncated, droppedInstances } = getRenderGroups(now, windowMs);
-  const groups = sortRenderGroups(all, 'avoidable').slice(0, MAX_RENDER_GROUPS);
+  const sorted = sortRenderGroups(all, 'avoidable');
+  const groups = sorted.slice(0, MAX_RENDER_GROUPS);
+  const rest = sorted.slice(MAX_RENDER_GROUPS);
   const heaviest = getCommits()
     .filter((c) => c.ms !== undefined && c.time >= now - windowMs)
     .sort((a, b) => b.ms! - a.ms!)
     .slice(0, MAX_HEAVIEST_COMMITS);
-  return {
+  const section: RenderSection = {
     monitoring,
     windowSeconds: Math.round(windowMs / 1000),
     truncated,
     droppedInstances,
+    omitted: omittedOf(rest),
     ...(heaviest.length > 0 && {
       heaviestCommits: heaviest.map((c) => ({
         ms: round1(c.ms!),
@@ -117,8 +185,7 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       instances: g.instances,
       renders: g.recent,
       avoidable: g.avoidable,
-      time:
-        (g.timed ?? 0) > 0 ? { totalMs: round1(g.ms), avgMs: round1(g.ms / g.timed!), avoidableMs: round1(g.avoidableMs ?? 0) } : undefined,
+      time: timeOf(g),
       memoized: g.memoized,
       memo: g.memo,
       mounts: g.mounts,
@@ -153,7 +220,16 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       advice: renderAdvice(g),
     })),
   };
+  return {
+    section,
+    ...(withBeyondCap && {
+      beyondCap: rest.slice(0, MAX_COMPARABLE_RENDER_ROWS - MAX_RENDER_GROUPS).map((g) => tallyOf(sourceOf(g))),
+    }),
+  };
 };
+
+export const buildRenderSection = (monitoring: boolean, now: number): RenderSection =>
+  buildRenderSectionParts(monitoring, now, false).section;
 
 // 새 howToRead 줄은 여기에 더한다.
 export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [
@@ -162,5 +238,6 @@ export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [
   'components[].memo: skipped is the number of times a React.memo component skipped a parent render; rendered is the count where it did not skip (parent renders only — mounts, own state, and context renders are excluded). When skipped is 0 and neverSkippedProps is non-empty, those props are a new reference on every render so memo has no effect (see first line of advice).',
   'components entries with the same name but different renderedAt values are counted separately. Library-internal components (minified names in the bundle) are folded into the libraries field of the app component that renders them, along with the package name. A row with package present means no rendering app component was found.',
   'components[].time: totalMs is the total render time for the window, avgMs is the per-render average, and avoidableMs is the sum for avoidable renders. startedRenders.childMs and unchangedMs are the total and unchanged-value portions of child render time. heaviestCommits lists the most expensive commits in the window and the component that started them. All values are sums of selfBaseDuration (self render time, before memo skips) measured in a dev build and will be larger than in production. Read them comparatively (before vs. after a fix) rather than as absolute values. These fields are absent when timing is unavailable.',
+  `renders.components lists at most ${MAX_RENDER_GROUPS} components (most avoidable first). renders.omitted counts the components left out by that limit and sums their renders, avoidable renders, and totalMs, so components plus omitted is the whole window. compare() keeps more rows than the report for this reason; a row it cannot see on one side is shown as status unknown, not removed.`,
   'components[].mounts: mount and unmount counts since the last reset (by component name, only when unmounts occurred). remounts counts instances that disappeared and reappeared under the same parent within 5s; parent is the nearest ancestor that swapped the subtree. Mount-effect requests, subscriptions, and timers run again each time. Siblings still present are not counted. When remounts[].cause is type-changed, the component name is the same but the function identity changed — caused by defining a component inside a render, counted regardless of sibling count.',
 ];
