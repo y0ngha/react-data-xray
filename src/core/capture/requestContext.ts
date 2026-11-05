@@ -1,3 +1,4 @@
+import { noteNPlusOneStage } from '../requests/nPlusOne.js';
 import { touchRecords } from '../requests/store.js';
 import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestRecord } from '../requests/types.js';
@@ -116,6 +117,8 @@ export const annotateRequest = (record: RequestRecord, fallback?: Error): Reques
     record.component = componentOfStack(record.stack);
     record.noAppFrame = !hasAppFrame(record.stack) || undefined;
     resolveSourceStack(record);
+    // 보낸 곳을 알았으니 N+1 판정 단계 하나가 끝났다(응답·중복 판정이 먼저 끝났으면 여기서 판정한다).
+    if (noteNPlusOneStage(record, 'annotated')) touchRecords();
     return true;
   });
   return record;

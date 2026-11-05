@@ -120,7 +120,7 @@ const splitEndpoints = (a: ComparableReport, b: ComparableReport): string[] => {
 };
 
 // 판정 기준만 본다. 기준이 다르면 중복·같은 응답 수가 달라진다. reportPath 는 보내는 곳일 뿐이라 보지 않는다.
-const CRITERIA = ['dedupeWindowMs', 'burst', 'keyHeaders'] as const;
+const CRITERIA = ['dedupeWindowMs', 'burst', 'nPlusOne', 'keyHeaders'] as const;
 
 const sortedText = (values: readonly string[]): string => JSON.stringify([...values].sort());
 
@@ -132,7 +132,12 @@ const sortedText = (values: readonly string[]): string => JSON.stringify([...val
 const configDifferences = (a: ComparableReport, b: ComparableReport): string[] => {
   const [x, y] = [a.config, b.config];
   if (!x || !y) return [];
-  const rows: Array<[string, string, string]> = CRITERIA.map((key) => [key, JSON.stringify(x[key]), JSON.stringify(y[key])]);
+  // nPlusOne(#85)처럼 나중에 더한 기준은 그 전에 저장한 보고서에 없다. 한쪽에 없으면 그 기준은 비교하지 않는다.
+  const rows: Array<[string, string, string]> = CRITERIA.filter((key) => x[key] !== undefined && y[key] !== undefined).map((key) => [
+    key,
+    JSON.stringify(x[key]),
+    JSON.stringify(y[key]),
+  ]);
   rows.push(['ignore (code)', sortedText(x.ignore.code), sortedText(y.ignore.code)]);
   rows.push(['ignore (panel)', sortedText(x.ignore.panel), sortedText(y.ignore.panel)]);
   if ((a.requests.dropped ?? 0) > 0 || (b.requests.dropped ?? 0) > 0)

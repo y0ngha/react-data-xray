@@ -1,7 +1,8 @@
 import { Fragment } from 'react';
 
 import type { EndpointRenders, RenderCost } from '../../../core/render/endpointRenders.js';
-import { isWastefulStat, type EndpointStat } from '../../../core/requests/endpointStats.js';
+import { isWastefulStat, type EndpointStat, type NPlusOneSender } from '../../../core/requests/endpointStats.js';
+import { nPlusOneHint } from '../../../core/requests/nPlusOne.js';
 import { useReveal } from '../../hooks/useReveal.js';
 import type { IgnoreSource } from '../../../shared/ignoredEndpoints.js';
 import type { FocusRequest } from '../../viewState.js';
@@ -63,8 +64,10 @@ const renderSegments = (r: EndpointRenders | undefined): Array<Segment | null> =
       ]
     : [];
 
+const senderLabel = (sender: NPlusOneSender): string => (sender.component ? `<${sender.component}>` : 'same caller');
+
 /** 요약 줄의 조각들. 없는 지표는 뺀다. */
-const segments = (stat: EndpointStat, renders: EndpointRenders | undefined): Segment[] => {
+const segments = (stat: EndpointStat, ignored: boolean, renders: EndpointRenders | undefined): Segment[] => {
   const all: Array<Segment | null> = [
     { text: `×${stat.count}` },
     { text: `avg ${stat.avgMs}ms` },
@@ -77,6 +80,12 @@ const segments = (stat: EndpointStat, renders: EndpointRenders | undefined): Seg
       ? { text: `failed: ${stat.failedCodes.join('·')}`, title: 'Status codes of failed requests regardless of waste' }
       : null,
     stat.review > 0 ? { text: `review: ${stat.review}`, color: color.review } : null,
+    // 무시한 엔드포인트는 보고서처럼 N+1 로 보이지 않는다
+    ...(ignored ? [] : (stat.nPlusOne ?? [])).map((sender) => ({
+      text: `N+1: ${senderLabel(sender)}×${sender.count}`,
+      title: sender.location ? `${nPlusOneHint()}\n${sender.location}` : nPlusOneHint(),
+      color: color.review,
+    })),
     stat.explained > 0 ? { text: `expected: ${stat.explained}` } : null,
     ...renderSegments(renders),
   ];
@@ -114,7 +123,7 @@ export const EndpointRow = ({ stat, renders, ignored, route, focus, onSelect, on
       </div>
       <Muted>
         {/* 조각 사이의 공백은 nowrap 밖에 두어 조각 사이에서만 줄이 바뀐다 */}
-        {segments(stat, renders).map((seg, i) => (
+        {segments(stat, !!ignored, renders).map((seg, i) => (
           <Fragment key={seg.text}>
             {i > 0 && ' · '}
             <span title={seg.title} style={{ whiteSpace: 'nowrap', color: seg.color, fontWeight: seg.bold ? 600 : undefined }}>

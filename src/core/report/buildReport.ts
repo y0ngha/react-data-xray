@@ -74,9 +74,10 @@ export interface BuildContext {
 
 /**
  * HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침,
- * 4: config 줄과 설정 안내 줄(#78), 5: complete·incompleteReasons 줄 #71, 6: requests.endpoints[].renders #84).
+ * 4: config 줄과 설정 안내 줄(#78), 5: complete·incompleteReasons 줄 #71, 6: requests.nPlusOne 줄과 config.nPlusOne #85,
+ * 7: requests.endpoints[].renders #84).
  */
-export const HOW_TO_READ_VERSION = 6;
+export const HOW_TO_READ_VERSION = 7;
 
 // 섹션별 줄을 읽는 순서로 잇는다.
 export const HOW_TO_READ: readonly string[] = [
@@ -100,7 +101,7 @@ export const HOW_TO_READ: readonly string[] = [
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
   'complete is false when some analysis that feeds this report had not finished; incompleteReasons says why: pending-analysis (pendingAnalysis steps still queued), source-maps (still resolving, so some callers are http addresses), source-map-timeout (snapshot waited 2s for source maps and gave up), query-keys (React Query request contexts not looked up yet). The periodic .rdx/report.json waits for none of these, and report() is a quick read that finishes the queue but does not wait for source maps. For before/after comparisons use window.__RDX__.snapshot(name), which finishes the queue and waits up to 2s for source maps, and check that its complete is true.',
   'Check diagnostics.problems first: if rdx was loaded after react-dom (renderHook.commitsSeen is 0) or requests went out before it loaded (capture.requestsBeforeInstall), the rest of the report is incomplete. Each problem says how to fix it.',
-  'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
+  'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), nPlusOne (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, nPlusOne, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
   'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
   'howToReadVersion is the version of these lines. If you already read this version, call window.__RDX__.report({ howToRead: false }) to leave them out.',
 ];
