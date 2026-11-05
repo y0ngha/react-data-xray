@@ -151,6 +151,13 @@ const hostRootOfContainer = (el: RootContainer): Fiber | null => {
   return key ? readKey<Fiber | null>(el, key) : null;
 };
 
+// 컨테이너에 붙은 HostRoot fiber 는 처음 만든 것이라 commit 마다 current/alternate 가 바뀐다. root.current 로 따라간다.
+const currentRoots = (): Fiber[] =>
+  rootContainers
+    .map(hostRootOfContainer)
+    .filter((root): root is Fiber => root !== null)
+    .map((root) => (root.stateNode as { current?: Fiber } | null)?.current ?? root);
+
 /** 페이지의 모든(살아 있는) React 루트의 현재 HostRoot fiber */
 export const findRootFibers = (): Fiber[] => {
   rootContainers = rootContainers.filter((el) => el.isConnected && hostRootOfContainer(el));
@@ -159,11 +166,16 @@ export const findRootFibers = (): Fiber[] => {
       (el) => hostRootOfContainer(el) && !isFrameworkDevtoolsRoot(el),
     );
   }
-  // 컨테이너에 붙은 HostRoot fiber 는 처음 만든 것이라 commit 마다 current/alternate 가 바뀐다. root.current 로 따라간다.
-  return rootContainers
-    .map(hostRootOfContainer)
-    .filter((root): root is Fiber => root !== null)
-    .map((root) => (root.stateNode as { current?: Fiber } | null)?.current ?? root);
+  return currentRoots();
+};
+
+/**
+ * commit 으로 기억해 둔 루트만(문서를 훑지 않는다). 유휴 큐에서 되풀이하는 일(쓰지 않는 응답 판정)이 쓴다.
+ * 기억한 루트가 없으면 빈 배열이다. 문서 전체 querySelectorAll 은 사용자 조회(findRootFibers)에만 남긴다.
+ */
+export const knownRootFibers = (): Fiber[] => {
+  rootContainers = rootContainers.filter((el) => el.isConnected && hostRootOfContainer(el));
+  return currentRoots();
 };
 
 /** 형제를 포함해 깊이 우선으로 모든 fiber 를 방문한다. visit 이 false 를 돌려주면 그 자식은 내려가지 않는다. */

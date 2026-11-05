@@ -52,6 +52,11 @@ export interface RequestRecord {
   cancelledByOverlap?: boolean;
   /** 중복 요청이 다시 나간 이유(의존성 변경·재마운트·StrictMode). 알 수 없으면 없다. */
   repeatCause?: { kind: 'deps' | 'remount' | 'strict'; detail: string };
+  /**
+   * 응답 몇 초 뒤 이 응답(같은 요청의 이전 응답 포함)을 들고 있는 컴포넌트를 참조·파생 매칭 모두 못 찾았다. 유휴 큐가 한 번 정한다(inspect/unused).
+   * false 는 쓰는 컴포넌트를 찾았다는 뜻이고, 판정하지 않은 요청(JSON 이 아니거나 빈 본문, 변경 요청, 무시한 엔드포인트, 실패)은 없다.
+   */
+  unused?: boolean;
   status: number;
   startedAt: number;
   durationMs: number;

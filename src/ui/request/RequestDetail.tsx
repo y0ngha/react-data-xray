@@ -12,7 +12,7 @@ import { Muted } from '../components/Muted.js';
 import { Section } from '../components/Section.js';
 import type { Focus } from '../contexts.js';
 import { useRecords } from '../hooks/useRecords.js';
-import { ClassBadge } from './ClassBadge.js';
+import { ClassBadge, UnusedBadge } from './ClassBadge.js';
 import { ConsumerList } from './ConsumerList.js';
 import { FetchCause } from './FetchCause.js';
 import { StackSection } from './StackSection.js';
@@ -66,6 +66,7 @@ const ResponseBodySection = ({ record }: { record: RequestRecord }) => {
 const RepeatInfo = ({ record }: { record: RequestRecord }) => (
   <div style={{ marginTop: 4 }}>
     <ClassBadge record={record} />
+    <UnusedBadge record={record} />
     {record.duplicateOf && <Muted>earlier request #{record.duplicateOf}</Muted>}
     {record.sameResponseAs && <Muted>same response #{record.sameResponseAs}</Muted>}
     {record.repeatCause && <Muted>repeat cause: {record.repeatCause.detail}</Muted>}

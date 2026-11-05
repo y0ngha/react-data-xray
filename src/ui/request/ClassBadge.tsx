@@ -3,7 +3,7 @@ import { CLASS_LABEL, isFailed, isWaste } from '../../core/requests/classify.js'
 import type { RequestRecord } from '../../core/requests/types.js';
 import { Badge } from '../components/Badge.js';
 import { useRequestActions } from '../contexts.js';
-import { classColor } from '../theme.js';
+import { classColor, color } from '../theme.js';
 
 const shorten = (label: string) => label.replace(' refetch', '').replace(' request', '');
 
@@ -17,3 +17,14 @@ export const ClassBadge = ({ record, short = false }: { record: RequestRecord; s
   const note = c === 'same-response' && pinnedRefetchReason(record) === 'stale-zero' ? ' · staleTime 0' : '';
   return <Badge color={classColor(c)}>{(isWaste(c) && isFailed(record) ? `${label} · failed response` : label) + note}</Badge>;
 };
+
+export const UNUSED_TITLE =
+  'No component was found holding this response a few seconds after it arrived. Data used only in effects or event handlers, or transformed into new objects, also looks unused — check the code.';
+
+/** 쓰지 않는 응답 배지(노랑, 확인 필요). 반복 분류와 따로 붙는다. 판정하지 않았거나 쓰는 컴포넌트가 있으면 그리지 않는다. */
+export const UnusedBadge = ({ record }: { record: RequestRecord }) =>
+  record.unused ? (
+    <span title={UNUSED_TITLE}>
+      <Badge color={color.review}>unused</Badge>
+    </span>
+  ) : null;
