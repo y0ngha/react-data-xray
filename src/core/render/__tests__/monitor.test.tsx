@@ -290,7 +290,13 @@ describe('렌더의 네트워크 원인', () => {
   };
   it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유·그리는 위치)을 남긴다', () => {
     expect(renderLeaf().origins).toEqual([
-      { name: 'Counter', reason: 'state', count: 2, location: expect.stringMatching(/monitor\.test\.tsx:\d+$/) },
+      {
+        name: 'Counter',
+        reason: 'state',
+        count: 2,
+        id: expect.stringMatching(/^c:Counter@.*monitor\.test\.tsx:\d+$/),
+        location: expect.stringMatching(/monitor\.test\.tsx:\d+$/),
+      },
     ]);
   });
 

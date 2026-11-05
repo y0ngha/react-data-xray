@@ -1,5 +1,6 @@
 import { round3 } from '../../shared/format.js';
 import { N_PLUS_ONE_FIX } from '../requests/nPlusOne.js';
+import { round1 } from '../../shared/format.js';
 import { countProblems, type RenderStorm } from '../problems.js';
 import type { CacheFindingKind } from '../reactQuery/cacheAudit.js';
 import { WINDOW_MS } from '../render/summary.js';
@@ -8,11 +9,10 @@ import { LARGE_LAYOUT_SHIFT, MAX_LAYOUT_SHIFT_ROWS, type LayoutShiftRow } from '
 import type { ReactQuerySection } from './reactQuerySection.js';
 import { MAX_RENDER_GROUPS, type RenderSection } from './renderSection.js';
 import type { RequestSection } from './requestSection.js';
-import { componentId, endpointId } from './ids.js';
+import { componentId, componentIdOf, endpointId } from '../../shared/ids.js';
 import { callerOf } from '../requests/callerFrames.js';
 
 const MAX_TOP_FINDINGS = 10;
-const round1 = (n: number): number => Math.round(n * 10) / 10;
 
 export type FindingKind =
   | 'duplicate'
@@ -360,7 +360,7 @@ const stormTarget = (s: RenderStorm): TopFinding['target'] =>
         library: `${s.package} ${s.name}`,
         ...(s.owner.location && { location: s.owner.location }),
       }
-    : { id: componentId(s.name, s.location), component: s.name, ...(s.location && { location: s.location }) };
+    : { id: componentIdOf(s), component: s.name, ...(s.location && { location: s.location }) };
 
 const remountFinding = (c: Component, i: number, target: TopFinding['target']): Ranked[] => {
   const remounts = c.mounts?.remounts ?? [];
@@ -462,6 +462,8 @@ const layoutShiftFindings = (rows: readonly LayoutShiftRow[]): { findings: Ranke
           ...((cause?.componentId ?? movedId) && { id: cause?.componentId ?? movedId }),
           ...(cause && { endpoint: cause.endpoint, endpointId: cause.endpointId }),
           ...((cause?.component ?? component) && { component: cause?.component ?? component }),
+          // 고칠 곳(id)이 원인 컴포넌트일 때, 밀린 컴포넌트는 componentId 로 남긴다
+          ...(cause && movedId && movedId !== cause.componentId && { componentId: movedId }),
           ...(location && { location }),
         },
         evidence: { shifts: list.length, score, ...(cause?.inferred && { inferredCause: 1 }) },
@@ -540,5 +542,5 @@ export const SUMMARY_HOW_TO_READ: readonly string[] = [
   `topFindings[].severity high means the RDX button badge counts it (an endpoint with wasted requests, or a component group — name and JSX location — with an instance rendering ${RENDER_STORM}+ times within the last ${WINDOW_MS / 1000}s; the same rule and count as summary.badge); medium means it can be reduced but the badge does not count it. Within a severity, requests come first (request bursts after the other request findings), then React Query, renders, layout shifts (a component whose shifts add up to a score of ${LARGE_LAYOUT_SHIFT}+, largest evidence.score first), and remounts; within each, the largest estimated savings (requests or renders saved, then ms) comes first.`,
   'topFindings[].detail is the path of the full entry in this report (e.g. requests.endpoints[0], or renders.components[2].libraries[0] for a library component folded into the app component that renders it); read it and confirm in code before fixing. target.location is the listed caller that sent the most wasted requests, the JSX location (renderedAt), or the call site (stack); it is absent when unknown. savings is an estimate (ms values are dev-build sums).',
   // 섹션 공통 id(report/ids.ts). topFindings 의 target.id 로 상세 행을 찾아가는 법이라 summary 줄에 둔다.
-  "id fields link the same endpoint or component across sections, summary and compare. They are strings built from names and locations (not numbers), so they stay the same across runs: an endpoint is ep:<endpoint> (e.g. ep:GET /items/:id), a component is c:<name>@<renderedAt> (c:<name> when the JSX location is unknown). requests.endpoints[].id and renders.components[].id name the rows; endpointId and componentId (and causedBy[].id, heaviestCommits[].startedBy.id) refer to them from networkCauses, requests.nPlusOne, requests.waterfalls[].chain, requests.bursts[].topEndpoints, requests.followUps (mutationId, refetchedId) and layoutShifts. componentId in requests.nPlusOne, requests.waterfalls[].chain and request findings is name-only because the sending component's JSX location is not known: it matches the renders.components rows whose id is c:<name> or starts with c:<name>@. summary.topFindings[].target.id is the row to fix (ep: for request findings, c: for render, remount and layout-shift findings; absent for React Query findings, which use queryKeys), and target.endpointId / componentId is the other endpoint or component the finding involves. compare rows carry the same id. A location still being source-mapped can change the id, so compare snapshots (complete true), not periodic files.",
+  "id fields link the same endpoint or component across sections, summary and compare. They are strings built from names and locations (not numbers), so they stay the same across runs: an endpoint is ep:<endpoint> (e.g. ep:GET /items/:id), a component is c:<name>@<renderedAt> (c:<name> when the JSX location is unknown); a library component row (package present) is c:<name>(<package>), followed by <<owner name>@<owner location> when the app component that rendered it is known. requests.endpoints[].id and renders.components[].id name the rows; endpointId and componentId (and causedBy[].id, heaviestCommits[].startedBy.id) refer to them from networkCauses, requests.nPlusOne, requests.waterfalls[].chain, requests.bursts[].topEndpoints, requests.followUps (mutationId, refetchedId) and layoutShifts. causedBy[].id and startedBy.id use the same rule as renders.components[].id, but that row may be missing from renders.components when it is beyond the row limit (renders.omitted) or did not render itself in the window. componentId in requests.nPlusOne, requests.waterfalls[].chain and request findings is name-only because the sending component's JSX location is not known: it matches the renders.components rows whose id is c:<name> or starts with c:<name>@. summary.topFindings[].target.id is the row to fix (ep: for request findings, c: for render, remount and layout-shift findings; absent for React Query findings, which use queryKeys), and target.endpointId / componentId is the other endpoint or component the finding involves (for a layout-shift finding whose fix is in the cause component, componentId is the component that moved). compare rows carry the same id. A location still being source-mapped can change the id, so compare snapshots (complete true), not periodic files.",
 ];

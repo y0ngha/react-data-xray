@@ -29,12 +29,24 @@ export interface NetworkCause {
   guessed?: true;
 }
 
+/**
+ * 렌더 행을 가르는 값만 담은 작은 칸(이름·그리는 위치·패키지·그린 앱 컴포넌트). 렌더 기록마다 하나 두고, React 19 의 위치가
+ * 소스맵으로 원본 줄로 바뀌면 이 칸도 고친다. 렌더 원인(origin.from)·commit(startedFrom)은 렌더 기록 대신 이 칸을 들어,
+ * fiber·렌더 기록을 붙잡지 않고도 보고서를 만들 때 바뀐 위치를 읽는다.
+ */
+export interface ComponentSite {
+  name: string;
+  location?: string;
+  package?: string;
+  owner?: { name: string; location?: string };
+}
+
 /** 렌더를 시작한 컴포넌트: 자기 state·context 가 바뀌었거나 새로 붙은 가장 가까운 조상(부모를 따라 렌더된 자손이 이어받는다) */
 export interface RenderOrigin {
   name: string;
   reason: RenderReason;
   /** 시작한 컴포넌트의 기록. 같은 이름의 다른 위치 컴포넌트와 구분하는 데만 쓴다(보고서·집계 결과에는 싣지 않는다). */
-  from?: { name: string; location?: string; package?: string; owner?: { name: string; location?: string } };
+  from?: ComponentSite;
 }
 
 /** state 때문에 렌더됐을 때, 값이 바뀐 훅 하나 */
@@ -77,8 +89,10 @@ export interface RenderEntry {
   location?: string;
   /** 라이브러리 코드가 만든 element 를 그리는 컴포넌트면 그 패키지 이름(그리는 위치가 앱 코드가 아니다) */
   package?: string;
-  /** 라이브러리 컴포넌트를 그린 가장 가까운 앱 컴포넌트 */
+  /** 라이브러리 컴포넌트를 그린 가장 가까운 앱 컴포넌트(그 기록의 site 를 물려 위치가 바뀌면 따라온다) */
   owner?: { name: string; location?: string };
+  /** 이 기록의 렌더 행 칸(ComponentSite). monitor 가 만들 때 둔다. 테스트가 손으로 만든 기록에는 없을 수 있다 */
+  site?: ComponentSite;
   /** React Compiler 가 메모하는 컴포넌트인지. 그러면 React.memo 대신 구조를 바꾸라고 권한다. */
   compiled?: boolean;
   /** memo 가 부모의 렌더를 건너뛴 시각(최근 것만 남긴다) */
@@ -136,7 +150,9 @@ export interface NetworkCauseCount {
 
 export interface OriginCount extends RenderOrigin {
   count: number;
-  /** 시작한 컴포넌트를 그리는 JSX 위치(소스맵으로 바뀐 것). 같은 이름의 다른 위치 컴포넌트는 따로 센다. 라이브러리 컴포넌트·위치를 모르면 없다 */
+  /** 시작한 컴포넌트의 렌더 행 id(componentIdOf, 보고서를 만들 때 정한다). 같은 행이면 한 칸에 센다 */
+  id: string;
+  /** 시작한 컴포넌트를 그리는 JSX 위치(소스맵으로 바뀐 것). 라이브러리 컴포넌트·위치를 모르면 없다 */
   location?: string;
 }
 
@@ -179,8 +195,8 @@ export interface Commit {
   ms?: number;
   /** 이 commit 을 시작한 컴포넌트(스스로 state·context 가 바뀌었거나 마운트된 가장 위 컴포넌트) */
   startedBy?: string;
-  /** startedBy 의 렌더 기록. 위치(소스맵으로 바뀌면 원본 줄)를 보고서를 만들 때 읽는다 */
-  startedFrom?: Pick<RenderEntry, 'location' | 'package'>;
+  /** startedBy 의 렌더 행 칸. 위치(소스맵으로 바뀌면 원본 줄)를 보고서를 만들 때 읽는다 */
+  startedFrom?: ComponentSite;
   /** 이 commit 에서 응답을 직접 받아 렌더된 첫(가장 위) 컴포넌트와 그 원인 */
   networkCause?: { cause: NetworkCause; component: string; location?: string };
 }

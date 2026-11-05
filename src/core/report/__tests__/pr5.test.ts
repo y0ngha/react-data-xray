@@ -23,7 +23,7 @@ describe('compare: 같은 이름의 위치별 행 (PR5-1)', () => {
       { name: 'Row', renders: 2, renderedAt: 'A.tsx:1' },
       { name: 'Row', renders: 9, renderedAt: 'B.tsx:2' },
     ]);
-    expect(compare(a, b).renders).toEqual([{ name: 'Row', id: 'c:Row@B.tsx:2', renderedAt: 'B.tsx:2', renders: 4 }]);
+    expect(compare(a, b).renders).toEqual([{ name: 'Row', id: 'c:Row@B.tsx:2', renderedAt: 'B.tsx:2', verdict: 'regressed', renders: 4 }]);
   });
 });
 

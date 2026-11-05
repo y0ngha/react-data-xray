@@ -8,12 +8,13 @@ import { resetLayoutShifts } from '../render/layoutShifts.js';
 import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
-import { buildReport, type RdxReport, type ReportOptions } from './buildReport.js';
+import { buildReport, buildSnapshotReport, type RdxReport, type ReportOptions } from './buildReport.js';
 import { buildDiagnostics, type RdxDiagnostics } from '../diagnostics/diagnostics.js';
 import { MESSAGES } from '../diagnostics/messages.js';
 import { setReportPluginState } from './endpointState.js';
 import { notePolled, notePollSent, receiveCommands, shouldPoll, tabState } from './commands.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
+import type { RenderRowTally } from './renderSection.js';
 
 // 처리기가 이 Host 를 막았을 때의 안내는 MESSAGES.forbiddenHost 한곳에 둔다(Vite·webpack·Next.js 를 함께 적는다).
 const UPLOAD_MS = 5000;
@@ -44,10 +45,13 @@ export const snapshotNames = (): string[] => {
   return [...new Set([...order, ...Object.keys(all)])].filter((n) => n in all);
 };
 export const getSnapshot = (name: string): ComparableReport | undefined => readSnapshots()[name];
-/** snapshot 이 저장에 성공했을 때 부른다(테스트에서 직접 부르기도 한다) */
-export const keepSnapshot = (name: string, value: RdxReport): void => {
+/**
+ * snapshot 이 저장에 성공했을 때 부른다(테스트에서 직접 부르기도 한다). renderBeyondCap 은 그 보고서와 함께 만든
+ * 상한 밖 렌더 행이다(buildSnapshotReport). 없으면 보고서에 있는 행만 남긴다
+ */
+export const keepSnapshot = (name: string, value: RdxReport, renderBeyondCap: readonly RenderRowTally[] = []): void => {
   const all = readSnapshots();
-  all[name] = toComparable(value);
+  all[name] = toComparable(value, renderBeyondCap);
   let keep = [...snapshotNames().filter((n) => n !== name), name].slice(-MAX_SNAPSHOTS);
   // 용량이 넘치면 들어갈 때까지 오래된 것부터 버린다. 방금 저장한 것도 못 넣으면 알린다.
   for (;;) {
@@ -183,7 +187,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
   const resolved = await whenSourcesResolved();
   const monitoring = isRenderMonitoring();
   keepRenderMonitoring();
-  const result = buildReport(monitoring, Date.now(), true, {}, { sourceMapTimedOut: !resolved });
+  const { report: result, renderBeyondCap } = buildSnapshotReport(monitoring, Date.now(), { sourceMapTimedOut: !resolved });
   const res = await send(`${target.path}?name=${encodeURIComponent(name)}`, {
     method: 'POST',
     credentials: 'omit',
@@ -191,8 +195,17 @@ const snapshot = async (name: string): Promise<RdxReport> => {
     body: JSON.stringify(result),
   }).catch(() => null);
   if (!res?.ok) throw new Error(`[react-data-xray] Could not write .rdx/${name}.json (${res ? res.status : 'no response'}).`);
-  keepSnapshot(name, result);
+  keepSnapshot(name, result, renderBeyondCap);
   return result;
+};
+
+/** dev 서버 플러그인이 없어 파일로 못 남길 때 이 탭에만 남긴다(패널 Save). snapshot 과 같은 비교용 부분을 남긴다 */
+export const keepTabSnapshot = (name: string): RdxReport => {
+  const monitoring = isRenderMonitoring();
+  keepRenderMonitoring();
+  const { report: saved, renderBeyondCap } = buildSnapshotReport(monitoring);
+  keepSnapshot(name, saved, renderBeyondCap);
+  return saved;
 };
 
 const compareSnapshots = async (before: string, after: string): Promise<ReportComparison> => {

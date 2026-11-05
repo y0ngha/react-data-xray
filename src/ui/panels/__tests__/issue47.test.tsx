@@ -6,6 +6,15 @@ import type { RdxReport } from '../../../core/report/buildReport.js';
 import { NO_PLUGIN_MESSAGE } from '../../../core/report/reportApi.js';
 import { CompareReports } from '../compare/CompareReports.js';
 import { SnapshotButton } from '../compare/SnapshotButton.js';
+import { compare } from '../../../core/report/compare.js';
+
+// compare 를 흉내 내는 mock 이 돌려줄 빈 합계
+const EMPTY = {
+  requests: { endpoints: [] },
+  renders: { monitoring: true, windowSeconds: 10, components: [] },
+  reactQuery: { findings: [] },
+};
+const EMPTY_TOTALS = compare(EMPTY, EMPTY).totals;
 
 const makeReport = (): RdxReport =>
   ({
@@ -69,9 +78,10 @@ it('snapshot_save_success: successful save shows status and name appears in Comp
     }),
     doctor: buildDiagnostics,
     compare: vi.fn<() => Promise<import('../../../core/report/compare.js').ReportComparison>>(async () => ({
+      totals: EMPTY_TOTALS,
       requests: [],
       renders: [],
-      reactQuery: { added: [], resolved: [] },
+      reactQuery: { added: [], resolved: [], fetchCauses: [] },
       warnings: [],
     })),
   };
@@ -110,9 +120,10 @@ it('snapshot_no_plugin: no plugin → tab-only status, name appears in sessionSt
     }),
     doctor: buildDiagnostics,
     compare: vi.fn<() => Promise<import('../../../core/report/compare.js').ReportComparison>>(async () => ({
+      totals: EMPTY_TOTALS,
       requests: [],
       renders: [],
-      reactQuery: { added: [], resolved: [] },
+      reactQuery: { added: [], resolved: [], fetchCauses: [] },
       warnings: [],
     })),
   };

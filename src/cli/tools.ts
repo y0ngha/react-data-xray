@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { compare, type ComparableReport } from '../core/report/compare.js';
+import type { RdxReport } from '../core/report/buildReport.js';
+import { compare, toComparable, type ComparableReport } from '../core/report/compare.js';
 import { DEFAULT_REPORT_NAME, isReportName, isTabId, reportFileFor, TABS_INDEX } from '../shared/reportPath.js';
 import {
   CliError,
@@ -67,7 +68,8 @@ export const compareTool = async (opts: CliOptions, before: string | undefined, 
   const [a, b] = await Promise.all([readReportFile(opts, before), readReportFile(opts, after)]);
   for (const { file, value } of [a, b])
     if (!isComparable(value)) throw new CliError(`${file} is not an rdx report (no requests/renders/reactQuery).`, EXIT.failed);
-  const result = compare(a.value as ComparableReport, b.value as ComparableReport);
+  // 파일은 보고서 전체다. 브라우저 스냅샷과 같은 비교용 부분으로 줄여 비교한다(렌더 시간·낭비 fetch 묶음을 같은 이름으로 읽는다).
+  const result = compare(toComparable(a.value as unknown as RdxReport), toComparable(b.value as unknown as RdxReport));
   const name = `compare-${before}-${after}`;
   if (isReportName(name)) {
     const folder = join(opts.cwd, opts.dir);

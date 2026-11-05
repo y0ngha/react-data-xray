@@ -1,6 +1,6 @@
 import { getLayoutShifts, layoutShiftSupported, type LayoutShift } from '../render/layoutShifts.js';
 import { round3 } from '../../shared/format.js';
-import { componentId, endpointId } from './ids.js';
+import { componentId, endpointId } from '../../shared/ids.js';
 
 // 큰 이동부터 이만큼만 싣는다.
 export const MAX_LAYOUT_SHIFT_ROWS = 20;

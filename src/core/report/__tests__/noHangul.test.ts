@@ -29,7 +29,7 @@ describe('no_hangul', () => {
       memoized: false,
       network: 0,
       causes: [],
-      origins: [{ name: 'Parent', reason: 'state', count: 2 }],
+      origins: [{ name: 'Parent', id: 'c:Parent', reason: 'state', count: 2 }],
       stateHooks: [{ label: 'useState #1', count: 3, intervalMs: 2000, last: { from: '0', to: '1' } }],
       compiled: false,
     };

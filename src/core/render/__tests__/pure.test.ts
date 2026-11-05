@@ -154,7 +154,7 @@ describe('summary, groups, advice', () => {
       memoized: false,
       network: 0,
       causes: [],
-      origins: [{ name: 'ChartContent', reason: 'state', count: 3 }],
+      origins: [{ name: 'ChartContent', id: 'c:ChartContent', reason: 'state', count: 3 }],
       stateHooks: [{ label: 'useState #4', count: 3, intervalMs: 1000, last: { from: '3000', to: '2000' } }],
       compiled: true,
     };

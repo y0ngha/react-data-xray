@@ -7,6 +7,15 @@ import { PanelToolbar } from '../PanelToolbar.js';
 import { buildDiagnostics } from '../../../core/diagnostics/diagnostics.js';
 import type { RdxReport } from '../../../core/report/buildReport.js';
 import { NO_PLUGIN_MESSAGE } from '../../../core/report/reportApi.js';
+import { compare } from '../../../core/report/compare.js';
+
+// compare 를 흉내 내는 mock 이 돌려줄 빈 합계
+const EMPTY = {
+  requests: { endpoints: [] },
+  renders: { monitoring: true, windowSeconds: 10, components: [] },
+  reactQuery: { findings: [] },
+};
+const EMPTY_TOTALS = compare(EMPTY, EMPTY).totals;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -131,9 +140,10 @@ describe('성공 알림 4s 후 사라짐, 실패는 유지 (#49)', () => {
       }),
       doctor: buildDiagnostics,
       compare: vi.fn<() => Promise<import('../../../core/report/compare.js').ReportComparison>>(async () => ({
+        totals: EMPTY_TOTALS,
         requests: [],
         renders: [],
-        reactQuery: { added: [], resolved: [] },
+        reactQuery: { added: [], resolved: [], fetchCauses: [] },
         warnings: [],
       })),
     };

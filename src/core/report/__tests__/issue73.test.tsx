@@ -5,12 +5,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { mockFetch } from '../../../testing/fetchMock.js';
 import { whenSourcesResolved } from '../../capture/requestContext.js';
-import { auditQueryCache, findQueryClients } from '../../reactQuery/cacheAudit.js';
-import { resetRenderStats, setRenderMonitoring } from '../../render/monitor.js';
+import { auditQueryCache, findQueryClients, shownStacks } from '../../reactQuery/cacheAudit.js';
+import { getCommits, resetRenderStats, setRenderMonitoring } from '../../render/monitor.js';
 import { appFramesOf } from '../../requests/callerFrames.js';
 import { flushQueue } from '../../scheduler/idleQueue.js';
 import { compare } from '../compare.js';
-import { componentId, endpointId } from '../ids.js';
+import { componentId, componentIdOf, endpointId } from '../../../shared/ids.js';
+import { buildReactQuerySection } from '../reactQuerySection.js';
 import { buildRenderSection } from '../renderSection.js';
 import { buildSummary } from '../summarySection.js';
 
@@ -49,12 +50,54 @@ describe('보고서의 고칠 위치와 섹션 공통 id (#73)', () => {
     ]);
     const started = sec.heaviestCommits?.find((c) => c.startedBy?.name === 'Counter')?.startedBy;
     expect(started).toEqual({ id: counter.id, name: 'Counter', ...(counter.renderedAt && { renderedAt: counter.renderedAt }) });
+    // 모든 causedBy id 가 렌더 행 하나를 가리킨다(행 상한 밖이면 없을 수 있다고 howToRead 에 적었다)
+    const ids = new Set(sec.components.map((c) => c.id));
+    sec.components.flatMap((c) => c.causedBy).forEach((o) => expect(ids.has(o.id)).toBe(true));
+    // commit 은 렌더 기록(fiber·이벤트)이 아니라 행 칸만 든다
+    const commit = getCommits().find((c) => c.startedBy === 'Counter')!;
+    expect(Object.keys(commit.startedFrom ?? {}).sort()).toEqual(counter.renderedAt ? ['location', 'name'] : ['name']);
+  });
+
+  it('같은 자리의 여러 인스턴스가 시작한 렌더는 causedBy 한 칸에 센다', () => {
+    const bumps: Array<() => void> = [];
+    const Item = () => {
+      const [n, setN] = useState(0);
+      useEffect(() => {
+        bumps.push(() => setN((x) => x + 1));
+      }, []);
+      return <Middle n={n} />;
+    };
+    render(
+      <>
+        {[1, 2, 3].map((k) => (
+          <Item key={k} />
+        ))}
+      </>,
+    );
+    act(() => bumps.forEach((b) => b()));
+    flushQueue();
+    const sec = buildRenderSection(true, Date.now());
+    const item = sec.components.find((c) => c.name === 'Item')!;
+    expect(sec.components.find((c) => c.name === 'Leaf')!.causedBy).toEqual([
+      { id: item.id, name: 'Item', ...(item.renderedAt && { renderedAt: item.renderedAt }), reason: 'state', count: 3 },
+    ]);
   });
 
   it('id 는 이름과 위치로 만든다(숫자가 아니라 실행이 달라도 같다)', () => {
     expect(endpointId('GET /items/:id')).toBe('ep:GET /items/:id');
     expect(componentId('Row', 'src/Row.tsx:12')).toBe('c:Row@src/Row.tsx:12');
     expect(componentId('Row')).toBe('c:Row');
+    // 라이브러리 행은 패키지와 그린 앱 컴포넌트로 가른다(렌더 그룹 키와 같다)
+    expect(
+      componentIdOf({
+        name: 'Cell',
+        package: 'ag-grid',
+        location: 'node_modules/x.js:1',
+        owner: { name: 'Grid', location: 'src/Grid.tsx:9' },
+      }),
+    ).toBe('c:Cell(ag-grid)<Grid@src/Grid.tsx:9');
+    expect(componentIdOf({ name: 'Cell', package: 'ag-grid' })).toBe('c:Cell(ag-grid)');
+    expect(componentIdOf({ name: 'Row', location: 'src/Row.tsx:12' })).toBe(componentId('Row', 'src/Row.tsx:12'));
   });
 
   it('summary·compare 도 같은 id 로 가리킨다', () => {
@@ -74,8 +117,15 @@ describe('보고서의 고칠 위치와 섹션 공통 id (#73)', () => {
     };
     const summary = buildSummary(
       { total: 3, dropped: 0, endpoints: [endpoint], nPlusOne: [], waterfalls: [], bursts: [], burstsOmitted: 0, followUps: [] },
-      { found: false, findings: [] },
-      { monitoring: true, windowSeconds: 10, truncated: false, droppedInstances: 0, components: [] },
+      { found: false, findings: [], fetchCausesOmitted: 0 },
+      {
+        monitoring: true,
+        windowSeconds: 10,
+        truncated: false,
+        droppedInstances: 0,
+        omitted: { components: 0, renders: 0, avoidable: 0 },
+        components: [],
+      },
       new Map(),
     );
     expect(summary.topFindings[0].target).toEqual({
@@ -94,6 +144,41 @@ describe('보고서의 고칠 위치와 섹션 공통 id (#73)', () => {
     const diff = compare(make(2, 4), make(0, 1));
     expect(diff.requests[0].id).toBe('ep:GET /a');
     expect(diff.renders[0].id).toBe('c:Row@src/Row.tsx:3');
+  });
+
+  it('레이아웃 이동 finding 은 고칠 원인 컴포넌트를 id 로, 밀린 컴포넌트를 componentId 로 가리킨다', () => {
+    const empty = { total: 0, dropped: 0, endpoints: [], nPlusOne: [], waterfalls: [], bursts: [], burstsOmitted: 0, followUps: [] };
+    const renders = {
+      monitoring: true,
+      windowSeconds: 10,
+      truncated: false,
+      droppedInstances: 0,
+      omitted: { components: 0, renders: 0, avoidable: 0 },
+      components: [],
+    };
+    const row = {
+      value: 0.2,
+      secondsAgo: 1,
+      component: 'Card',
+      renderedAt: 'src/Card.tsx:3',
+      componentId: 'c:Card@src/Card.tsx:3',
+      cause: {
+        endpoint: 'GET /a',
+        endpointId: 'ep:GET /a',
+        component: 'List',
+        componentId: 'c:List@src/List.tsx:5',
+        renderedAt: 'src/List.tsx:5',
+      },
+    };
+    const summary = buildSummary(empty, { found: false, findings: [], fetchCausesOmitted: 0 }, renders, new Map(), [row]);
+    expect(summary.topFindings[0].target).toEqual({
+      id: 'c:List@src/List.tsx:5',
+      endpoint: 'GET /a',
+      endpointId: 'ep:GET /a',
+      component: 'List',
+      componentId: 'c:Card@src/Card.tsx:3',
+      location: 'src/List.tsx:5',
+    });
   });
 
   it('스택은 앱 프레임 앞쪽 3줄로 자르고, 앱 프레임이 없으면 앞쪽 프레임을 남긴다', () => {
@@ -117,7 +202,7 @@ describe('보고서의 고칠 위치와 섹션 공통 id (#73)', () => {
     expect(appFramesOf('Error')).toBeUndefined();
   });
 
-  it('React Query finding 의 호출 위치는 앱 프레임 3줄이고, 요청 callers 처럼 소스맵으로 원본 위치가 된다', async () => {
+  it('React Query finding 의 호출 위치는 앱 프레임 3줄이고, 요청 callers 처럼 소스맵으로 원본 위치가 되며, 변환 전·후의 같은 호출 위치는 한 줄로 묶는다', async () => {
     const code = `a\nb\nsave()\n//# sourceMappingURL=${inlineMap({ version: 3, sources: ['rq-save.ts'], mappings: ';;AASE' })}`;
     const original = mockFetch.getMockImplementation()!;
     mockFetch.mockImplementation(async (input, init) =>
@@ -142,13 +227,24 @@ describe('보고서의 고칠 위치와 섹션 공통 id (#73)', () => {
       await client.invalidateQueries({ queryKey: ['nothing'] });
       flushQueue();
       await whenSourcesResolved();
+      // 앞 finding 의 위치가 원본으로 바뀐 뒤에 같은 곳에서 또 부른다
+      await client.invalidateQueries({ queryKey: ['nothing-else'] });
+      flushQueue();
     } finally {
       Error.prepareStackTrace = prepare;
     }
-    const miss = auditQueryCache(() => 'ok', []).find((f) => f.kind === 'invalidate-miss');
-    const lines = miss?.stack?.split('\n') ?? [];
+    const misses = auditQueryCache(() => 'ok', []).filter((f) => f.kind === 'invalidate-miss');
+    expect(misses).toHaveLength(1);
+    expect(misses[0].count).toBe(2);
+    // 묶기 키는 기록한 그대로의 위치다
+    expect(misses[0].stack?.split('\n')[0]).toBe('at save (http://localhost:3000/src/rq-save.ts:3:5)');
+    const lines = shownStacks(misses[0]).stack?.split('\n') ?? [];
     expect(lines).toHaveLength(3);
     expect(lines[0]).toBe('at save (src/rq-save.ts:10:3)');
-    expect(miss?.stack).not.toContain('node_modules');
+    expect(shownStacks(misses[0]).stack).not.toContain('node_modules');
+    // 보고서에는 원본 위치만 싣는다
+    const [finding] = buildReactQuerySection([], new Map()).findings.filter((f) => f.kind === 'invalidate-miss');
+    expect(finding.stack?.split('\n')[0]).toBe('at save (src/rq-save.ts:10:3)');
+    expect(finding).not.toHaveProperty('resolvedStack');
   });
 });

@@ -14,7 +14,13 @@ import {
   REACT_QUERY_HOW_TO_READ_EXTRA,
   type ReactQuerySection,
 } from './reactQuerySection.js';
-import { buildRenderSection, RENDER_HOW_TO_READ, RENDER_HOW_TO_READ_EXTRA, type RenderSection } from './renderSection.js';
+import {
+  buildRenderSectionParts,
+  RENDER_HOW_TO_READ,
+  RENDER_HOW_TO_READ_EXTRA,
+  type RenderRowTally,
+  type RenderSection,
+} from './renderSection.js';
 import { buildRequestSection, REQUEST_HOW_TO_READ, REQUEST_HOW_TO_READ_EXTRA, type RequestSection } from './requestSection.js';
 import { LAYOUT_SHIFT_HOW_TO_READ, layoutShiftRows, MAX_LAYOUT_SHIFT_ROWS, type LayoutShiftRow } from './layoutShiftSection.js';
 import { getResetAt } from './resetAt.js';
@@ -79,7 +85,8 @@ export interface BuildContext {
  * HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침,
  * 4: config 줄과 설정 안내 줄(#78), 5: complete·incompleteReasons 줄 #71, 6: requests.nPlusOne 줄과 config.nPlusOne #85,
  * 7: requests.endpoints[].renders #84, 8: waterfalls 줄 #86, 9: unused 줄 #87, 10: layoutShifts 줄 #89,
- * 12: requests.bursts·followUps 줄 #74(11 은 먼저 열린 #110 몫), 14: 섹션 공통 id 줄, causedBy·startedBy 위치, React Query 스택 #73(13 은 #110 몫)).
+ * 12: requests.bursts·followUps 줄 #74, 13: renders.omitted·reactQuery.fetchCausesOmitted·compare 판정 줄 #72,
+ * 14: 섹션 공통 id 줄, causedBy·startedBy 위치, React Query 스택 #73).
  */
 export const HOW_TO_READ_VERSION = 14;
 
@@ -108,17 +115,24 @@ export const HOW_TO_READ: readonly string[] = [
   'Check diagnostics.problems first: if rdx was loaded after react-dom (renderHook.commitsSeen is 0) or requests went out before it loaded (capture.requestsBeforeInstall), the rest of the report is incomplete. Each problem says how to fix it.',
   'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), nPlusOne (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, nPlusOne, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
   'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
+  "compare(before, after) gives a verdict for each row and for totals (requests, wastedRequests, renders, avoidable). For a row in both reports: improved or regressed by waste first (duplicates + sameResponses for requests, avoidable for renders, count of wasteful groups for React Query fetch causes), then by the total count; unchanged otherwise. For a row in only one report: new or gone, except regressed for a new row that has waste and improved for a gone row that had waste. unknown means it cannot be told: the row may have been left out by one report's row limit (status unknown, the known side is in before/after), or a total covers dropped requests or an older snapshot that filled the render row limit.",
   'howToReadVersion is the version of these lines. If you already read this version, call window.__RDX__.report({ howToRead: false }) to leave them out.',
 ];
 
-/** 지금까지 모은 요청과 렌더를 요약한다. drain 이 false 면(주기적인 업로드) 미뤄 둔 분석을 기다리지 않고 지금까지 끝난 것만 담는다. */
-export const buildReport = (
+/** 비교용으로 저장할 보고서와, 보고서 상한 밖 렌더 행(보고서 JSON 에는 싣지 않는다). keepSnapshot·toComparable 에 함께 넘긴다 */
+export interface SnapshotReport {
+  report: RdxReport;
+  renderBeyondCap: RenderRowTally[];
+}
+
+const buildReportParts = (
   monitoring: boolean,
-  now = Date.now(),
-  drain = true,
-  options: ReportOptions = {},
-  context: BuildContext = {},
-): RdxReport => {
+  now: number,
+  drain: boolean,
+  options: ReportOptions,
+  context: BuildContext,
+  withBeyondCap: boolean,
+): { report: RdxReport; renderBeyondCap?: RenderRowTally[] } => {
   // 사용자가 직접 묻는 조회는 미뤄 둔 분석을 먼저 마친다.
   if (drain) {
     queueIndex(); // 모든 기록의 색인 일을 큐에 올린 뒤
@@ -136,7 +150,7 @@ export const buildReport = (
   const endpointRenders = getEndpointRenders(now, reportWindowMs(now), { include: (r) => shown.has(r) });
   const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf, endpointRenders);
   const reactQuery = buildReactQuerySection(records, classes);
-  const renders = buildRenderSection(monitoring, now);
+  const { section: renders, beyondCap: renderBeyondCap } = buildRenderSectionParts(monitoring, now, withBeyondCap);
   const allShifts = layoutShiftRows(now);
   const layoutShifts = allShifts?.slice(0, MAX_LAYOUT_SHIFT_ROWS);
   // 섹션을 만든 뒤에 읽는다(만드는 동안 큐에 들어간 일도 센다). 읽기만 하고 비우지 않는다.
@@ -149,7 +163,7 @@ export const buildReport = (
     ...(sourcesResolved ? [] : [context.sourceMapTimedOut ? ('source-map-timeout' as const) : ('source-maps' as const)]),
     ...(queryKeysResolved ? [] : (['query-keys'] as const)),
   ];
-  return {
+  const report: RdxReport = {
     // 순위만 매긴다: 위 섹션이 이미 계산한 값과, 배지가 쓰는 렌더 폭주 기준(core/problems.ts)
     summary: buildSummary(requests, reactQuery, renders, findRenderStorms(now), allShifts),
     howToReadVersion: HOW_TO_READ_VERSION,
@@ -169,4 +183,23 @@ export const buildReport = (
     ...(layoutShifts && { layoutShifts }),
     diagnostics: buildDiagnostics(),
   };
+  return { report, renderBeyondCap };
+};
+
+/** 지금까지 모은 요청과 렌더를 요약한다. drain 이 false 면(주기적인 업로드) 미뤄 둔 분석을 기다리지 않고 지금까지 끝난 것만 담는다. */
+export const buildReport = (
+  monitoring: boolean,
+  now = Date.now(),
+  drain = true,
+  options: ReportOptions = {},
+  context: BuildContext = {},
+): RdxReport => buildReportParts(monitoring, now, drain, options, context, false).report;
+
+/**
+ * snapshot 이 저장할 보고서. 큐를 비운 사용자 조회이고, compare 가 상한 때문에 밀린 행을 사라진 것으로 보지 않게
+ * 보고서 상한 밖 렌더 행도 함께 만든다(주기 업로드는 만들지 않는다).
+ */
+export const buildSnapshotReport = (monitoring: boolean, now = Date.now(), context: BuildContext = {}): SnapshotReport => {
+  const { report, renderBeyondCap } = buildReportParts(monitoring, now, true, {}, context, true);
+  return { report, renderBeyondCap: renderBeyondCap ?? [] };
 };

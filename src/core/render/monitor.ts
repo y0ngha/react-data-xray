@@ -55,9 +55,8 @@ let epoch = 0;
 const appOwnerOf = (fiber: Fiber): RenderEntry['owner'] => {
   for (let f = fiber.return; f; f = f.return) {
     if (!isComposite(f) || libraryPackageOf(f)) continue;
-    return (
-      entries.get(f) ?? (f.alternate ? entries.get(f.alternate) : undefined) ?? { name: getComponentName(f), location: jsxLocationOf(f) }
-    );
+    const entry = entries.get(f) ?? (f.alternate ? entries.get(f.alternate) : undefined);
+    return entry ? (entry.site ?? entry) : { name: getComponentName(f), location: jsxLocationOf(f) };
   }
   return undefined;
 };
@@ -77,10 +76,18 @@ const entryOf = (fiber: Fiber, alt: Fiber | null, memoized: boolean, compiled: b
     owner: pkg ? appOwnerOf(fiber) : undefined,
   };
   if (!existing) {
-    // React 19 의 위치는 변환된 코드 기준이라, 소스맵을 받는 대로 원본 줄로 바꾼다.
+    entry.site = {
+      name: entry.name,
+      ...(entry.location && { location: entry.location }),
+      ...(pkg && { package: pkg }),
+      ...(entry.owner && { owner: entry.owner }),
+    };
+    // React 19 의 위치는 변환된 코드 기준이라, 소스맵을 받는 대로 원본 줄로 바꾼다(행 칸도 같이).
     void resolveJsxLocation(fiber)
       .then((location) => {
-        if (location) entry.location = location;
+        if (!location) return;
+        entry.location = location;
+        if (entry.site) entry.site.location = location;
       })
       .catch(() => undefined);
   }
@@ -271,7 +278,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
         if (event.ms !== undefined) totalMs = (totalMs ?? 0) + event.ms;
         if (startedBy === undefined && STARTS_RENDER.has(event.reason)) {
           startedBy = getComponentName(p.fiber);
-          startedFrom = entries.get(p.fiber);
+          startedFrom = entries.get(p.fiber)?.site;
         }
         if (!networkCause && event.cause && event.cause.via !== 'parent') {
           const entry = entries.get(p.fiber);
@@ -279,7 +286,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
         }
         inheritedBy[at] = {
           cause: event.cause,
-          origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason, from: entries.get(p.fiber) },
+          origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason, from: entries.get(p.fiber)?.site },
         };
       } catch {
         /* 이 fiber 만 건너뛴다 */

@@ -144,7 +144,7 @@ describe('RenderGroupRow', () => {
       memoized: false,
       network: 3,
       causes: [{ record, direct: 1, timing: 0, parent: 2, sameResponse: 2 }],
-      origins: [{ name: 'Page', reason: 'state', count: 4 }],
+      origins: [{ name: 'Page', id: 'c:Page', reason: 'state', count: 4 }],
       stateHooks: [],
       compiled: false,
       location: 'src/Page.tsx:12',

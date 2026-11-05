@@ -25,6 +25,8 @@ export interface RenderGroup extends RenderSummary {
   impact?: OriginImpact;
   /** 라이브러리 소유 컴포넌트면 그 패키지(그린 앱 컴포넌트를 못 찾았을 때만 목록에 따로 남는다) */
   package?: string;
+  /** 라이브러리 그룹을 그린 앱 컴포넌트(그룹 키의 일부, 첫 인스턴스의 것) */
+  owner?: { name: string; location?: string };
   /** 이 앱 컴포넌트가 그려서 안쪽에서 렌더된 라이브러리 컴포넌트들 */
   libraries?: LibraryRender[];
   /** 마운트·언마운트·재마운트 횟수(언마운트가 있었을 때만) */
@@ -75,7 +77,7 @@ const mergeCauses = (a: readonly NetworkCauseCount[], b: readonly NetworkCauseCo
 const mergeOrigins = (a: readonly OriginCount[], b: readonly OriginCount[]): OriginCount[] => {
   const byOrigin = new Map<string, OriginCount>();
   [...a, ...b].forEach((o) => {
-    const key = `${o.name}|${o.location ?? ''}|${o.reason}`;
+    const key = `${o.id}|${o.reason}`;
     const prev = byOrigin.get(key);
     byOrigin.set(key, prev ? { ...prev, count: prev.count + o.count } : { ...o });
   });

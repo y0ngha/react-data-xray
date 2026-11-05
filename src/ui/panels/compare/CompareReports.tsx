@@ -1,19 +1,48 @@
 import { useEffect, useMemo, useReducer, useState } from 'react';
 
-import { compare } from '../../../core/report/compare.js';
+import { compare, type ReportComparison, type Total } from '../../../core/report/compare.js';
 import { getSnapshot, snapshotNames } from '../../../core/report/reportApi.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { SNAPSHOT_SAVED_EVENT } from './SnapshotButton.js';
 
-const REQUEST_LABELS: ReadonlySet<string> = new Set(['endpoint', 'status']);
-const RENDER_LABELS: ReadonlySet<string> = new Set(['name', 'status', 'renderedAt', 'package']);
+// 행 머리에 따로 보이는 값과, 증감이 아닌 값(unknown 행의 아는 쪽 값, 행 key 로만 쓰는 id)은 증감 목록에서 뺀다.
+const REQUEST_LABELS: ReadonlySet<string> = new Set(['endpoint', 'id', 'status', 'verdict', 'before', 'after']);
+const RENDER_LABELS: ReadonlySet<string> = new Set(['name', 'id', 'status', 'verdict', 'renderedAt', 'package', 'before', 'after']);
+const FETCH_LABELS: ReadonlySet<string> = new Set(['queryKey', 'observer', 'cause', 'wasteful', 'status', 'verdict', 'before', 'after']);
+
+const signed = (v: number): string => `${v > 0 ? '+' : ''}${v}`;
 
 const fmt = (row: Record<string, unknown>, skip: ReadonlySet<string>): string =>
   Object.entries(row)
     .filter(([k]) => !skip.has(k))
-    .map(([k, v]) => `${k} ${typeof v === 'number' && v > 0 ? '+' : ''}${String(v)}`)
+    .map(([k, v]) => `${k} ${typeof v === 'number' ? signed(v) : String(v)}`)
     .join(' · ');
+
+// unknown 행은 증감 대신 아는 쪽 값만 있다.
+const known = (row: { before?: object; after?: object }): string => {
+  const [side, values] = row.before ? ['before', row.before] : row.after ? ['after', row.after] : ['', {}];
+  const text = Object.entries(values)
+    .map(([k, v]) => `${k} ${String(v)}`)
+    .join(' · ');
+  return text && `(${side}: ${text})`;
+};
+
+const TOTAL_LABELS: Array<[keyof ReportComparison['totals'], string]> = [
+  ['requests', 'requests'],
+  ['wastedRequests', 'wasted requests'],
+  ['renders', 'renders'],
+  ['avoidable', 'avoidable renders'],
+];
+
+const totalText = (label: string, t: Total): string => `${label} ${t.before} → ${t.after} (${signed(t.delta)}, ${t.verdict})`;
+
+const Totals = ({ totals }: { totals: ReportComparison['totals'] }) => (
+  <div>
+    {TOTAL_LABELS.map(([key, label]) => totalText(label, totals[key] as Total)).join(' · ')}
+    {totals.renderMs && ` · render ms ${totals.renderMs.before} → ${totals.renderMs.after} (${signed(totals.renderMs.delta)})`}
+  </div>
+);
 
 /** 저장한 스냅샷 둘(전, 후)을 골라 증감을 보인다. */
 export const CompareReports = () => {
@@ -61,14 +90,21 @@ export const CompareReports = () => {
               {result.warnings.map((w) => (
                 <div key={w}>⚠ {w}</div>
               ))}
+              <Totals totals={result.totals} />
               {result.requests.map((r) => (
                 <div key={r.endpoint}>
-                  {r.endpoint} {r.status ?? ''} {fmt(r, REQUEST_LABELS)}
+                  {r.endpoint} {r.status ?? ''} [{r.verdict}] {fmt(r, REQUEST_LABELS)}
                 </div>
               ))}
               {result.renders.map((r) => (
-                <div key={`${r.name}|${r.renderedAt ?? ''}|${r.package ?? ''}`}>
-                  &lt;{r.name}&gt; {r.renderedAt ?? r.package ?? ''} {r.status ?? ''} {fmt(r, RENDER_LABELS)}
+                <div key={r.id}>
+                  &lt;{r.name}&gt; {r.renderedAt ?? r.package ?? ''} {r.status ?? ''} [{r.verdict}] {fmt(r, RENDER_LABELS)} {known(r)}
+                </div>
+              ))}
+              {result.reactQuery.fetchCauses.map((r) => (
+                <div key={`${r.queryKey}|${r.observer ?? ''}|${r.cause ?? ''}|${r.wasteful ? 1 : 0}`}>
+                  React Query fetch {r.queryKey} {r.cause ?? ''}
+                  {r.wasteful ? ' (wasteful)' : ''} {r.status ?? ''} [{r.verdict}] {fmt(r, FETCH_LABELS)} {known(r)}
                 </div>
               ))}
               {result.reactQuery.added.map((id) => (

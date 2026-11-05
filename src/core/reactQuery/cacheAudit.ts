@@ -39,10 +39,13 @@ export interface CacheFinding {
   keys: string[];
   /** 관련 요청(메서드 URL) */
   requests: string[];
-  /** invalidate-miss: invalidateQueries 를 부른 코드 위치 */
+  /** invalidate-miss: invalidateQueries 를 부른 코드 위치(기록한 그대로의 앱 프레임 3줄. 같은 호출 위치를 묶는 키라 바꾸지 않는다) */
   stack?: string;
-  /** double-invalidate: 겹친 두 무효화의 호출 위치(앞, 뒤) */
+  /** double-invalidate: 겹친 두 무효화의 호출 위치(앞, 뒤). stack 과 같이 기록한 그대로다 */
   stacks?: string[];
+  /** stack·stacks 를 소스맵으로 원본 위치로 바꾼 것. 바뀐 것만 있고, 보여 줄 때는 shownStacks 로 이것을 먼저 쓴다 */
+  resolvedStack?: string;
+  resolvedStacks?: string[];
   /** 같은 호출 위치에서 묶인 수. invalidate-*: 무효화 키 수(keys 는 앞의 몇 개만 남긴다), double-invalidate: 겹친 횟수 */
   count?: number;
 }
@@ -288,15 +291,30 @@ const callerStack = (error: Error): string | undefined => {
 };
 
 /**
- * finding 의 호출 위치를 요청 callers 와 같은 길(소스맵)로 원본 위치로 바꿔 둔다. 같은 finding 객체를 고쳐 쓰므로
- * 이미 묶여 보고서에 실린 finding 도 다음 보고서부터 원본 위치를 보인다. 보고서 저장 전 소스맵 대기가 이 변환도 기다린다.
+ * finding 의 호출 위치를 요청 callers 와 같은 길(소스맵)로 원본 위치로 바꿔 resolvedStack·resolvedStacks 에 둔다. 기록한 stack 은
+ * 묶기 키라 그대로 둔다(바꾸면 같은 호출 위치의 finding 이 변환 전·후로 갈린다). 보고서 저장 전 소스맵 대기가 이 변환도 기다리고,
+ * 바뀌면 패널이 다시 그리도록 알린다.
  */
 const resolveFindingStacks = (finding: CacheFinding): void => {
-  if (finding.stack) resolveSourceStackLater(finding.stack, (resolved) => (finding.stack = resolved));
+  if (finding.stack)
+    resolveSourceStackLater(finding.stack, (resolved) => {
+      finding.resolvedStack = resolved;
+      touchRecords();
+    });
   finding.stacks?.forEach((stack, i) => {
-    if (stack) resolveSourceStackLater(stack, (resolved) => finding.stacks && (finding.stacks[i] = resolved));
+    if (!stack) return;
+    resolveSourceStackLater(stack, (resolved) => {
+      (finding.resolvedStacks ??= [...(finding.stacks ?? [])])[i] = resolved;
+      touchRecords();
+    });
   });
 };
+
+/** 보여 줄 호출 위치: 원본 위치로 바뀐 것이 있으면 그것, 없으면 기록한 그대로 */
+export const shownStacks = (f: CacheFinding): { stack?: string; stacks?: string[] } => ({
+  ...((f.resolvedStack ?? f.stack) !== undefined && { stack: f.resolvedStack ?? f.stack }),
+  ...((f.resolvedStacks ?? f.stacks) && { stacks: f.resolvedStacks ?? f.stacks }),
+});
 
 // 키 모양이 같다: 앞 두 요소가 같은 문자열이고, 그 뒤는 겹치는 자리끼리 타입이 같다(객체는 무효화 쪽 필드가 있다).
 // 그래서 ['todo','detail',1] 과 ['todo','detail',{id:1}] 처럼 타입이 어긋난 오타는 모양이 같다고 보지 않는다.
@@ -811,7 +829,7 @@ export const overlapCancelOf = (record: RequestRecord): string[] | undefined => 
     const m = history?.misses.find(
       (x) => x.at >= auditFrom && x.finding.kind === 'double-invalidate' && !!x.overlap && cancelledBy(x.overlap, record),
     );
-    if (m?.finding.stacks) return m.finding.stacks;
+    if (m?.finding.stacks) return shownStacks(m.finding).stacks;
   }
   return undefined;
 };

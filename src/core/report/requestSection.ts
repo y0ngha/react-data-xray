@@ -14,7 +14,7 @@ import type { RequestRecord } from '../requests/types.js';
 import { findWaterfalls, type Waterfall, type WaterfallStep } from '../requests/waterfall.js';
 import { queryContextOf, type QueryContext } from '../capture/queryContext.js';
 import { groupBy } from '../../shared/collections.js';
-import { componentId, endpointId } from './ids.js';
+import { componentId, endpointId } from '../../shared/ids.js';
 import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 
 const MAX_CALLERS = 3;
