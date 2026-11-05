@@ -61,6 +61,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 | New callback (`changedProps.newCallback`) | `useCallback` in the parent |
 | Context change | Split frequently-changing and stable values into separate contexts; `useMemo` for Provider value |
 | React Query key problem | Follow `reactQuery.findings[].fix` |
+| Unused response (`requests.endpoints[].unused`, summary kind `unused-response`) | Confirm in code that nothing reads the data — not in effects, event handlers, refs, or transformed copies. If truly unused, remove the request or fetch it only when needed (`enabled` condition, on interaction). Otherwise leave it: this flag is a review hint, not proof of waste |
 
 ## 6. Constraints
 

@@ -9,7 +9,14 @@ import type { RequestSection } from './requestSection.js';
 const MAX_TOP_FINDINGS = 10;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
-export type FindingKind = 'duplicate' | 'same-response' | 'react-query' | 'render-storm' | 'avoidable-renders' | 'remount';
+export type FindingKind =
+  | 'duplicate'
+  | 'same-response'
+  | 'unused-response'
+  | 'react-query'
+  | 'render-storm'
+  | 'avoidable-renders'
+  | 'remount';
 
 export interface TopFinding {
   kind: FindingKind;
@@ -46,6 +53,7 @@ export interface ReportSummary {
 const KIND_ORDER: Record<FindingKind, number> = {
   duplicate: 0,
   'same-response': 0,
+  'unused-response': 0,
   'react-query': 1,
   'render-storm': 2,
   'avoidable-renders': 2,
@@ -88,6 +96,30 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
         savings: { requests: wasted, ms },
         detail: `requests.endpoints[${i}]`,
         rank: [wasted, ms, e.count],
+      },
+    ];
+  });
+
+/**
+ * 응답을 쓰는 컴포넌트를 못 찾은 엔드포인트(무시한 것은 뺀다). 배지는 세지 않는다(medium): effect·핸들러에서만 쓰거나 가공한 데이터도 이렇게 보인다.
+ * 보낸 위치는 가장 많이 보낸 caller 다(쓰지 않는 요청만 따로 세지 않는다).
+ */
+const unusedFindings = (endpoints: readonly Endpoint[]): Ranked[] =>
+  endpoints.flatMap((e, i): Ranked[] => {
+    if (e.ignored || !e.unused) return [];
+    const caller = e.callers[0];
+    const component = caller?.component ?? caller?.observer;
+    const ms = Math.round(e.unused * e.avgMs);
+    return [
+      {
+        kind: 'unused-response',
+        severity: 'medium',
+        target: { endpoint: e.endpoint, ...(component && { component }), ...(caller?.frame && { location: caller.frame }) },
+        evidence: { count: e.count, unused: e.unused },
+        savings: { requests: e.unused, ms },
+        fix: 'No component holds this response. Confirm in code that nothing reads it (effects, event handlers, transformed copies), then remove the request or fetch it only when needed.',
+        detail: `requests.endpoints[${i}]`,
+        rank: [e.unused, ms, e.count],
       },
     ];
   });
@@ -255,6 +287,7 @@ export const buildSummary = (
   const problems = countProblems(requests.endpoints, storms);
   const all = [
     ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
+    ...unusedFindings(requests.endpoints),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),
   ].sort(byRank);

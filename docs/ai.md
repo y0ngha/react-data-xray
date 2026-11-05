@@ -58,7 +58,7 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 |---|---|
 | `summary` | Read first. `verdict` (one-line count), `badge` (the RDX button badge count and its breakdown), `topFindings[]` (up to 10, in fix order: `kind`, `severity`, `target` with location, `evidence`, estimated `savings`, `fix`, `detail` path to the full entry), `omitted` |
 | `requests.total` · `dropped` | Number of requests recorded; number dropped when the record limit (`config.maxRecords`, default 200) was exceeded. If `dropped` is non-zero, split the scenario into shorter runs |
-| `requests.endpoints[]` | Per-endpoint `count` · `duplicates` · `sameResponses` · `review` (polling, focus refetch) · `ignored` (in the panel or by `config.ignore`), example waste URLs, `callers` (code that sent the request) |
+| `requests.endpoints[]` | Per-endpoint `count` · `duplicates` · `sameResponses` · `review` (polling, focus refetch) · `ignored` (in the panel or by `config.ignore`), example waste URLs, `unused` · `unusedExamples` (responses no component was found holding a few seconds after they arrived — review, not waste), `callers` (code that sent the request) |
 | `reactQuery.findings[]` | Cache key audit findings with `fix` |
 | `renders.windowSeconds` | The window covered by render data. After `reset()`: everything since then (up to 2 min). Otherwise: the last 10s |
 | `renders.truncated` · `droppedInstances` | Whether rendered instances exceeded 5000 and the count excluded (those with fewest renders). When true, `components[]` counts may be lower than actual |

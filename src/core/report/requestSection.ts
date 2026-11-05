@@ -1,3 +1,4 @@
+import { UNUSED_SETTLE_MS } from '../inspect/unused.js';
 import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
@@ -51,6 +52,10 @@ export interface RequestSection {
     repeatCauses?: Array<{ kind: 'deps' | 'remount' | 'strict'; detail: string; count: number }>;
     /** 낭비로 판정된 요청의 URL 예(쿼리 포함) */
     wasteExamples: string[];
+    /** 응답 몇 초 뒤에도 그 응답을 들고 있는 컴포넌트를 못 찾은 요청 수(확인 필요). 없으면 두지 않는다 */
+    unused?: number;
+    /** 그 요청의 URL 예(쿼리 포함) */
+    unusedExamples?: string[];
   }>;
 }
 
@@ -140,6 +145,14 @@ const repeatCausesOf = (own: readonly RequestRecord[]) => {
     : undefined;
 };
 
+/** 쓰지 않는 응답의 수와 URL 예. 없으면 필드를 두지 않는다. */
+const unusedOf = (own: readonly RequestRecord[]): { unused?: number; unusedExamples?: string[] } => {
+  const unused = own.filter((r) => r.unused);
+  return unused.length > 0
+    ? { unused: unused.length, unusedExamples: Array.from(new Set(unused.map((r) => redactUrl(r.url)))).slice(0, MAX_EXAMPLES) }
+    : {};
+};
+
 /**
  * queryOf 는 요청의 React Query 문맥을 찾는 함수다. 기본은 fiber 트리를 걸어 찾는다(사용자가 요청한 보고서).
  * 5초 주기 업로드처럼 앱 경로 가까이서 돌 때는 knownQueryContextOf 를 넘겨 이미 찾아 둔 것만 쓴다.
@@ -157,24 +170,27 @@ export const buildRequestSection = (
     dropped: getDroppedCount(),
     endpoints: getEndpointStats(records, classes).map((s) => {
       const own = byEndpoint.get(s.endpoint) ?? [];
-      return {
-        endpoint: s.endpoint,
-        ignored: !!matcher.sourceOf(s.endpoint),
-        count: s.count,
-        restoredCount: own.filter((r) => r.restored).length,
-        avgMs: s.avgMs,
-        duplicates: s.duplicates,
-        sameResponses: s.sameResponses,
-        failedDuplicates: s.failedDuplicates ?? 0,
-        refetchReasons: refetchReasonsOf(own, classes),
-        review: s.review,
-        callers: callersOf(own, queryOf, (r) => isWaste(classes.get(r.id))),
-        repeatCauses: repeatCausesOf(own),
-        wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
-          0,
-          MAX_EXAMPLES,
-        ),
-      };
+      return Object.assign(
+        {
+          endpoint: s.endpoint,
+          ignored: !!matcher.sourceOf(s.endpoint),
+          count: s.count,
+          restoredCount: own.filter((r) => r.restored).length,
+          avgMs: s.avgMs,
+          duplicates: s.duplicates,
+          sameResponses: s.sameResponses,
+          failedDuplicates: s.failedDuplicates ?? 0,
+          refetchReasons: refetchReasonsOf(own, classes),
+          review: s.review,
+          callers: callersOf(own, queryOf, (r) => isWaste(classes.get(r.id))),
+          repeatCauses: repeatCausesOf(own),
+          wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
+            0,
+            MAX_EXAMPLES,
+          ),
+        },
+        unusedOf(own),
+      );
     }),
   };
 };
@@ -187,5 +203,6 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   "callers.waste is how many of that caller's requests were counted as waste (duplicates or sameResponses); absent when none. summary points at the listed caller with the most waste.",
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
+  `unused is how many of the endpoint's responses no component was found holding ${UNUSED_SETTLE_MS / 1000}s after they arrived (neither the same object nor a derived copy with matching field values; earlier responses of the same request count as held), with unusedExamples as their URLs. Only successful, non-empty JSON responses of non-mutating requests (not POST, PUT, PATCH, DELETE) on endpoints that are not ignored are judged, once each. It needs review rather than being waste: data used only inside effects or event handlers, or transformed into new objects, also looks unused — confirm in code that nothing reads it before removing or deferring the request. summary lists such endpoints as kind unused-response with severity medium. Absent when none.`,
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
 ];

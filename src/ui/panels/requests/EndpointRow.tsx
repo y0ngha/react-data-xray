@@ -6,6 +6,7 @@ import type { IgnoreSource } from '../../../shared/ignoredEndpoints.js';
 import type { FocusRequest } from '../../viewState.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
+import { UNUSED_TITLE } from '../../request/ClassBadge.js';
 import { color, plainButtonStyle, rowStyle } from '../../theme.js';
 
 interface EndpointRowProps {
@@ -51,6 +52,7 @@ const segments = (stat: EndpointStat): Segment[] => {
       ? { text: `failed: ${stat.failedCodes.join('·')}`, title: 'Status codes of failed requests regardless of waste' }
       : null,
     stat.review > 0 ? { text: `review: ${stat.review}`, color: color.review } : null,
+    stat.unused ? { text: `unused: ${stat.unused}`, color: color.review, title: UNUSED_TITLE } : null,
     stat.explained > 0 ? { text: `expected: ${stat.explained}` } : null,
   ];
   return all.filter((seg): seg is Segment => seg !== null);

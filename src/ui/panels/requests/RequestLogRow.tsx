@@ -1,6 +1,6 @@
 import { pathOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
-import { ClassBadge } from '../../request/ClassBadge.js';
+import { ClassBadge, UnusedBadge } from '../../request/ClassBadge.js';
 import { RequestLink } from '../../request/RequestLink.js';
 import { RequestParams } from '../../request/RequestParams.js';
 import { RequestStatusLine } from '../../request/RequestSummary.js';
@@ -16,6 +16,7 @@ export const RequestLogRow = ({ record }: { record: RequestRecord }) => (
           {record.method} {pathOf(record.url)}
         </u>
         <ClassBadge record={record} short />
+        <UnusedBadge record={record} />
       </div>
       <RequestStatusLine record={record} />
       <RequestParams record={record} />

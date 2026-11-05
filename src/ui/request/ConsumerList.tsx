@@ -37,7 +37,8 @@ export const ConsumerList = ({ record }: { record: RequestRecord }) => {
   // 찾기 전에 큐를 비우므로 렌더가 끝난 다음 프레임에 찾는다. 큐의 step 이 다른 컴포넌트의 state 를 바꿀 수 있다.
   const [consumers, setConsumers] = useState<Consumer[]>([]);
   useEffect(() => {
-    const frame = requestAnimationFrame(() => setConsumers(findConsumers(record, isOwnUi)));
+    // 참조로 못 찾으면 파생으로도 찾는다(쓰지 않는 응답 판정과 같은 기준이라 unused 배지와 어긋나지 않는다).
+    const frame = requestAnimationFrame(() => setConsumers(findConsumers(record, isOwnUi, undefined, { derived: true })));
     return () => cancelAnimationFrame(frame);
   }, [record]);
   const byName = Array.from(groupBy(consumers, (c) => c.name));
@@ -63,7 +64,12 @@ export const ConsumerList = ({ record }: { record: RequestRecord }) => {
           <>
             {byName.map(([name, list]) => (
               <div key={name}>
-                &lt;{name}&gt; {list.length > 1 && `× ${list.length}`} <Muted>← {list[0].via}</Muted> <MountNote name={name} />
+                &lt;{name}&gt; {list.length > 1 && `× ${list.length}`}{' '}
+                <Muted>
+                  ← {list[0].via}
+                  {list[0].match === 'derived' && ' (derived: matching field values)'}
+                </Muted>{' '}
+                <MountNote name={name} />
               </div>
             ))}
             <Button subtle active={highlight} onClick={toggle} title="Highlight these components on the page with an orange dashed border">

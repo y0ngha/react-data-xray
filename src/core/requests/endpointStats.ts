@@ -23,6 +23,8 @@ export interface EndpointStat {
   failedDuplicates?: number;
   /** 실패한 요청(낭비 여부와 무관)의 상태 코드(네트워크 오류는 'ERR'), 많이 나온 순 */
   failedCodes?: string[];
+  /** 응답을 쓰는 컴포넌트를 찾지 못한 요청 수(노랑, 확인 필요. inspect/unused). 없으면 비운다 */
+  unused?: number;
   /** 요청을 보낸 경로·컴포넌트별 건수, 많은 순. 경로도 컴포넌트도 모르는 요청은 뺀다 */
   sites?: EndpointSite[];
 }
@@ -66,6 +68,7 @@ const tally = (stat: EndpointStat & { totalMs: number }, r: RequestRecord, c: Re
   sameResponses: stat.sameResponses + (c === 'same-response' ? 1 : 0),
   review: stat.review + (needsReview(c) ? 1 : 0),
   explained: stat.explained + (c === 'strict-mode' || c === 'reconnect-refetch' || c === 'ignored' ? 1 : 0),
+  ...(r.unused ? { unused: (stat.unused ?? 0) + 1 } : {}),
   ...(isWaste(c) && isFailed(r) ? { failedDuplicates: (stat.failedDuplicates ?? 0) + 1 } : {}),
 });
 

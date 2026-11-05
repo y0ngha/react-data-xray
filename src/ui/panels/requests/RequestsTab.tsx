@@ -6,6 +6,7 @@ import type { RequestRecord } from '../../../core/requests/types.js';
 import { toIgnoreMatcher, type IgnoreMatcher } from '../../../shared/ignoredEndpoints.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
+import { UNUSED_TITLE } from '../../request/ClassBadge.js';
 import { useRequestActions } from '../../contexts.js';
 import { useFocusedItem } from '../../viewState.js';
 import { color } from '../../theme.js';
@@ -62,15 +63,20 @@ export const RequestsTab = ({ records, stats, ignored: ignoredInput, onToggleIgn
   const [view, setView] = useState<View>('endpoints');
   const [filter, setFilter] = useState<string | null>(null);
   const [currentOnly, setCurrentOnly] = useState(false);
+  // 쓰는 컴포넌트를 못 찾은 응답(unused)만 보인다. 엔드포인트 보기는 그런 요청이 있는 줄만 남긴다.
+  const [unusedOnly, setUnusedOnly] = useState(false);
   const route = currentOnly ? window.location.pathname : undefined;
-  const logs = [...records].reverse().filter((r) => (!filter || endpointOf(r) === filter) && (route === undefined || r.route === route));
+  const logs = [...records]
+    .reverse()
+    .filter((r) => (!filter || endpointOf(r) === filter) && (route === undefined || r.route === route) && (!unusedOnly || r.unused));
   const { classOf } = useRequestActions();
   // 경로 필터 중에는 그 경로에서 보낸 요청만으로 건수·낭비를 다시 센다(전 경로 합계를 보이지 않는다). 분류는 전체 기록 기준 그대로다.
-  const shownStats = useMemo(() => {
+  const routeStats = useMemo(() => {
     if (route === undefined) return stats;
     const own = records.filter((r) => r.route === route);
     return getEndpointStats(own, new Map(own.map((r) => [r.id, classOf(r)])));
   }, [route, stats, records, classOf]);
+  const shownStats = unusedOnly ? routeStats.filter((s) => s.unused) : routeStats;
   const focus = useFocusedItem('requests');
   // 배지 내역에서 엔드포인트를 골라 왔으면 엔드포인트별 보기로 돌린다(그 줄이 보이게).
   const [seenFocus, setSeenFocus] = useState(focus);
@@ -105,6 +111,9 @@ export const RequestsTab = ({ records, stats, ignored: ignoredInput, onToggleIgn
           title="Show only requests from the current route (location.pathname)"
         >
           This route
+        </Button>
+        <Button active={unusedOnly} onClick={() => setUnusedOnly(!unusedOnly)} title={`Show only responses marked unused. ${UNUSED_TITLE}`}>
+          Unused
         </Button>
         <span style={{ color: color.muted, marginLeft: 'auto' }}>{records.length} req</span>
       </div>
