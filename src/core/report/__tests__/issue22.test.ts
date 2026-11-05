@@ -25,7 +25,7 @@ describe('compare', () => {
     const r = compare(make([ep('GET /old', 2, 1)], [{ name: 'A', renders: 9, avoidable: 5 }]), make([ep('GET /new', 3, 0)]));
     expect(r.requests).toEqual([
       { endpoint: 'GET /old', status: 'removed', verdict: 'improved', count: -2, duplicates: -1 },
-      { endpoint: 'GET /new', status: 'added', verdict: 'regressed', count: 3 },
+      { endpoint: 'GET /new', status: 'added', verdict: 'new', count: 3 },
     ]);
     expect(r.renders).toEqual([{ name: 'A', status: 'removed', verdict: 'improved', renders: -9, avoidable: -5 }]);
   });

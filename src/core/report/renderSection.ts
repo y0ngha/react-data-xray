@@ -4,12 +4,12 @@ import { getCommits, getRenderGroups, MAX_GROUPED_INSTANCES, reportWindowMs } fr
 import { withHookPathsSync } from '../render/summary.js';
 import { RENDER_REASONS } from '../render/types.js';
 import { endpointOf } from '../requests/requestKey.js';
+import { round1 } from '../../shared/format.js';
 
 export const MAX_RENDER_GROUPS = 30;
 /** compare 용으로 남기는 렌더 행의 상한(보고서 행 포함). 스냅샷 6개를 sessionStorage 에 두므로 행 수를 묶는다 */
 export const MAX_COMPARABLE_RENDER_ROWS = 200;
 const MAX_HEAVIEST_COMMITS = 3;
-const round1 = (n: number): number => Math.round(n * 10) / 10;
 
 export interface RenderSection {
   monitoring: boolean;
@@ -108,25 +108,38 @@ export interface RenderRowTally {
   totalMs?: number;
 }
 
-const timeOf = (g: RenderGroup): number | undefined => ((g.timed ?? 0) > 0 ? round1(g.ms) : undefined);
+type RenderTime = NonNullable<RenderSection['components'][number]['time']>;
 
-const tallyOf = (g: RenderGroup): RenderRowTally => ({
+/** 보고서 행의 time 과 상한 밖 행의 totalMs 가 함께 쓰는 값. dev 빌드가 시간을 주지 않으면 없다 */
+const timeOf = (g: RenderGroup): RenderTime | undefined =>
+  (g.timed ?? 0) > 0 ? { totalMs: round1(g.ms), avgMs: round1(g.ms / g.timed!), avoidableMs: round1(g.avoidableMs ?? 0) } : undefined;
+
+/** tallyOf 가 읽는 행의 모양. 보고서 행(파일에서 읽은 것 포함)도 이 모양이다 */
+export type TallySource = Pick<RenderSection['components'][number], 'name' | 'renders' | 'avoidable' | 'renderedAt' | 'package'> & {
+  time?: Pick<RenderTime, 'totalMs'>;
+};
+
+/** 보고서 행과 상한 밖 행을 compare 용 행으로 줄인다(두 행이 같은 함수를 거친다). */
+export const tallyOf = (c: TallySource): RenderRowTally => ({
+  name: c.name,
+  renders: c.renders,
+  avoidable: c.avoidable,
+  renderedAt: c.renderedAt,
+  package: c.package,
+  totalMs: c.time?.totalMs,
+});
+
+const sourceOf = (g: RenderGroup): TallySource => ({
   name: g.name,
   renders: g.recent,
   avoidable: g.avoidable,
   renderedAt: g.location,
   package: g.package,
-  totalMs: timeOf(g),
+  time: timeOf(g),
 });
 
-// 보고서 상한 밖 행(compare 용). 보고서 JSON 에는 싣지 않고, 같은 섹션 객체로 toComparable 이 꺼내 스냅샷에만 남긴다.
-const rowsBeyondCap = new WeakMap<RenderSection, RenderRowTally[]>();
-
-/** 이 섹션을 만들 때 상한 밖으로 빠진 행(많아야 MAX_COMPARABLE_RENDER_ROWS - 보고서 행 수). 파일에서 읽은 보고서면 없다 */
-export const rowsBeyondCapOf = (section: RenderSection): readonly RenderRowTally[] | undefined => rowsBeyondCap.get(section);
-
 const omittedOf = (rest: readonly RenderGroup[]): RenderSection['omitted'] => {
-  const timed = rest.map(timeOf).filter((ms): ms is number => ms !== undefined);
+  const timed = rest.flatMap((g) => timeOf(g)?.totalMs ?? []);
   return {
     components: rest.length,
     renders: rest.reduce((n, g) => n + g.recent, 0),
@@ -135,7 +148,15 @@ const omittedOf = (rest: readonly RenderGroup[]): RenderSection['omitted'] => {
   };
 };
 
-export const buildRenderSection = (monitoring: boolean, now: number): RenderSection => {
+/** 렌더 섹션과, 원하면 보고서 상한 밖 행(compare 용, 많아야 MAX_COMPARABLE_RENDER_ROWS - 보고서 행 수) */
+export interface RenderSectionParts {
+  section: RenderSection;
+  /** withBeyondCap 일 때만 있다. 보고서 JSON 에는 싣지 않고 스냅샷의 비교용 부분에만 남긴다 */
+  beyondCap?: RenderRowTally[];
+}
+
+/** 지금의 렌더 섹션. snapshot 처럼 비교용으로 저장할 때만 withBeyondCap 으로 상한 밖 행을 더 만든다(주기 업로드는 만들지 않는다). */
+export const buildRenderSectionParts = (monitoring: boolean, now: number, withBeyondCap: boolean): RenderSectionParts => {
   const windowMs = reportWindowMs(now);
   const { groups: all, truncated, droppedInstances } = getRenderGroups(now, windowMs);
   const sorted = sortRenderGroups(all, 'avoidable');
@@ -164,8 +185,7 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       instances: g.instances,
       renders: g.recent,
       avoidable: g.avoidable,
-      time:
-        (g.timed ?? 0) > 0 ? { totalMs: round1(g.ms), avgMs: round1(g.ms / g.timed!), avoidableMs: round1(g.avoidableMs ?? 0) } : undefined,
+      time: timeOf(g),
       memoized: g.memoized,
       memo: g.memo,
       mounts: g.mounts,
@@ -200,9 +220,16 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       advice: renderAdvice(g),
     })),
   };
-  rowsBeyondCap.set(section, rest.slice(0, MAX_COMPARABLE_RENDER_ROWS - MAX_RENDER_GROUPS).map(tallyOf));
-  return section;
+  return {
+    section,
+    ...(withBeyondCap && {
+      beyondCap: rest.slice(0, MAX_COMPARABLE_RENDER_ROWS - MAX_RENDER_GROUPS).map((g) => tallyOf(sourceOf(g))),
+    }),
+  };
 };
+
+export const buildRenderSection = (monitoring: boolean, now: number): RenderSection =>
+  buildRenderSectionParts(monitoring, now, false).section;
 
 // 새 howToRead 줄은 여기에 더한다.
 export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [

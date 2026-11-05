@@ -7,8 +7,20 @@ import { color } from '../../theme.js';
 
 const TOOLTIP_W = 300;
 
-/** 막대에 호버했을 때 보이는 요청 요약 */
-export const TimelineTooltip = ({ record, x, y, maxX }: { record: RequestRecord; x: number; y: number; maxX: number }) => (
+/** 막대에 호버했을 때 보이는 요청 요약. waitedFor 는 이 요청이 기다린 앞 요청(워터폴)이다 */
+export const TimelineTooltip = ({
+  record,
+  waitedFor,
+  x,
+  y,
+  maxX,
+}: {
+  record: RequestRecord;
+  waitedFor?: RequestRecord;
+  x: number;
+  y: number;
+  maxX: number;
+}) => (
   <div
     role="tooltip"
     style={{
@@ -30,6 +42,11 @@ export const TimelineTooltip = ({ record, x, y, maxX }: { record: RequestRecord;
     <RequestStatusLine record={record} />
     <RequestParams record={record} />
     <ClassBadge record={record} />
+    {waitedFor && (
+      <div style={{ color: color.review }}>
+        Waterfall: waited for {waitedFor.method} {pathOf(waitedFor.url)}
+      </div>
+    )}
     <div style={{ color: color.accent }}>Click for details</div>
   </div>
 );

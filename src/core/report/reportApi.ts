@@ -1,4 +1,4 @@
-import { isReportName, REPORT_HEADER, reportFileFor, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
+import { isReportName, REPORT_HEADER, reportFileFor, TAB_HEADER, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
 import { config, subscribeConfig } from '../config.js';
 import { getNativeFetch } from '../capture/nativeFetch.js';
 import { whenSourcesResolved } from '../capture/requestContext.js';
@@ -7,11 +7,13 @@ import { resetCacheAudit } from '../reactQuery/cacheAudit.js';
 import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
-import { buildReport, type RdxReport, type ReportOptions } from './buildReport.js';
+import { buildReport, buildSnapshotReport, type RdxReport, type ReportOptions } from './buildReport.js';
 import { buildDiagnostics, type RdxDiagnostics } from '../diagnostics/diagnostics.js';
 import { MESSAGES } from '../diagnostics/messages.js';
 import { setReportPluginState } from './endpointState.js';
+import { notePolled, notePollSent, receiveCommands, shouldPoll, tabState } from './commands.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
+import type { RenderRowTally } from './renderSection.js';
 
 // 처리기가 이 Host 를 막았을 때의 안내는 MESSAGES.forbiddenHost 한곳에 둔다(Vite·webpack·Next.js 를 함께 적는다).
 const UPLOAD_MS = 5000;
@@ -42,10 +44,13 @@ export const snapshotNames = (): string[] => {
   return [...new Set([...order, ...Object.keys(all)])].filter((n) => n in all);
 };
 export const getSnapshot = (name: string): ComparableReport | undefined => readSnapshots()[name];
-/** snapshot 이 저장에 성공했을 때 부른다(테스트에서 직접 부르기도 한다) */
-export const keepSnapshot = (name: string, value: RdxReport): void => {
+/**
+ * snapshot 이 저장에 성공했을 때 부른다(테스트에서 직접 부르기도 한다). renderBeyondCap 은 그 보고서와 함께 만든
+ * 상한 밖 렌더 행이다(buildSnapshotReport). 없으면 보고서에 있는 행만 남긴다
+ */
+export const keepSnapshot = (name: string, value: RdxReport, renderBeyondCap: readonly RenderRowTally[] = []): void => {
   const all = readSnapshots();
-  all[name] = toComparable(value);
+  all[name] = toComparable(value, renderBeyondCap);
   let keep = [...snapshotNames().filter((n) => n !== name), name].slice(-MAX_SNAPSHOTS);
   // 용량이 넘치면 들어갈 때까지 오래된 것부터 버린다. 방금 저장한 것도 못 넣으면 알린다.
   for (;;) {
@@ -141,7 +146,7 @@ const report = (options?: ReportOptions): RdxReport => {
 };
 
 const HANDSHAKE_RETRY_MS = 3000;
-// dev 서버가 꺼지면 계속 실패하므로 이만큼 연속 실패하면 멈춘다. 서버가 돌아오면 Vite 가 페이지를 다시 열어 처음부터 확인한다.
+// 이만큼 연속으로 올리지 못하면 올리기를 쉬고 받아 가기(본문 없는 GET)만 가끔 보낸다. 받아 가기가 되면 다시 올린다.
 const MAX_UPLOAD_FAILURES = 3;
 
 type Endpoint = 'ready' | 'forbidden-host' | 'missing';
@@ -180,7 +185,7 @@ const snapshot = async (name: string): Promise<RdxReport> => {
   const resolved = await whenSourcesResolved();
   const monitoring = isRenderMonitoring();
   keepRenderMonitoring();
-  const result = buildReport(monitoring, Date.now(), true, {}, { sourceMapTimedOut: !resolved });
+  const { report: result, renderBeyondCap } = buildSnapshotReport(monitoring, Date.now(), { sourceMapTimedOut: !resolved });
   const res = await send(`${target.path}?name=${encodeURIComponent(name)}`, {
     method: 'POST',
     credentials: 'omit',
@@ -188,8 +193,17 @@ const snapshot = async (name: string): Promise<RdxReport> => {
     body: JSON.stringify(result),
   }).catch(() => null);
   if (!res?.ok) throw new Error(`[react-data-xray] Could not write .rdx/${name}.json (${res ? res.status : 'no response'}).`);
-  keepSnapshot(name, result);
+  keepSnapshot(name, result, renderBeyondCap);
   return result;
+};
+
+/** dev 서버 플러그인이 없어 파일로 못 남길 때 이 탭에만 남긴다(패널 Save). snapshot 과 같은 비교용 부분을 남긴다 */
+export const keepTabSnapshot = (name: string): RdxReport => {
+  const monitoring = isRenderMonitoring();
+  keepRenderMonitoring();
+  const { report: saved, renderBeyondCap } = buildSnapshotReport(monitoring);
+  keepSnapshot(name, saved, renderBeyondCap);
+  return saved;
 };
 
 const compareSnapshots = async (before: string, after: string): Promise<ReportComparison> => {
@@ -282,7 +296,6 @@ const startUpload = async (): Promise<void> => {
   let lastSent = 0;
   let sentComplete = true; // 마지막으로 보낸 파일이 끝난 보고서였는지
   let failures = 0;
-  let timer = 0;
   const upload = async () => {
     // 도중에 reportPath 가 바뀌었으면 새 경로를 먼저 확인한다. 없으면 이번 주기는 보내지 않는다.
     const target = endpointFor(send);
@@ -293,32 +306,43 @@ const startUpload = async (): Promise<void> => {
     // 덜 분석된 파일을 보낸 뒤 분석이 끝나면, 내용이 그대로여도 한 번 보내 파일이 complete: true 로 따라잡게 한다.
     const caughtUp = full.complete && !sentComplete;
     const idle = key === last && !caughtUp;
+    const tab = getTabId();
     // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
-    if (idle && Date.now() - lastSent < TAB_HEARTBEAT_MS) return;
-    const body = JSON.stringify(full); // summary 가 맨 앞에 오도록 키 순서를 그대로 둔다
-    const query = new URLSearchParams({ tab: getTabId(), path: location.pathname, title: document.title });
+    // 올리지 않는 주기에도 CLI·MCP 가 맡긴 명령을 본문 없는 GET 으로 받아 간다(#69). CLI 를 쓰지 않을 때는 1분 안쪽마다.
+    // 업로드가 계속 실패하면(dev 서버를 다시 띄우는 중 등) 올리기를 쉬고 받아 가기만 한다. 받아 가기가 되면 다시 올린다.
+    const quiet = failures >= MAX_UPLOAD_FAILURES || (idle && Date.now() - lastSent < TAB_HEARTBEAT_MS);
+    if (quiet && !shouldPoll(Date.now())) return;
+    const query = new URLSearchParams({ tab, path: location.pathname, title: document.title, ...tabState() });
     if (idle) query.set('idle', '1');
-    const res = await send(`${target.path}?${query}`, {
-      method: 'POST',
-      credentials: 'omit',
-      headers: { 'content-type': 'application/json' },
-      body,
-    }).catch(() => null);
+    // 받아 가기 주기는 보낸 때부터 센다(업로드도 응답으로 명령을 받으므로 받아 가기로 친다).
+    notePollSent(Date.now());
+    const res = await send(
+      `${target.path}?${query}`,
+      quiet
+        ? { method: 'GET', credentials: 'omit', headers: { [TAB_HEADER]: '1' } }
+        : {
+            method: 'POST',
+            credentials: 'omit',
+            headers: { 'content-type': 'application/json', [TAB_HEADER]: '1' },
+            body: JSON.stringify(full), // summary 가 맨 앞에 오도록 키 순서를 그대로 둔다
+          },
+    ).catch(() => null);
     if (res?.ok) {
-      last = key;
-      lastSent = Date.now();
-      sentComplete = full.complete;
+      if (!quiet) {
+        last = key;
+        lastSent = Date.now();
+        sentComplete = full.complete;
+      }
       failures = 0;
+      notePolled(res);
+      await receiveCommands(send, target.path, res, tab, { reset, snapshot });
       return;
     }
-    // 잠깐 실패하면 다음 주기에 다시 보내고, 계속 실패하면 멈춘다.
-    failures++;
-    if (failures >= MAX_UPLOAD_FAILURES) {
-      window.clearInterval(timer);
-      uploading = false;
-    }
+    // 잠깐 실패하면 다음 주기에 다시 보낸다. 받아 가기의 실패는 세지 않는다(그때는 이미 쉬는 중이거나 보고서가 그대로다).
+    // 멈추지 않는다: 멈추면 dev 서버를 다시 띄운 뒤 CLI 명령이 탭에 닿지 않는다.
+    if (!quiet) failures++;
   };
-  timer = window.setInterval(() => void upload(), UPLOAD_MS);
+  window.setInterval(() => void upload(), UPLOAD_MS);
   await upload();
 };
 

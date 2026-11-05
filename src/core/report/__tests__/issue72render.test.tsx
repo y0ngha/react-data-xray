@@ -3,7 +3,7 @@ import { useState, type FC } from 'react';
 import { afterEach, expect, it } from 'vitest';
 
 import { resetRenderStats, setRenderMonitoring } from '../../render/monitor.js';
-import { buildReport } from '../buildReport.js';
+import { buildReport, buildSnapshotReport } from '../buildReport.js';
 import { compare, toComparable } from '../compare.js';
 import { MAX_RENDER_GROUPS } from '../renderSection.js';
 
@@ -26,8 +26,8 @@ const Page = () => {
     <div>
       <button onClick={() => setN((v) => v + 1)}>bump</button>
       <span>{n}</span>
-      {children.map((C, i) => (
-        <C key={i} />
+      {children.map((C) => (
+        <C key={C.displayName} />
       ))}
     </div>
   );
@@ -41,10 +41,11 @@ it('real_report: 보고서 상한 밖 행도 비교용 부분에 남아, 순위�
   setRenderMonitoring(true);
   render(<Page />);
   bump('bump', 2);
-  const report = buildReport(true);
+  const { report, renderBeyondCap } = buildSnapshotReport(true);
   expect(report.renders.components).toHaveLength(MAX_RENDER_GROUPS);
   expect(report.renders.omitted.components).toBeGreaterThan(0);
-  const before = toComparable(report);
+  expect(renderBeyondCap).toHaveLength(report.renders.omitted.components);
+  const before = toComparable(report, renderBeyondCap);
   // 상한 밖 행을 다 담아 남은 것이 없다.
   expect(before.renders.omitted).toMatchObject({ components: 0, renders: 0, avoidable: 0 });
   expect(before.renders.components.length).toBe(report.renders.components.length + report.renders.omitted.components);
@@ -59,6 +60,9 @@ it('real_report: 보고서 상한 밖 행도 비교용 부분에 남아, 순위�
   expect(vsFile.totals.renders.verdict).toBe('unchanged');
 
   // 두 탭 보고서끼리는 모든 행을 보므로 같은 측정이면 증감이 없다.
-  expect(compare(before, toComparable(buildReport(true))).renders).toEqual([]);
+  const again = buildSnapshotReport(true);
+  expect(compare(before, toComparable(again.report, again.renderBeyondCap)).renders).toEqual([]);
+  // 보통 보고서(주기 업로드·report())는 상한 밖 행을 만들지 않고, 그것만으로 비교하면 빠진 행은 unknown 이다.
+  expect(compare(before, toComparable(buildReport(true))).renders.every((r) => r.status === 'unknown')).toBe(true);
   expect(JSON.stringify(report)).not.toContain(`"name":"${missing.name}"`);
 });

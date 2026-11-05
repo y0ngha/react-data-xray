@@ -8,12 +8,14 @@ import { endpointOf, pathOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
+import { findWaterfalls, type Waterfall } from '../requests/waterfall.js';
 import { queryContextOf, type QueryContext } from '../capture/queryContext.js';
 import { groupBy } from '../../shared/collections.js';
 import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 
 const MAX_CALLERS = 3;
 const MAX_EXAMPLES = 3;
+const MAX_WATERFALLS = 5;
 
 interface Caller {
   frame: string;
@@ -61,6 +63,8 @@ export interface RequestSection {
     /** 낭비로 판정된 요청의 URL 예(쿼리 포함) */
     wasteExamples: string[];
   }>;
+  /** 응답 → 마운트 → 요청으로 이어진 직렬 고리(워터폴). 지연이 큰 순으로 최대 5개, 없으면 빈 배열 */
+  waterfalls: Waterfall[];
   /** 목록의 항목마다 보낸 요청(N+1) 묶음. 요청이 많은 순. 무시한 엔드포인트는 뺀다 */
   nPlusOne: NPlusOneEntry[];
 }
@@ -206,6 +210,7 @@ export const buildRequestSection = (
     nPlusOne: nPlusOneRuns(records)
       .filter((run) => !matcher.sourceOf(run.endpoint))
       .map(nPlusOneEntryOf),
+    waterfalls: findWaterfalls(records, (r) => callerOf(r.sourceStack ?? r.stack)).slice(0, MAX_WATERFALLS),
   };
 };
 
@@ -218,6 +223,7 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
   'requests.nPlusOne lists requests sent once per list item (N+1): config.nPlusOne.count (default 5)+ requests for different IDs to the same endpoint (an :id path segment) from the same component (or, when the component is unknown, the same caller location) within config.nPlusOne.windowMs (default 1000). count is the number of different IDs (paths), windowMs the time from the first to the last request, examples a few URLs (one per ID). Ignored endpoints are left out. Repeats of the same ID are duplicates and are not included. It is review (may be intended, e.g. a virtualized list), not waste: fetch them in one request from the list (batch endpoint, include/expand) or fetch once in the parent.',
+  'requests.waterfalls lists serial request chains (up to 5, largest latency first): the response of chain[i] caused the commit in which chain[i+1].component mounted, and that component sent chain[i+1] right after (from its effect). Requests sent in parallel are not chained. depth is the number of requests in the chain, latencyMs is the sum of chain[].ms (the wait added by running them one after another), location is where each request was sent. Paths with the same endpoints and components are grouped: chain[].ms is the average response time over all grouped paths (including several list rows behind one first request), and count is the number of distinct chains, counted by their first request. If the later request does not need the earlier response, start it in parallel or prefetch it; if it does, join the data on the server or move both into a route loader. rdx does not check whether the data is actually used.',
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
   'requests.endpoints[].renders is what responses from this endpoint caused on screen during renders.windowSeconds: count renders and ms self render time, including both components that received the response (direct, or own state changed right after it arrived) and descendants that rendered along with them; viaParent is the portion that rendered only because an ancestor did (fix that ancestor, or memoize the children). fromSameResponse is the portion caused by a response identical to the previous one — pure waste that disappears when the refetch is removed or setState is skipped for an unchanged response; summary.topFindings[].savings.renders and renderMs for that endpoint come from it. ms is a selfBaseDuration sum from a dev build: compare it across endpoints or before vs. after a fix rather than reading it as production time; each ms is absent when none of the renders in that part had timing. Renders are counted over the same instances as renders.components (when renders.truncated is true, the dropped instances are not counted either) and only for requests still in the record (see requests.dropped). Absent when no render was linked to the endpoint.',
 ];

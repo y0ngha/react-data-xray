@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { keepSnapshot, NO_PLUGIN_MESSAGE, snapshotNames } from '../../../core/report/reportApi.js';
+import { keepTabSnapshot, NO_PLUGIN_MESSAGE, snapshotNames } from '../../../core/report/reportApi.js';
 import { isReportName } from '../../../shared/reportPath.js';
 import { useFlash } from '../../hooks/useFlash.js';
 import { Button } from '../../components/Button.js';
@@ -47,8 +47,7 @@ export const SnapshotButton = () => {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg === NO_PLUGIN_MESSAGE) {
         // 플러그인이 없으면 파일은 못 쓰지만 이 탭에 남겨 비교에는 쓸 수 있게 한다.
-        const rpt = window.__RDX__!.report();
-        keepSnapshot(name, rpt);
+        keepTabSnapshot(name);
         window.dispatchEvent(new Event(SNAPSHOT_SAVED_EVENT));
         setPhase({ kind: 'idle' });
         setFlash('Tab only — no dev-server plugin');

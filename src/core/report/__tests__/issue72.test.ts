@@ -201,3 +201,76 @@ describe('toComparable·스냅샷 크기 (#72)', () => {
     expect(JSON.stringify(six).length).toBeLessThan(250_000);
   });
 });
+
+describe('리뷰 반영 (#72)', () => {
+  const ep = (endpoint: string, count: number, duplicates: number, extra: { review?: number; failedDuplicates?: number } = {}) => ({
+    endpoint,
+    count,
+    duplicates,
+    sameResponses: 0,
+    ...extra,
+  });
+  const withEndpoints = (endpoints: ReturnType<typeof ep>[], dropped?: number) =>
+    side([], {}, { requests: { endpoints, ...(dropped !== undefined && { dropped }) } });
+
+  it('old_fields: 한쪽에 failedDuplicates·review 가 없으면(옛 스냅샷) 그 증감을 만들지 않는다', () => {
+    const r = compare(withEndpoints([ep('GET /a', 5, 2)]), withEndpoints([ep('GET /a', 5, 1, { review: 3, failedDuplicates: 1 })]));
+    expect(r.requests).toEqual([{ endpoint: 'GET /a', verdict: 'improved', duplicates: -1 }]);
+    // 그것만 다른 행은 싣지 않는다.
+    expect(compare(withEndpoints([ep('GET /a', 5, 1)]), withEndpoints([ep('GET /a', 5, 1, { review: 3 })])).requests).toEqual([]);
+  });
+
+  it('dropped_totals: 한쪽이라도 기록 상한으로 요청을 버렸으면 요청 합계는 unknown 이고 어느 쪽인지 경고한다', () => {
+    const r = compare(withEndpoints([ep('GET /a', 200, 10)], 50), withEndpoints([ep('GET /a', 100, 0)], 0));
+    expect(r.totals.requests.verdict).toBe('unknown');
+    expect(r.totals.wastedRequests).toEqual({ before: 10, after: 0, delta: -10, verdict: 'unknown' });
+    expect(r.warnings).toContain('requests were dropped at the record limit in before (dropped 50 / 0); request totals cannot be judged');
+    expect(compare(withEndpoints([], 0), withEndpoints([], 3)).warnings[0]).toContain('in after (dropped 0 / 3)');
+    expect(compare(withEndpoints([ep('GET /a', 2, 1)]), withEndpoints([ep('GET /a', 2, 0)])).totals.wastedRequests.verdict).toBe(
+      'improved',
+    );
+  });
+
+  it('one_sided: 한쪽에만 있는 행은 0 과 견주지 않고 new·gone 이며, 낭비가 있을 때만 regressed·improved 다', () => {
+    const r = compare(
+      withEndpoints([ep('GET /gone', 3, 0), ep('GET /fixed', 4, 2)]),
+      withEndpoints([ep('GET /new', 3, 0), ep('GET /dup', 4, 1)]),
+    );
+    expect(r.requests.map((e) => [e.endpoint, e.status, e.verdict])).toEqual([
+      ['GET /gone', 'removed', 'gone'],
+      ['GET /fixed', 'removed', 'improved'],
+      ['GET /new', 'added', 'new'],
+      ['GET /dup', 'added', 'regressed'],
+    ]);
+    const rr = compare(side([row('Quiet', 0, 2), row('Waste', 3)]), side([row('Fresh', 0, 1), row('Noisy', 2)]));
+    expect(rr.renders.map((c) => [c.name, c.verdict])).toEqual([
+      ['Quiet', 'gone'],
+      ['Waste', 'improved'],
+      ['Fresh', 'new'],
+      ['Noisy', 'regressed'],
+    ]);
+  });
+
+  it('fetch_causes_omitted: fetchCausesOmitted 가 0 이면 20개로 꽉 찼어도 빠진 묶음이 없고, 0 보다 크면 unknown 이다', () => {
+    const fc = (queryKey: string, count: number) => ({ queryKey, cause: 'mount', count });
+    const full = Array.from({ length: MAX_FETCH_CAUSES }, (_, i) => fc(`["k${i}"]`, 30 - i));
+    const rq = (fetchCauses: ReturnType<typeof fc>[], fetchCausesOmitted?: number) =>
+      side([], {}, { reactQuery: { findings: [], fetchCauses, ...(fetchCausesOmitted !== undefined && { fetchCausesOmitted }) } });
+    const exact = compare(rq(full, 0), rq([fc('["new"]', 1)], 0));
+    expect(exact.reactQuery.fetchCauses.find((c) => c.queryKey === '["new"]')).toMatchObject({ status: 'added', verdict: 'new' });
+    expect(exact.reactQuery.fetchCauses.find((c) => c.queryKey === '["k0"]')).toMatchObject({ status: 'removed', verdict: 'gone' });
+    const cut = compare(rq(full, 2), rq([fc('["new"]', 1)], 0));
+    expect(cut.reactQuery.fetchCauses.find((c) => c.queryKey === '["new"]')?.status).toBe('unknown');
+  });
+
+  it('report_fetch_causes_omitted: 보고서는 상한 밖 fetch 원인 묶음 수를 싣고, toComparable 이 남긴다', async () => {
+    const { buildReactQuerySection } = await import('../reactQuerySection.js');
+    expect(buildReactQuerySection([], new Map()).fetchCausesOmitted).toBe(0);
+    const c = toComparable({
+      requests: { endpoints: [] },
+      renders: { monitoring: true, windowSeconds: 10, components: [], omitted: { components: 0, renders: 0, avoidable: 0 } },
+      reactQuery: { findings: [], fetchCausesOmitted: 4 },
+    } as unknown as RdxReport);
+    expect(c.reactQuery.fetchCausesOmitted).toBe(4);
+  });
+});

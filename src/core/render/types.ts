@@ -25,6 +25,8 @@ export const RENDER_REASONS: readonly RenderReason[] = ['mount', 'state', 'conte
 export interface NetworkCause {
   record: RequestRecord;
   via: 'direct' | 'timing' | 'parent';
+  /** parent 일 때, 이어받은 조상의 원인이 시간 추정(timing)이었다. 워터폴 판정은 이것을 근거로 쓰지 않는다 */
+  guessed?: true;
 }
 
 /** 렌더를 시작한 컴포넌트: 자기 state·context 가 바뀌었거나 새로 붙은 가장 가까운 조상(부모를 따라 렌더된 자손이 이어받는다) */

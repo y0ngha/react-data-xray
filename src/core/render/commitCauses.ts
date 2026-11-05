@@ -12,6 +12,8 @@ export interface CommitCause {
   remount?: { parent: string; typeChanged: boolean };
   /** 이 commit 에서 처음 바뀐 effect 의존성. 마운트(이전 렌더 없음)는 없다 */
   deps?: string;
+  /** 마운트했을 때, 그 마운트 렌더의 네트워크 원인 요청 id(응답 객체로 확인한 것만. 응답 → 마운트 → 요청 워터폴 판정용, requests/waterfall) */
+  causedBy?: number;
 }
 
 const MAX_NAMES = 1000;
@@ -46,6 +48,7 @@ export const noteCommitCause = (name: string, at: number, change: Omit<CommitCau
     last.time ??= change.time;
     last.remount ??= change.remount;
     last.deps ??= change.deps;
+    last.causedBy ??= change.causedBy;
     return;
   }
   list.push({ seq: at, ...change });
@@ -55,6 +58,9 @@ export const noteCommitCause = (name: string, at: number, change: Omit<CommitCau
 /** 이 이름이 after 순번 뒤부터 upTo 순번까지(포함) 렌더된 기록(오래된 것부터). 렌더 기록이 없으면 빈 배열. */
 export const commitCausesBetween = (name: string, after: number, upTo: number): CommitCause[] =>
   (byName.get(name) ?? []).filter((c) => c.seq > after && c.seq <= upTo);
+
+/** 렌더 기록이 하나라도 있는가(감시가 켜져 있었다). 없으면 요청마다 렌더 기록으로 정하는 판정 step 을 걸지 않는다. */
+export const hasCommitRecords = (): boolean => recorded.size > 0;
 
 /** 이 순번의 commit 에 렌더 기록이 남아 있는가. 없으면 감시가 꺼져 있었거나(앱의 첫 commit 은 대개 RDX 버튼이 감시를 켜기 전이다) 기록을 비운 뒤다. */
 export const hasCommitRecord = (at: number): boolean => recorded.has(at);
