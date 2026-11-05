@@ -13,7 +13,16 @@ const report = await window.__RDX__.report();
 window.__RDX__.doctor();                  // is rdx attached? same as report.diagnostics
 await window.__RDX__.snapshot('before');  // saves to .rdx/before.json (plugin required, see below)
                                           // or Measure › Save in the panel toolbar (same effect)
+// … fix, then reset → same interaction → snapshot('after') …
+await window.__RDX__.compare('before', 'after'); // diff of two snapshots saved in this tab
+                                          // also writes .rdx/compare-before-after.json; panel: Measure › Compare
 ```
+
+**Compare before and after**: `compare(before, after)` (browser, panel **Measure › Compare**, `npx react-data-xray compare`, or the MCP `compare` tool) diffs two saved reports so the AI does not have to read both. The browser version reads the snapshots saved in that tab (the last 6); the CLI reads `.rdx/<name>.json`, so it works across tabs and reloads. Both write `.rdx/compare-<before>-<after>.json`:
+
+- `warnings`: read first. Measurement windows, pages or detection `config` differ, only one report was measured after a `reset()` (`resetAt`), render monitoring was off, a report was saved with `complete: false` (with its `incompleteReasons`), requests were dropped, render instances were truncated, endpoint naming changed between rdx versions, or rows are `unknown`. Any of these means the numbers are not comparable as they are: reset, repeat the same scenario and snapshot again.
+- `totals`: `requests`, `wastedRequests`, `renders`, `avoidable` with `before` · `after` · `delta` · `verdict` (`renderMs` has no verdict).
+- `requests[]`, `renders[]`, `reactQuery.fetchCauses[]`: per-row changes with the same `ep:…` / `c:…` `id` as the reports, and a `verdict`: `improved` / `regressed` (waste first, then the total count) or `unchanged` for rows in both reports, `new` / `gone` for rows in only one (`regressed` / `improved` when that row has waste), `unknown` when it cannot be told (a row left out by one report's row limit has `status: 'unknown'` and its known side in `before` / `after`). `reactQuery.added` / `resolved` list findings that appeared or went away. Layout shifts are not diffed.
 
 **Read from a file**: attach the plugin to your dev server and it will write `.rdx/report.json` whenever the report changes (at most every 5s). A `.gitignore` entry is created automatically.
 

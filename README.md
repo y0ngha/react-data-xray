@@ -233,12 +233,14 @@ Attaching RDX to an existing service (React 18 + Vite, legacy `fetch` mixed with
 
 ## Working with AI agents
 
-Export the RDX report for AI to read, and AI will run the measure → diagnose → fix → re-measure loop for you. Use these three steps in the browser console or an AI tool:
+Export the RDX report for AI to read, and AI will run the measure → diagnose → fix → re-measure loop for you. Use these steps in the browser console or an AI tool:
 
 ```js
 window.__RDX__.reset();                  // clear records and start a fresh measurement
 // … interact with the screen …
 await window.__RDX__.snapshot('before'); // save to .rdx/before.json
+// … fix, then reset → same interaction → snapshot('after') …
+await window.__RDX__.compare('before', 'after'); // what improved or regressed, also in .rdx/compare-before-after.json
 ```
 
 No browser tool? With the dev server plugin attached and the app open in a tab, the same steps run from the terminal: `npx react-data-xray reset`, `npx react-data-xray snapshot before`, `npx react-data-xray compare before after`. `npx react-data-xray mcp` offers them as MCP tools (`claude mcp add rdx -- npx react-data-xray mcp`).
