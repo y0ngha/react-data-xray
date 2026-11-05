@@ -4,10 +4,24 @@ import { getCommits, getRenderGroups, MAX_GROUPED_INSTANCES, reportWindowMs } fr
 import { withHookPathsSync } from '../render/summary.js';
 import { RENDER_REASONS } from '../render/types.js';
 import { endpointOf } from '../requests/requestKey.js';
+import { componentId, endpointId } from './ids.js';
 
 export const MAX_RENDER_GROUPS = 30;
 const MAX_HEAVIEST_COMMITS = 3;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+/** 다른 컴포넌트를 가리키는 칸. renderedAt 은 그 컴포넌트를 그리는 JSX 위치(소스맵으로 바꾼 것, 모르면 없다) */
+export interface ComponentRef {
+  id: string;
+  name: string;
+  renderedAt?: string;
+}
+
+const refOf = (name: string, location: string | undefined): ComponentRef => ({
+  id: componentId(name, location),
+  name,
+  ...(location && { renderedAt: location }),
+});
 
 export interface RenderSection {
   monitoring: boolean;
@@ -16,9 +30,11 @@ export interface RenderSection {
   /** 인스턴스가 너무 많아 렌더 적은 인스턴스를 센 대상에서 뺐는지와 그 수 */
   truncated: boolean;
   droppedInstances: number;
-  /** 구간 안에서 렌더 시간이 가장 큰 commit 몇 개(시간 기록이 있을 때만) */
-  heaviestCommits?: Array<{ ms: number; components: number; startedBy?: string; secondsAgo: number }>;
+  /** 구간 안에서 렌더 시간이 가장 큰 commit 몇 개(시간 기록이 있을 때만). startedBy 는 그 commit 을 시작한 컴포넌트와 그리는 JSX 위치 */
+  heaviestCommits?: Array<{ ms: number; components: number; startedBy?: ComponentRef; secondsAgo: number }>;
   components: Array<{
+    /** 섹션 공통 id(`c:Name@renderedAt`, 위치를 모르면 `c:Name`) */
+    id: string;
     name: string;
     instances: number;
     renders: number;
@@ -42,8 +58,8 @@ export interface RenderSection {
     package?: string;
     /** 이 컴포넌트가 그려서 안쪽에서 렌더된 라이브러리 컴포넌트(패키지별) */
     libraries?: Array<{ package: string; name: string; instances: number; renders: number; avoidable: number }>;
-    /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상(이름·이유). 고칠 곳은 대개 이 조상이다 */
-    causedBy: Array<{ name: string; reason: string; count: number }>;
+    /** 조상 때문에 렌더됐다면 그 렌더를 시작한 조상(이름·이유·그리는 JSX 위치). 고칠 곳은 대개 이 조상이다 */
+    causedBy: Array<ComponentRef & { reason: string; count: number }>;
     stateChanges: Array<{
       label: string;
       count: number;
@@ -61,6 +77,7 @@ export interface RenderSection {
     };
     networkCauses: Array<{
       endpoint: string;
+      endpointId: string;
       direct: number;
       byTiming: number;
       viaParent: number;
@@ -108,11 +125,15 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       heaviestCommits: heaviest.map((c) => ({
         ms: round1(c.ms!),
         components: c.count,
-        startedBy: c.startedBy,
+        startedBy:
+          c.startedBy === undefined
+            ? undefined
+            : refOf(c.startedBy, c.startedFrom && !c.startedFrom.package ? c.startedFrom.location : undefined),
         secondsAgo: Math.round((now - c.time) / 1000),
       })),
     }),
     components: groups.map((g) => ({
+      id: componentId(g.name, g.location),
       name: g.name,
       instances: g.instances,
       renders: g.recent,
@@ -131,7 +152,7 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       renderedAt: g.location,
       package: g.package,
       libraries: g.libraries,
-      causedBy: g.origins,
+      causedBy: g.origins.map((o) => ({ ...refOf(o.name, o.location), reason: o.reason, count: o.count })),
       // hookIndex 는 label 을 만드는 내부 값이라 보고서에 싣지 않는다.
       stateChanges: withHookPathsSync(g.stateHooks, g.fiber).map(({ label, count, intervalMs, last }) => ({
         label,
@@ -145,6 +166,7 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
       },
       networkCauses: g.causes.map((c) => ({
         endpoint: endpointOf(c.record),
+        endpointId: endpointId(endpointOf(c.record)),
         direct: c.direct,
         byTiming: c.timing,
         viaParent: c.parent,
@@ -157,10 +179,11 @@ export const buildRenderSection = (monitoring: boolean, now: number): RenderSect
 
 // 새 howToRead 줄은 여기에 더한다.
 export const RENDER_HOW_TO_READ_EXTRA: readonly string[] = [
+  'causedBy[].renderedAt is the JSX location that renders that ancestor (source-mapped like renderedAt; absent when unknown or for a library component), and causedBy[].id is its renders.components id. The same name at different locations is listed separately, so renderedAt tells you which one to open.',
   `When renders.truncated is true, the number of rendered instances exceeded ${MAX_GROUPED_INSTANCES} and the instances with fewer renders (droppedInstances of them) were excluded. This is separate from the per-component limit of 200 renders.`,
   "stateChanges.label: in a dev build, the custom hook path that called the hook is prepended (e.g., useCart › useState #2); if a source map is resolved, the call location is appended (src/x.ts:12). Without either, only 'type #index' is shown.",
   'components[].memo: skipped is the number of times a React.memo component skipped a parent render; rendered is the count where it did not skip (parent renders only — mounts, own state, and context renders are excluded). When skipped is 0 and neverSkippedProps is non-empty, those props are a new reference on every render so memo has no effect (see first line of advice).',
   'components entries with the same name but different renderedAt values are counted separately. Library-internal components (minified names in the bundle) are folded into the libraries field of the app component that renders them, along with the package name. A row with package present means no rendering app component was found.',
-  'components[].time: totalMs is the total render time for the window, avgMs is the per-render average, and avoidableMs is the sum for avoidable renders. startedRenders.childMs and unchangedMs are the total and unchanged-value portions of child render time. heaviestCommits lists the most expensive commits in the window and the component that started them. All values are sums of selfBaseDuration (self render time, before memo skips) measured in a dev build and will be larger than in production. Read them comparatively (before vs. after a fix) rather than as absolute values. These fields are absent when timing is unavailable.',
+  'components[].time: totalMs is the total render time for the window, avgMs is the per-render average, and avoidableMs is the sum for avoidable renders. startedRenders.childMs and unchangedMs are the total and unchanged-value portions of child render time. heaviestCommits lists the most expensive commits in the window and the component that started them (startedBy: id, name, renderedAt). All values are sums of selfBaseDuration (self render time, before memo skips) measured in a dev build and will be larger than in production. Read them comparatively (before vs. after a fix) rather than as absolute values. These fields are absent when timing is unavailable.',
   'components[].mounts: mount and unmount counts since the last reset (by component name, only when unmounts occurred). remounts counts instances that disappeared and reappeared under the same parent within 5s; parent is the nearest ancestor that swapped the subtree. Mount-effect requests, subscriptions, and timers run again each time. Siblings still present are not counted. When remounts[].cause is type-changed, the component name is the same but the function identity changed — caused by defining a component inside a render, counted regardless of sibling count.',
 ];

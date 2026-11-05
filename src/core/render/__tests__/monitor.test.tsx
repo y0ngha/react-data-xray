@@ -288,8 +288,10 @@ describe('렌더의 네트워크 원인', () => {
     bump(2);
     return getTopRenders(200).find((e) => e.name === 'Leaf')!;
   };
-  it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유)을 남긴다', () => {
-    expect(renderLeaf().origins).toEqual([{ name: 'Counter', reason: 'state', count: 2 }]);
+  it('부모를 따라 렌더된 자손은 렌더를 시작한 조상(이름·이유·그리는 위치)을 남긴다', () => {
+    expect(renderLeaf().origins).toEqual([
+      { name: 'Counter', reason: 'state', count: 2, location: expect.stringMatching(/monitor\.test\.tsx:\d+$/) },
+    ]);
   });
 
   // React 18 은 _debugSource, React 19 는 _debugStack 에서 읽는다(pnpm test:react19 가 19 쪽을 본다).

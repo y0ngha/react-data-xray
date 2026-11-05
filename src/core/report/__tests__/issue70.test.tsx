@@ -16,6 +16,7 @@ import { getRecords } from '../../requests/store.js';
 import { flushQueue } from '../../scheduler/idleQueue.js';
 import { buildReport, HOW_TO_READ, HOW_TO_READ_VERSION } from '../buildReport.js';
 import { toComparable } from '../compare.js';
+import { componentId, endpointId } from '../ids.js';
 import type { ReactQuerySection } from '../reactQuerySection.js';
 import type { RenderSection } from '../renderSection.js';
 import type { RequestSection } from '../requestSection.js';
@@ -23,12 +24,13 @@ import { installReportApi } from '../reportApi.js';
 import { buildSummary } from '../summarySection.js';
 
 // howToRead 문구(와 문구에 들어가는 RENDER_STORM·WINDOW_MS)가 바뀌면 이 두 값을 함께 고친다. 판은 하나 올린다.
-const EXPECTED_HOW_TO_READ = { version: 10, hash: 'c5f84a000600' };
+const EXPECTED_HOW_TO_READ = { version: 14, hash: '585abab991c0' };
 
 type Endpoint = RequestSection['endpoints'][number];
 type Component = RenderSection['components'][number];
 
 const endpoint = (name: string, duplicates: number, sameResponses: number, extra: Partial<Endpoint> = {}): Endpoint => ({
+  id: endpointId(name),
   endpoint: name,
   ignored: false,
   count: duplicates + sameResponses + 1,
@@ -43,6 +45,7 @@ const endpoint = (name: string, duplicates: number, sameResponses: number, extra
   ...extra,
 });
 const component = (name: string, renders: number, avoidable: number, extra: Partial<Component> = {}): Component => ({
+  id: componentId(name, extra.renderedAt),
   name,
   instances: 1,
   renders,
@@ -119,7 +122,7 @@ describe('보고서 summary (#70)', () => {
       savings: { requests: 5, ms: 50 },
       detail: 'requests.endpoints[2]',
     });
-    expect(s.topFindings[1].target).toEqual({ endpoint: 'GET /api/small' });
+    expect(s.topFindings[1].target).toEqual({ id: 'ep:GET /api/small', endpoint: 'GET /api/small' });
     expect(s.topFindings[2]).toMatchObject({ detail: 'renders.components[2]', evidence: { rendersLast10s: 30 } });
     expect(s.topFindings[3]).toMatchObject({ rule: 'stale-zero', fix: 'Increase staleTime.', detail: 'reactQuery.findings[1]' });
     expect(s.topFindings[4]).toMatchObject({ savings: { renders: 3, ms: 3 }, detail: 'renders.components[0]' });
@@ -149,7 +152,7 @@ describe('보고서 summary (#70)', () => {
       {
         kind: 'render-storm',
         severity: 'high',
-        target: { component: 'Grid', location: 'src/Grid.tsx:9:1', library: 'ag-grid Cell' },
+        target: { id: 'c:Grid@src/Grid.tsx:9:1', component: 'Grid', location: 'src/Grid.tsx:9:1', library: 'ag-grid Cell' },
         evidence: { renders: 400, avoidable: 0, rendersLast10s: 12 },
         detail: 'renders.components[0].libraries[0]',
       },
@@ -176,7 +179,7 @@ describe('보고서 summary (#70)', () => {
       {
         kind: 'render-storm',
         severity: 'high',
-        target: { component: 'Ticker', location: 'src/T.tsx:1:1' },
+        target: { id: 'c:Ticker@src/T.tsx:1:1', component: 'Ticker', location: 'src/T.tsx:1:1' },
         evidence: { renders: 12, avoidable: 0, rendersLast10s: 12 },
       },
     ]);

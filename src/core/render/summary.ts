@@ -43,9 +43,14 @@ const countOrigins = (events: RenderEntry['events']): OriginCount[] => {
   const byOrigin = new Map<string, OriginCount>();
   events.forEach(({ origin }) => {
     if (!origin) return;
-    const key = `${origin.name}|${origin.reason}`;
+    // 위치는 기록(from)에서 지금 읽는다. React 19 의 위치는 소스맵을 받은 뒤 원본 줄로 바뀌어 있다.
+    const location = origin.from && !origin.from.package ? origin.from.location : undefined;
+    const key = `${origin.name}|${location ?? ''}|${origin.reason}`;
     const prev = byOrigin.get(key);
-    byOrigin.set(key, prev ? { ...prev, count: prev.count + 1 } : { name: origin.name, reason: origin.reason, count: 1 });
+    byOrigin.set(
+      key,
+      prev ? { ...prev, count: prev.count + 1 } : { name: origin.name, reason: origin.reason, count: 1, ...(location && { location }) },
+    );
   });
   return [...byOrigin.values()].sort((a, b) => b.count - a.count).slice(0, MAX_ORIGINS);
 };

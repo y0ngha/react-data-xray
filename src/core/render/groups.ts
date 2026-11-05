@@ -75,7 +75,7 @@ const mergeCauses = (a: readonly NetworkCauseCount[], b: readonly NetworkCauseCo
 const mergeOrigins = (a: readonly OriginCount[], b: readonly OriginCount[]): OriginCount[] => {
   const byOrigin = new Map<string, OriginCount>();
   [...a, ...b].forEach((o) => {
-    const key = `${o.name}|${o.reason}`;
+    const key = `${o.name}|${o.location ?? ''}|${o.reason}`;
     const prev = byOrigin.get(key);
     byOrigin.set(key, prev ? { ...prev, count: prev.count + o.count } : { ...o });
   });

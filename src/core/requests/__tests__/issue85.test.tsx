@@ -188,7 +188,9 @@ describe('항목마다 보낸 요청(N+1) 판정 (#85)', () => {
     expect(section.nPlusOne).toEqual([
       {
         endpoint: 'GET /api/items/:id/owner',
+        endpointId: 'ep:GET /api/items/:id/owner',
         component: 'ItemCard',
+        componentId: 'c:ItemCard',
         count: 24,
         windowMs: 23 * 20,
         examples: ['/api/items/1/owner', '/api/items/2/owner', '/api/items/3/owner'],

@@ -9,9 +9,10 @@ import { endpointOf, pathOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
-import { findWaterfalls, type Waterfall } from '../requests/waterfall.js';
+import { findWaterfalls, type Waterfall, type WaterfallStep } from '../requests/waterfall.js';
 import { queryContextOf, type QueryContext } from '../capture/queryContext.js';
 import { groupBy } from '../../shared/collections.js';
+import { componentId, endpointId } from './ids.js';
 import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 
 const MAX_CALLERS = 3;
@@ -37,6 +38,8 @@ export interface RequestSection {
   /** 기록 상한(200건)을 넘어 빠진 요청 수(reset 뒤부터) */
   dropped: number;
   endpoints: Array<{
+    /** 섹션 공통 id(`ep:<endpoint>`) */
+    id: string;
     endpoint: string;
     /** 사용자가 의도된 반복으로 지정해 낭비로 세지 않은 엔드포인트 */
     ignored: boolean;
@@ -69,12 +72,31 @@ export interface RequestSection {
     unusedExamples?: string[];
   }>;
   /** 응답 → 마운트 → 요청으로 이어진 직렬 고리(워터폴). 지연이 큰 순으로 최대 5개, 없으면 빈 배열 */
-  waterfalls: Waterfall[];
+  waterfalls: ReportWaterfall[];
   /** 목록의 항목마다 보낸 요청(N+1) 묶음. 요청이 많은 순. 무시한 엔드포인트는 뺀다 */
   nPlusOne: NPlusOneEntry[];
 }
 
-export interface NPlusOneEntry {
+/** 보고서의 워터폴 고리. 단계마다 섹션 공통 id 를 붙인다 */
+export interface ReportWaterfall extends Omit<Waterfall, 'chain'> {
+  chain: Array<WaterfallStep & IdRefs>;
+}
+
+/**
+ * 다른 섹션의 행을 가리키는 id. componentId 는 보낸 컴포넌트의 이름만으로 만든다(`c:Name`, 그리는 위치를 모른다):
+ * renders.components[].id 가 `c:Name@` 로 시작하는 행이 그 컴포넌트다.
+ */
+interface IdRefs {
+  endpointId: string;
+  componentId?: string;
+}
+
+const idRefsOf = (endpoint: string, component: string | undefined): IdRefs => ({
+  endpointId: endpointId(endpoint),
+  ...(component && { componentId: componentId(component) }),
+});
+
+export interface NPlusOneEntry extends IdRefs {
   endpoint: string;
   /** 보낸 컴포넌트. 모르면 없고, 그때 묶은 기준은 location 이다 */
   component?: string;
@@ -172,6 +194,7 @@ const nPlusOneEntryOf = (run: NPlusOneRun): NPlusOneEntry => {
   const location = callerOf(first.sourceStack ?? first.stack);
   return {
     endpoint: run.endpoint,
+    ...idRefsOf(run.endpoint, run.component),
     ...(run.component && { component: run.component }),
     ...(location && { location }),
     count: run.distinct,
@@ -202,6 +225,7 @@ export const buildRequestSection = (
       const own = byEndpoint.get(s.endpoint) ?? [];
       return Object.assign(
         {
+          id: endpointId(s.endpoint),
           endpoint: s.endpoint,
           ignored: !!matcher.sourceOf(s.endpoint),
           count: s.count,
@@ -226,7 +250,9 @@ export const buildRequestSection = (
     nPlusOne: nPlusOneRuns(records)
       .filter((run) => !matcher.sourceOf(run.endpoint))
       .map(nPlusOneEntryOf),
-    waterfalls: findWaterfalls(records, (r) => callerOf(r.sourceStack ?? r.stack)).slice(0, MAX_WATERFALLS),
+    waterfalls: findWaterfalls(records, (r) => callerOf(r.sourceStack ?? r.stack))
+      .slice(0, MAX_WATERFALLS)
+      .map((w) => Object.assign({}, w, { chain: w.chain.map((step) => Object.assign({}, step, idRefsOf(step.endpoint, step.component))) })),
   };
 };
 

@@ -39,16 +39,16 @@ Start each scenario from a clean state. Use the browser tool directly if availab
 
 The `howToRead` field in the report is authoritative. This document does not duplicate it (fields grow with each rdx version), so read it before reading the results. Once you have read a given `howToReadVersion`, later calls can use `window.__RDX__.report({ howToRead: false })` to leave it out. Only the order of inspection is prescribed here.
 
-1. `summary` first: `summary.verdict` is a one-line count, and `summary.topFindings` lists what to fix in order (severity `high` is what the RDX button badge counts). Open each finding's `detail` path for the full entry and start from `target.location`.
+1. `summary` first: `summary.verdict` is a one-line count, and `summary.topFindings` lists what to fix in order (severity `high` is what the RDX button badge counts). Open each finding's `detail` path for the full entry and start from `target.location`. `target.id` (and every `id` / `endpointId` / `componentId` in the report) is a cross-section key: `ep:<endpoint>` or `c:<name>@<renderedAt>`. Use it to jump between sections, e.g. from a request finding's `ep:GET /items` to the `renders.components` rows whose `networkCauses[].endpointId` matches, or from a `causedBy[].id` to that ancestor's own row.
 2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional (in the panel, or in code via `config.ignore`) — skip it. Then `requests.nPlusOne`: requests sent once per list item (review, not waste).
    Then `requests.waterfalls`: serial request chains (a response mounted the component that sent the next request), largest `latencyMs` first.
 3. `reactQuery.findings`: follow each item's `fix`.
-4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
+4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself; `causedBy[].renderedAt` says which one when several components share the name.
 5. `layoutShifts` (Chrome/Edge only; absent in Safari and Firefox): largest shift first. `cause.component` is usually where to reserve the space; `cause.endpoint` is the response whose arrival moved the screen.
 
 ## 4. Confirm the root cause (required before fixing)
 
-- Open code using the function name from `callers` and the `causedBy` / `renderedAt` paths. Lines that remain as http addresses have no source map — find them by function name.
+- Open code using the function name from `callers`, the `causedBy[].renderedAt` / `renderedAt` / `heaviestCommits[].startedBy.renderedAt` paths, and `reactQuery.findings[].stack`. Lines that remain as http addresses have no source map — find them by function name.
 - Verify the diagnosis against the code. Example: "cards off-screen are still polling" is wrong if LazyLoad unmounts off-screen cards.
 - If unsure, do not fix. Ask the user with the evidence.
 
@@ -78,7 +78,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 ## 7. Re-measure and report
 
 1. Run the same scenario again following the same steps as section 2, then save with `snapshot('after-<scenario>')` (or `npx react-data-xray snapshot after-<scenario>`).
-2. Compare before and after: `npx react-data-xray compare before-<scenario> after-<scenario>` (reads the two files, so it works across tabs and reloads; `window.__RDX__.compare` only sees snapshots saved in that tab). Look at `count` · `duplicates` · `sameResponses` per endpoint, `renders` · `avoidable` per component, `layoutShifts[].value` per component (compare does not diff it — read both reports), and `warnings`.
+2. Compare before and after: `npx react-data-xray compare before-<scenario> after-<scenario>` (reads the two files, so it works across tabs and reloads; `window.__RDX__.compare` only sees snapshots saved in that tab). Look at `count` · `duplicates` · `sameResponses` per endpoint, `renders` · `avoidable` per component (each row's `id` is the same `ep:…` / `c:…` id as in the reports, so match the finding you fixed by id), `layoutShifts[].value` per component (compare does not diff it — read both reports), and `warnings`.
 3. If a metric did not improve, revert that change.
 4. Report to the user in a table: what was fixed and why (code location), before/after numbers, and anything that could not be confirmed.
 

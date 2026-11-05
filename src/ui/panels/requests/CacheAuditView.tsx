@@ -35,7 +35,7 @@ export const CacheAuditView = ({ records }: { records: readonly RequestRecord[] 
             ? f.stacks.map((st, i) => (
                 <Muted key={`${i ? 'after' : 'before'}${st}`}>{`${i ? 'after' : 'before'}: ${st.split('\n')[0]}`}</Muted>
               ))
-            : f.stack && <Muted>{f.stack.split('\n').slice(1, 3).join(' ')}</Muted>}
+            : f.stack && <Muted>{f.stack.split('\n').slice(0, 2).join(' ')}</Muted>}
         </div>
       ))}
     </div>

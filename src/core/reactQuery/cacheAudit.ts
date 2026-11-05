@@ -1,8 +1,10 @@
+import { resolveSourceStackLater } from '../capture/requestContext.js';
 import { findRootFibers, walkFibers } from '../fiber/tree.js';
 import { findDerivedOrigin, isIndexPending } from '../inspect/derivedMatch.js';
 import { enqueue, flushQueue, isQueuePending } from '../scheduler/idleQueue.js';
 import type { RequestClass } from '../requests/classify.js';
 import { getOrigin } from '../requests/origins.js';
+import { appFramesOf } from '../requests/callerFrames.js';
 import { paramKeyOf, requestKeyOf } from '../requests/requestKey.js';
 import { getRecords, lastRecordId, touchRecords } from '../requests/store.js';
 import type { Origin, RequestRecord } from '../requests/types.js';
@@ -275,16 +277,25 @@ const resolvePending = (history: ClientHistory): void => {
   history.pending = isQueuePending() ? unresolved : [];
 };
 
-/** 앱에서 invalidateQueries 를 부른 위치. rdx 가 감싼 invalidateQueries 와 그 안쪽 프레임은 뺀다(앱 코드가 첫 줄에 오게). */
+/**
+ * 앱에서 invalidateQueries 를 부른 위치. rdx 가 감싼 invalidateQueries 와 그 안쪽 프레임은 빼고, 앱 코드 프레임 앞쪽 3줄만 남긴다
+ * (앱 코드가 첫 줄에 오게). 유휴 큐 step 안에서 부른다.
+ */
 const callerStack = (error: Error): string | undefined => {
   const lines = (error.stack ?? '').split('\n').map((line) => line.trim());
   const wrapper = lines.findIndex((line) => line.includes('invalidateQueries'));
-  return (
-    lines
-      .slice(wrapper + 1)
-      .filter((line) => line && line !== 'Error')
-      .join('\n') || undefined
-  );
+  return appFramesOf(lines.slice(wrapper + 1).join('\n'));
+};
+
+/**
+ * finding 의 호출 위치를 요청 callers 와 같은 길(소스맵)로 원본 위치로 바꿔 둔다. 같은 finding 객체를 고쳐 쓰므로
+ * 이미 묶여 보고서에 실린 finding 도 다음 보고서부터 원본 위치를 보인다. 보고서 저장 전 소스맵 대기가 이 변환도 기다린다.
+ */
+const resolveFindingStacks = (finding: CacheFinding): void => {
+  if (finding.stack) resolveSourceStackLater(finding.stack, (resolved) => (finding.stack = resolved));
+  finding.stacks?.forEach((stack, i) => {
+    if (stack) resolveSourceStackLater(stack, (resolved) => finding.stacks && (finding.stacks[i] = resolved));
+  });
 };
 
 // 키 모양이 같다: 앞 두 요소가 같은 문자열이고, 그 뒤는 겹치는 자리끼리 타입이 같다(객체는 무효화 쪽 필드가 있다).
@@ -341,17 +352,15 @@ const recordOverlap = (
       // 요청 분류가 이 겹침으로 취소된 요청을 StrictMode 로 보지 않게 기록에 표시한다
       if (noteOverlap(overlap, getRecords())) touchRecords();
       const stack = callerStack(now.error);
-      pushBounded(history.misses, {
-        at: now.at,
-        overlap,
-        finding: {
-          kind: 'double-invalidate',
-          keys: [keyText(first.key), keyText(now.key)],
-          requests: [],
-          stack,
-          stacks: [callerStack(first.error) ?? '', stack ?? ''],
-        },
-      });
+      const finding: CacheFinding = {
+        kind: 'double-invalidate',
+        keys: [keyText(first.key), keyText(now.key)],
+        requests: [],
+        stack,
+        stacks: [callerStack(first.error) ?? '', stack ?? ''],
+      };
+      resolveFindingStacks(finding);
+      pushBounded(history.misses, { at: now.at, overlap, finding });
     }
     return true;
   });
@@ -372,15 +381,9 @@ const recordInvalidate = (history: ClientHistory, client: QueryClientLike, args:
   enqueue(() => {
     if (seen.some((k) => partialMatch(key, k))) return true;
     const kind = seen.some((k) => sameShape(key, k)) ? 'invalidate-unloaded' : 'invalidate-miss';
-    pushBounded(history.misses, {
-      at,
-      finding: {
-        kind,
-        keys: [keyText(key)],
-        requests: [],
-        stack: callerStack(error),
-      },
-    });
+    const finding: CacheFinding = { kind, keys: [keyText(key)], requests: [], stack: callerStack(error) };
+    resolveFindingStacks(finding);
+    pushBounded(history.misses, { at, finding });
     return true;
   });
 };

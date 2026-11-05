@@ -65,6 +65,9 @@ describe('보고서 렌더 시간 (#17)', () => {
     const p = sec.components.find((c) => c.name === 'Parent')!;
     expect(p.time).toMatchObject({ totalMs: expect.any(Number), avgMs: expect.any(Number), avoidableMs: 0 });
     expect(p.startedRenders).toMatchObject({ childMs: expect.any(Number), unchangedMs: expect.any(Number) });
-    expect(sec.heaviestCommits?.[0]).toMatchObject({ startedBy: 'Parent', components: 2 });
+    expect(sec.heaviestCommits?.[0]).toMatchObject({
+      startedBy: { id: expect.stringMatching(/^c:Parent@.*issue17\.test\.tsx:\d+$/), name: 'Parent', renderedAt: expect.any(String) },
+      components: 2,
+    });
   });
 });

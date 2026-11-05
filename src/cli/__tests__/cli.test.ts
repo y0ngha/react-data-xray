@@ -186,7 +186,7 @@ describe('rdx CLI(#69)', { timeout: 20_000 }, () => {
     const { code, out } = await run(['compare', 'a', 'b']);
     expect(code).toBe(0);
     const diff = JSON.parse(out) as { requests: unknown[] };
-    expect(diff.requests).toEqual([{ endpoint: 'GET /api/users', count: -2, duplicates: -2, sameResponses: -1 }]);
+    expect(diff.requests).toEqual([{ endpoint: 'GET /api/users', id: 'ep:GET /api/users', count: -2, duplicates: -2, sameResponses: -1 }]);
     expect(JSON.parse(await readFile(join(root, '.rdx', 'compare-a-b.json'), 'utf8'))).toEqual(diff);
     expect(await run(['compare', 'a', 'missing'])).toMatchObject({ code: 1, err: expect.stringContaining('No report at') });
     await writeFile(join(root, '.rdx', 'other.json'), '{"x":1}');

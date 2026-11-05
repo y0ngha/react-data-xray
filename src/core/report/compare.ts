@@ -1,6 +1,7 @@
 import { formatTime } from '../../shared/format.js';
 import type { EffectiveConfig } from '../config.js';
 import type { RdxReport } from './buildReport.js';
+import { componentId, endpointId } from './ids.js';
 
 /** 비교에 쓰는 부분만 담은 보고서. sessionStorage 에 남기는 것도 이 크기다. */
 export interface ComparableReport {
@@ -59,9 +60,10 @@ type Status = 'added' | 'removed';
 export type Delta<K extends string, N extends string> = { status?: Status } & { [P in K]: string } & { [P in N]?: number };
 
 export interface ReportComparison {
-  requests: Array<Delta<'endpoint', 'count' | 'duplicates' | 'sameResponses'>>;
-  /** 같은 이름이라도 renderedAt·package 가 다르면 다른 행이다 */
-  renders: Array<Delta<'name', 'renders' | 'avoidable'> & { renderedAt?: string; package?: string }>;
+  /** id 는 보고서의 requests.endpoints[].id 와 같다(옛 스냅샷에는 없어 비교할 때 만든다) */
+  requests: Array<Delta<'endpoint', 'count' | 'duplicates' | 'sameResponses'> & { id: string }>;
+  /** 같은 이름이라도 renderedAt·package 가 다르면 다른 행이다. id 는 renders.components[].id 와 같다 */
+  renders: Array<Delta<'name', 'renders' | 'avoidable'> & { id: string; renderedAt?: string; package?: string }>;
   reactQuery: { added: string[]; resolved: string[] };
   /** 두 보고서를 같은 조건으로 잰 것인지 믿기 어려운 사유 */
   warnings: string[];
@@ -185,7 +187,9 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
       (e) => e.endpoint,
       ['count', 'duplicates', 'sameResponses'],
       (e, n) => e[n],
-    ),
+      (e) => e.endpoint,
+      (e) => ({ id: endpointId(e.endpoint) }),
+    ) as ReportComparison['requests'],
     renders: diffBy(
       a.renders.components,
       b.renders.components,
@@ -195,8 +199,8 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
       ['renders', 'avoidable'],
       (c, n) => c[n],
       (c) => c.name,
-      (c) => ({ renderedAt: c.renderedAt, package: c.package }),
-    ),
+      (c) => ({ id: componentId(c.name, c.renderedAt), renderedAt: c.renderedAt, package: c.package }),
+    ) as ReportComparison['renders'],
     reactQuery: { added: [...after].filter((id) => !before.has(id)), resolved: [...before].filter((id) => !after.has(id)) },
     warnings,
   };

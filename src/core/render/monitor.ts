@@ -256,6 +256,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   let at = 0;
   let totalMs: number | undefined;
   let startedBy: string | undefined;
+  let startedFrom: Commit['startedFrom'];
   // 이 commit 에서 응답을 직접 받아 렌더된 첫(가장 위) 컴포넌트. 형제가 밀린 레이아웃 이동의 원인을 짐작하는 데 쓴다.
   let networkCause: Commit['networkCause'];
   const mine = epoch;
@@ -268,7 +269,10 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       try {
         const event = recordRender(p, now, seq, p.parent < 0 ? {} : inheritedBy[p.parent]);
         if (event.ms !== undefined) totalMs = (totalMs ?? 0) + event.ms;
-        if (startedBy === undefined && STARTS_RENDER.has(event.reason)) startedBy = getComponentName(p.fiber);
+        if (startedBy === undefined && STARTS_RENDER.has(event.reason)) {
+          startedBy = getComponentName(p.fiber);
+          startedFrom = entries.get(p.fiber);
+        }
         if (!networkCause && event.cause && event.cause.via !== 'parent') {
           const entry = entries.get(p.fiber);
           networkCause = { cause: event.cause, component: getComponentName(p.fiber), location: entry?.location };
@@ -289,7 +293,15 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       if (entry.skips.length > MAX_EVENTS_PER_COMPONENT) entry.skips.shift();
       active.add(entry);
     });
-    commits.push({ id: ++commitSeq, time: now, count: pending.length, ms: totalMs, startedBy, ...(networkCause && { networkCause }) });
+    commits.push({
+      id: ++commitSeq,
+      time: now,
+      count: pending.length,
+      ms: totalMs,
+      startedBy,
+      ...(startedFrom && { startedFrom }),
+      ...(networkCause && { networkCause }),
+    });
     if (commits.length > MAX_COMMITS) commits.shift();
     commitListeners.forEach((listener) => listener());
     return true;

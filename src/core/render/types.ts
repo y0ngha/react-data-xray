@@ -136,6 +136,8 @@ export interface NetworkCauseCount {
 
 export interface OriginCount extends RenderOrigin {
   count: number;
+  /** 시작한 컴포넌트를 그리는 JSX 위치(소스맵으로 바뀐 것). 같은 이름의 다른 위치 컴포넌트는 따로 센다. 라이브러리 컴포넌트·위치를 모르면 없다 */
+  location?: string;
 }
 
 export interface RenderSummary {
@@ -177,6 +179,8 @@ export interface Commit {
   ms?: number;
   /** 이 commit 을 시작한 컴포넌트(스스로 state·context 가 바뀌었거나 마운트된 가장 위 컴포넌트) */
   startedBy?: string;
+  /** startedBy 의 렌더 기록. 위치(소스맵으로 바뀌면 원본 줄)를 보고서를 만들 때 읽는다 */
+  startedFrom?: Pick<RenderEntry, 'location' | 'package'>;
   /** 이 commit 에서 응답을 직접 받아 렌더된 첫(가장 위) 컴포넌트와 그 원인 */
   networkCause?: { cause: NetworkCause; component: string; location?: string };
 }
