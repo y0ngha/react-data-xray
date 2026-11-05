@@ -160,7 +160,15 @@ export interface ReportComparison {
    * 같은 이름이라도 renderedAt·package(와 그린 앱 컴포넌트)가 다르면 다른 행이다. id 는 renders.components[].id 와 같다.
    * totalMs 증감은 렌더 수가 달라진 행에만 싣는다
    */
-  renders: Array<Delta<'name', 'renders' | 'avoidable' | 'totalMs'> & { id: string; renderedAt?: string; package?: string }>;
+  renders: Array<
+    Delta<'name', 'renders' | 'avoidable' | 'totalMs'> & {
+      id: string;
+      renderedAt?: string;
+      /** JSX 줄만 옮겨져 위치가 달라진 행을 한 행으로 맞췄을 때, 전 보고서의 위치(#129) */
+      renderedAtBefore?: string;
+      package?: string;
+    }
+  >;
   reactQuery: {
     added: string[];
     resolved: string[];
@@ -365,6 +373,40 @@ const fetchCauseDiff = (a: ComparableReport, b: ComparableReport): ReportCompari
 /** 렌더 행의 id. 보고서 행의 id(renders.components[].id)를 쓰고, 그 필드 전에 저장한 스냅샷은 같은 함수로 만든다 */
 const rowIdOf = (c: RenderRowTally): string => c.id ?? componentIdOf({ name: c.name, location: c.renderedAt, package: c.package });
 
+/** renderedAt 에서 끝의 :줄(:열) 을 뗀 파일 */
+const fileOf = (location: string): string => location.replace(/:\d+(?::\d+)?$/, '');
+
+/**
+ * id 로 짝이 없는 렌더 행 가운데, 이름·파일·패키지가 같고 줄만 다른 행을 짝짓는다(#129). 고친 파일에서 JSX 줄이 밀리면
+ * id(c:이름@파일:줄)가 바뀌어 같은 컴포넌트가 다른 행이 되기 때문이다. 같은 조합이 어느 한쪽에 둘 이상이면(한 파일의 여러
+ * 위치에서 같은 컴포넌트를 그림) 어느 것이 옮겨졌는지 모르므로 짝짓지 않는다.
+ * @returns 짝지은 후(after) 행 → 전(before) 행
+ */
+const movedRows = (a: readonly RenderRowTally[], b: readonly RenderRowTally[]): Map<RenderRowTally, RenderRowTally> => {
+  const idsA = new Set(a.map(rowIdOf));
+  const idsB = new Set(b.map(rowIdOf));
+  const keyOf = (c: RenderRowTally): string | undefined =>
+    c.renderedAt ? JSON.stringify([c.name, fileOf(c.renderedAt), c.package ?? null]) : undefined;
+  const byKey = (rows: readonly RenderRowTally[], others: ReadonlySet<string>): Map<string, RenderRowTally[]> => {
+    const groups = new Map<string, RenderRowTally[]>();
+    rows
+      .filter((c) => !others.has(rowIdOf(c)))
+      .forEach((c) => {
+        const key = keyOf(c);
+        if (key !== undefined) groups.set(key, [...(groups.get(key) ?? []), c]);
+      });
+    return groups;
+  };
+  const before = byKey(a, idsB);
+  const after = byKey(b, idsA);
+  return new Map(
+    [...after].flatMap(([key, ys]) => {
+      const xs = before.get(key);
+      return ys.length === 1 && xs?.length === 1 ? [[ys[0], xs[0]] as const] : [];
+    }),
+  );
+};
+
 const sidesOf = (a: boolean, b: boolean): string => (a && b ? 'both reports' : a ? 'before' : 'after');
 
 /** 저장한 두 보고서(a: 전, b: 후)의 차이. 양수는 b 에서 늘어난 것이다. */
@@ -410,16 +452,18 @@ export const compare = (a: ComparableReport, b: ComparableReport): ReportCompari
     warnings.push(
       `render instances were truncated in ${sidesOf(ta, tb)} (droppedInstances ${a.renders.droppedInstances ?? 0} / ${b.renders.droppedInstances ?? 0}); render counts leave out the least-rendered instances`,
     );
+  const moved = movedRows(a.renders.components, b.renders.components);
   const renders = diffBy(a.renders.components, b.renders.components, {
     keyName: 'name',
     // 같은 이름의 위치별·패키지별(그린 앱 컴포넌트별) 행을 한 행으로 합치지 않는다. id 를 남기기 전 스냅샷은 이름·위치·패키지로 만든다.
-    idOf: rowIdOf,
+    // 줄만 옮겨진 행은 전 행의 id 로 맞춘다(보이는 id·위치는 후 행의 것).
+    idOf: (c) => rowIdOf(moved.get(c) ?? c),
     nameOf: (c) => c.name,
     numbers: ['renders', 'avoidable'],
     info: ['totalMs'],
     valueOf: (c, n) => c[n],
     rankOf: (c) => [c.avoidable, c.renders],
-    extraOf: (c) => ({ id: rowIdOf(c), renderedAt: c.renderedAt, package: c.package }),
+    extraOf: (c) => ({ id: rowIdOf(c), renderedAt: c.renderedAt, renderedAtBefore: moved.get(c)?.renderedAt, package: c.package }),
     mayHide: [rendersMayHide(a), rendersMayHide(b)],
   });
   const fetchCauses = fetchCauseDiff(a, b);
