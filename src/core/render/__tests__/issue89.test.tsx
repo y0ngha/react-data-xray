@@ -301,7 +301,7 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
   });
 
   it('summary_grouping: 같은 컴포넌트·원인의 작은 이동이 합쳐 0.1 을 넘으면 하나의 finding 이다', () => {
-    const empty = { total: 0, dropped: 0, endpoints: [], nPlusOne: [], waterfalls: [] };
+    const empty = { total: 0, dropped: 0, endpoints: [], nPlusOne: [], waterfalls: [], bursts: [], burstsOmitted: 0, followUps: [] };
     const renders = { monitoring: true, windowSeconds: 10, truncated: false, droppedInstances: 0, components: [] };
     const row = { value: 0.06, secondsAgo: 1, component: 'Card', renderedAt: 'src/Card.tsx:3' };
     const summary = buildSummary(empty, { findings: [] } as never, renders as never, new Map(), [row, row, { ...row, component: 'Other' }]);
@@ -315,7 +315,7 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
   });
 
   it('verdict_components: verdict 는 밀린 컴포넌트(이름·위치)를 한 번씩만 세고, 컴포넌트를 모르는 이동은 세지 않는다', () => {
-    const empty = { total: 0, dropped: 0, endpoints: [], nPlusOne: [], waterfalls: [] };
+    const empty = { total: 0, dropped: 0, endpoints: [], nPlusOne: [], waterfalls: [], bursts: [], burstsOmitted: 0, followUps: [] };
     const renders = { monitoring: true, windowSeconds: 10, truncated: false, droppedInstances: 0, components: [] };
     const card = { value: 0.2, secondsAgo: 1, component: 'Card', renderedAt: 'src/Card.tsx:3' };
     const rows = [
