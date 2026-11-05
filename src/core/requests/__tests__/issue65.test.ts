@@ -64,7 +64,7 @@ describe('이슈 65: 같은 응답 판정이 응답 원문을 들고 있지 않�
 
   it('payload 를 모르는 요청은 해시하지 않는다', () => {
     const r = respond('/api/up', big('0'), null);
-    runSteps(3); // 중복 판정, 원문 보관, 그 알림뿐
+    runSteps(4); // 중복 판정, 원문 보관, 워터폴 판정, 그 알림뿐
     expect(isQueuePending()).toBe(false);
     expect(r.sameResponseAs).toBeUndefined();
     expect(sameResponseMemory().keys).toBe(0);

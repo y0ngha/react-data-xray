@@ -39,6 +39,11 @@ export interface RequestRecord {
    * 'unrecorded' 는 그 commit 들에 렌더 기록이 없다(감시가 꺼져 있었다). StrictMode 재실행 판정에 쓴다.
    */
   mountEvidence?: 'mounted' | 'not-mounted' | 'unrecorded';
+  /**
+   * 이 요청이 기다린 앞 요청의 id(워터폴): 그 응답이 원인인 commit 에서 보낸 컴포넌트가 마운트됐고, 그 마운트 직후 이 요청이 나갔다.
+   * 같은 때 병렬로 나간 요청은 앞 요청의 응답 전에 시작했으므로 달지 않는다. 유휴 큐가 렌더 기록으로 정한다(requests/waterfall).
+   */
+  waterfallFrom?: number;
   /** 겹친 무효화(double-invalidate)가 취소한 요청. 유휴 큐가 정한다(reactQuery/overlapCancel). */
   cancelledByOverlap?: boolean;
   /** 중복 요청이 다시 나간 이유(의존성 변경·재마운트·StrictMode). 알 수 없으면 없다. */

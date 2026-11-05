@@ -118,7 +118,9 @@ const recordRender = (p: Pending, now: number, seq: number, inherited: Inherited
   noteCommitCause(
     entry.name,
     seq,
-    p.alt ? { time: now, deps: changedEffectDep(snap) } : { time: now, mounted: true, remount: remountAt(entry.name, now) },
+    p.alt
+      ? { time: now, deps: changedEffectDep(snap) }
+      : { time: now, mounted: true, remount: remountAt(entry.name, now), causedBy: event.cause?.record.id },
   );
   entry.events.push(event);
   if (entry.events.length > MAX_EVENTS_PER_COMPONENT) entry.events.shift();

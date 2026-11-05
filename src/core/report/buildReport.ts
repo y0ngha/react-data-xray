@@ -41,8 +41,8 @@ export interface ReportOptions {
   howToRead?: boolean;
 }
 
-/** HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침). */
-export const HOW_TO_READ_VERSION = 3;
+/** HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침, 4: waterfalls 줄 #86). */
+export const HOW_TO_READ_VERSION = 4;
 
 // 섹션별 줄을 읽는 순서로 잇는다.
 export const HOW_TO_READ: readonly string[] = [

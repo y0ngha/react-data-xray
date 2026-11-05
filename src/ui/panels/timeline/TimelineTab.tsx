@@ -49,11 +49,19 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
       </div>
       <div ref={boxRef} style={{ position: 'relative' }}>
         <TimelineChart layout={layout} hovered={hovered?.record ?? null} onHover={onHover} />
-        {hovered && <TimelineTooltip record={hovered.record} x={hovered.x} y={hovered.y + layout.laneH + 4} maxX={width} />}
+        {hovered && (
+          <TimelineTooltip
+            record={hovered.record}
+            waitedFor={layout.links.find((l) => l.to === hovered.record)?.from}
+            x={hovered.x}
+            y={hovered.y + layout.laneH + 4}
+            maxX={width}
+          />
+        )}
       </div>
       <Muted>
         Hover a bar to see request info; click for details (headers, Request/Response Body). If render ticks appear right after a burst,
-        each request triggers a separate render.
+        each request triggers a separate render. An arrow means the next request waited for the previous response (waterfall).
       </Muted>
     </div>
   );

@@ -12,6 +12,8 @@ export interface CommitCause {
   remount?: { parent: string; typeChanged: boolean };
   /** 이 commit 에서 처음 바뀐 effect 의존성. 마운트(이전 렌더 없음)는 없다 */
   deps?: string;
+  /** 마운트했을 때, 그 마운트 렌더의 네트워크 원인 요청 id(응답 → 마운트 → 요청 워터폴 판정용, requests/waterfall) */
+  causedBy?: number;
 }
 
 const MAX_NAMES = 1000;
@@ -46,6 +48,7 @@ export const noteCommitCause = (name: string, at: number, change: Omit<CommitCau
     last.time ??= change.time;
     last.remount ??= change.remount;
     last.deps ??= change.deps;
+    last.causedBy ??= change.causedBy;
     return;
   }
   list.push({ seq: at, ...change });

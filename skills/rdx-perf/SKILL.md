@@ -40,6 +40,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 
 1. `summary` first: `summary.verdict` is a one-line count, and `summary.topFindings` lists what to fix in order (severity `high` is what the RDX button badge counts). Open each finding's `detail` path for the full entry and start from `target.location`.
 2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
+   Then `requests.waterfalls`: serial request chains (a response mounted the component that sent the next request), largest `latencyMs` first.
 3. `reactQuery.findings`: follow each item's `fix`.
 4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
 
@@ -60,6 +61,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 | Same content, new reference (`changedProps.sameContent`) | `useMemo` in the parent; use structural sharing for responses |
 | New callback (`changedProps.newCallback`) | `useCallback` in the parent |
 | Context change | Split frequently-changing and stable values into separate contexts; `useMemo` for Provider value |
+| Request waterfall (`requests.waterfalls`: a response mounts the component that sends the next request) | Open the later request's `location` and check whether it uses the earlier response. If it does not, start it in parallel (lift it next to the first request) or prefetch it. If it does, join the data on the server (one endpoint) or move both requests into a route loader. rdx does not check the data dependency — confirm it in code |
 | React Query key problem | Follow `reactQuery.findings[].fix` |
 
 ## 6. Constraints

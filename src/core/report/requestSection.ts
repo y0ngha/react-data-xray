@@ -5,11 +5,13 @@ import { endpointOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
+import { findWaterfalls, type Waterfall } from '../requests/waterfall.js';
 import { queryContextOf, type QueryContext } from '../capture/queryContext.js';
 import { groupBy } from '../../shared/collections.js';
 
 const MAX_CALLERS = 3;
 const MAX_EXAMPLES = 3;
+const MAX_WATERFALLS = 5;
 
 interface Caller {
   frame: string;
@@ -51,6 +53,8 @@ export interface RequestSection {
     /** 낭비로 판정된 요청의 URL 예(쿼리 포함) */
     wasteExamples: string[];
   }>;
+  /** 응답 → 마운트 → 요청으로 이어진 직렬 고리(워터폴). 지연이 큰 순으로 최대 5개, 없으면 빈 배열 */
+  waterfalls: Waterfall[];
 }
 
 /** 순서는 buildReport 가 다른 섹션 줄과 맞춘다. */
@@ -174,6 +178,7 @@ export const buildRequestSection = (
         ),
       };
     }),
+    waterfalls: findWaterfalls(records, (r) => callerOf(r.sourceStack ?? r.stack)).slice(0, MAX_WATERFALLS),
   };
 };
 
@@ -184,5 +189,6 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   "callers.waste is how many of that caller's requests were counted as waste (duplicates or sameResponses); absent when none. summary points at the listed caller with the most waste.",
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
+  'requests.waterfalls lists serial request chains (up to 5, largest latency first): the response of chain[i] caused the commit in which chain[i+1].component mounted, and that component sent chain[i+1] right after (from its effect). Requests sent in parallel are not chained. depth is the number of requests in the chain, latencyMs is the sum of their response times (the wait added by running them one after another; ms values are averages over count occurrences), location is where each request was sent. If the later request does not need the earlier response, start it in parallel or prefetch it; if it does, join the data on the server or move both into a route loader. rdx does not check whether the data is actually used.',
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
 ];

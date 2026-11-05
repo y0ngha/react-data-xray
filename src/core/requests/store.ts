@@ -4,6 +4,7 @@ import { markOverlapCancelled } from '../reactQuery/overlapCancel.js';
 import { currentCommitSeq } from '../render/commitCauses.js';
 import { isAborted } from './aborted.js';
 import { repeatCauseStep } from './repeatCause.js';
+import { waterfallStep } from './waterfall.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import { createResponseHasher, digestOf, HASH_CHUNK } from './responseHash.js';
 import type { RequestRecord } from './types.js';
@@ -83,8 +84,16 @@ export const createRecord = (
   };
   // 순서는 큐가 지키고, 판정은 startedAt 기준이라 늦어도 같다.
   enqueue(() => {
-    const duplicate = isStale(record) ? undefined : detectDuplicate(record);
+    if (isStale(record)) return true;
+    const duplicate = detectDuplicate(record);
     record.duplicateOf = duplicate?.id;
+    // 앞 요청을 기다렸는지(워터폴)도 보낸 컴포넌트를 안 뒤에, useLayoutEffect 가 보냈으면 다음 commit 의 렌더 기록 뒤에 정한다.
+    const waterfall = waterfallStep(record, records);
+    enqueue(() => {
+      const done = waterfall();
+      if (record.waterfallFrom !== undefined) notify();
+      return done;
+    });
     // 보낸 컴포넌트는 앞서 걸린 annotate step 이 채우므로, 그 뒤로 한 번 더 미룬다.
     if (duplicate) {
       const step = repeatCauseStep(record, duplicate.commitSeq);
