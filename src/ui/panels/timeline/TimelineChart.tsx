@@ -1,3 +1,5 @@
+import type { LayoutShift } from '../../../core/render/layoutShifts.js';
+import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { formatTime } from '../../../shared/format.js';
 import { useRequestActions } from '../../contexts.js';
@@ -68,7 +70,15 @@ const BurstBand = ({
   );
 };
 
-/** 요청 막대(호버하면 요약, 클릭하면 상세), 몰림 구간, 렌더 commit 눈금을 그린다. */
+/** 이동 표시의 툴팁: 시각, 점수, 밀린 컴포넌트, 원인 응답과 그 응답으로 렌더된 컴포넌트 */
+export const shiftLabel = (s: LayoutShift): string =>
+  [
+    `${formatTime(s.time)} · layout shift ${s.value.toFixed(3)}`,
+    s.component ? `moved: <${s.component.name}>` : 'moved: unknown node',
+    s.cause ? `after ${endpointOf(s.cause.record)} rendered <${s.cause.component}> (click for details)` : 'no network cause found',
+  ].join(' · ');
+
+/** 요청 막대(호버하면 요약, 클릭하면 상세), 몰림 구간, 렌더 commit 눈금, 레이아웃 이동(클릭하면 원인 요청 상세)을 그린다. */
 export const TimelineChart = ({ layout, hovered, onHover }: TimelineChartProps) => {
   const { open, classOf } = useRequestActions();
   const barFill = (record: RequestRecord) => {
@@ -112,6 +122,20 @@ export const TimelineChart = ({ layout, hovered, onHover }: TimelineChartProps) 
       {layout.commits.map((c) => (
         <rect key={c.key} x={c.x} y={layout.commitBaseY - c.height} width={2} height={c.height} fill={color.render}>
           <title>{`${formatTime(c.time)} · ${c.count} components rendered`}</title>
+        </rect>
+      ))}
+      {layout.shifts.map(({ key, x, height, shift }) => (
+        <rect
+          key={key}
+          x={x - 1}
+          y={layout.dividerY + 1}
+          width={3}
+          height={height}
+          fill={color.shift}
+          style={shift.cause ? { cursor: 'pointer' } : undefined}
+          onClick={shift.cause ? () => open(shift.cause!.record) : undefined}
+        >
+          <title>{shiftLabel(shift)}</title>
         </rect>
       ))}
       {layout.ticks.map((t) => (

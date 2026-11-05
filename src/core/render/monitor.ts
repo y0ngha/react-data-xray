@@ -464,3 +464,59 @@ export const getRenderGroups = (
   sinceMs = WINDOW_MS,
   keep: (entry: RenderEntry) => boolean = () => true,
 ): RenderGroupsResult => drain(renderGroupsSteps(now, sinceMs, keep));
+
+/** fiber 가 rdx 패널(렌더 감시에서 빼는 컴포넌트) 안에 있는지. 레이아웃 이동에서 패널 자신이 밀린 것은 뺀다. */
+export const isIgnoredFiber = (fiber: Fiber): boolean => {
+  for (let f: Fiber | null = fiber; f; f = f.return) if (ignoredTypes.has(f.type)) return true;
+  return false;
+};
+
+const entryOfFiber = (fiber: Fiber): RenderEntry | undefined =>
+  entries.get(fiber) ?? (fiber.alternate ? entries.get(fiber.alternate) : undefined);
+
+/** 이 컴포넌트를 그리는 JSX 위치. 렌더 기록이 있으면 소스맵으로 바꾼 위치를 쓴다. */
+export const renderedAtOf = (fiber: Fiber): string | undefined => entryOfFiber(fiber)?.location ?? jsxLocationOf(fiber);
+
+// 레이아웃 이동은 commit 뒤 다음 그리기에서 생긴다. 이보다 앞선 렌더는 그 이동을 일으킨 commit 으로 보지 않는다.
+const SHIFT_COMMIT_GAP_MS = 1000;
+// Date.now 와 performance 시계(timeOrigin + startTime)의 어긋남
+const SHIFT_CLOCK_SKEW_MS = 50;
+
+export interface ShiftCause {
+  cause: NetworkCause;
+  /** 그 응답으로 렌더된 컴포넌트(부모를 따라 렌더됐으면 같은 응답을 직접 받은 조상) */
+  component: string;
+  location?: string;
+}
+
+/**
+ * 레이아웃 이동(time, ms epoch)을 일으킨 네트워크 원인. fiber 와 그 조상 가운데 이동 직전(1초 안) 가장 늦은 commit 에서
+ * 렌더된 것을 아래부터 보고, 처음 만난 네트워크 원인(`cause.record`)을 쓴다. 렌더 기록이 없으면(감시가 꺼져 있었음) 없다.
+ */
+export const shiftCauseOf = (fiber: Fiber, time: number): ShiftCause | undefined => {
+  const chain: RenderEntry[] = [];
+  for (let f: Fiber | null = fiber; f; f = f.return) {
+    const entry = isComposite(f) ? entryOfFiber(f) : undefined;
+    if (entry && chain[chain.length - 1] !== entry) chain.push(entry);
+  }
+  // 조상마다 이동 시각 이전의 마지막 렌더(기록은 시간순이다)
+  const lastBefore = chain.map((entry): RenderEvent | undefined => {
+    for (let i = entry.events.length - 1; i >= 0; i--) if (entry.events[i].time <= time + SHIFT_CLOCK_SKEW_MS) return entry.events[i];
+    return undefined;
+  });
+  const latest = Math.max(-Infinity, ...lastBefore.map((e) => e?.time ?? -Infinity));
+  if (latest < time - SHIFT_COMMIT_GAP_MS) return undefined;
+  const at = lastBefore.findIndex((e) => e?.time === latest && e.cause);
+  if (at < 0) return undefined;
+  const { record } = lastBefore[at]!.cause!;
+  // 부모를 따라 렌더됐으면, 같은 commit 에서 같은 응답을 직접 받은 조상까지 올라간다.
+  let owner = at;
+  for (let i = at; i < chain.length; i++) {
+    const e = lastBefore[i];
+    if (e?.time !== latest || e.cause?.record !== record) continue;
+    owner = i;
+    if (e.cause.via !== 'parent') break;
+  }
+  const entry = chain[owner];
+  return { cause: lastBefore[owner]!.cause!, component: entry.name, ...(entry.location && { location: entry.location }) };
+};

@@ -24,6 +24,7 @@ export const color = {
   failed: '#fb923c',
   consumer: '#fb923c',
   render: '#a78bfa',
+  shift: '#f472b6',
 } as const;
 
 export const FONT = '12px/1.5 ui-monospace, Menlo, monospace';

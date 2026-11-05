@@ -13,6 +13,7 @@ import {
 } from './reactQuerySection.js';
 import { buildRenderSection, RENDER_HOW_TO_READ, RENDER_HOW_TO_READ_EXTRA, type RenderSection } from './renderSection.js';
 import { buildRequestSection, REQUEST_HOW_TO_READ, REQUEST_HOW_TO_READ_EXTRA, type RequestSection } from './requestSection.js';
+import { buildLayoutShiftSection, LAYOUT_SHIFT_HOW_TO_READ, type LayoutShiftRow } from './layoutShiftSection.js';
 import { getResetAt } from './resetAt.js';
 import { buildSummary, SUMMARY_HOW_TO_READ, type ReportSummary } from './summarySection.js';
 import { findRenderStorms } from '../problems.js';
@@ -32,6 +33,8 @@ export interface RdxReport {
   requests: RequestSection;
   reactQuery: ReactQuerySection;
   renders: RenderSection;
+  /** 레이아웃 이동(점수 큰 순)과 그 원인 응답·컴포넌트. 브라우저가 layout-shift 를 주지 않으면(Safari, Firefox) 없다 */
+  layoutShifts?: LayoutShiftRow[];
   /** rdx 가 제대로 붙었는지(window.__RDX__.doctor() 와 같다). 결과를 읽기 전에 problems 를 먼저 본다 */
   diagnostics: RdxDiagnostics;
 }
@@ -41,8 +44,8 @@ export interface ReportOptions {
   howToRead?: boolean;
 }
 
-/** HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침). */
-export const HOW_TO_READ_VERSION = 3;
+/** HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침, 4: layoutShifts 줄(#89)). */
+export const HOW_TO_READ_VERSION = 4;
 
 // 섹션별 줄을 읽는 순서로 잇는다.
 export const HOW_TO_READ: readonly string[] = [
@@ -64,6 +67,7 @@ export const HOW_TO_READ: readonly string[] = [
   ...REQUEST_HOW_TO_READ_EXTRA,
   ...RENDER_HOW_TO_READ_EXTRA,
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
+  ...LAYOUT_SHIFT_HOW_TO_READ,
   'Check diagnostics.problems first: if rdx was loaded after react-dom (renderHook.commitsSeen is 0) or requests went out before it loaded (capture.requestsBeforeInstall), the rest of the report is incomplete. Each problem says how to fix it.',
   'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
   'howToReadVersion is the version of these lines. If you already read this version, call window.__RDX__.report({ howToRead: false }) to leave them out.',
@@ -83,9 +87,10 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true,
   const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf);
   const reactQuery = buildReactQuerySection(records, classes);
   const renders = buildRenderSection(monitoring, now);
+  const layoutShifts = buildLayoutShiftSection(now);
   return {
     // 순위만 매긴다: 위 섹션이 이미 계산한 값과, 배지가 쓰는 렌더 폭주 기준(core/problems.ts)
-    summary: buildSummary(requests, reactQuery, renders, findRenderStorms(now)),
+    summary: buildSummary(requests, reactQuery, renders, findRenderStorms(now), layoutShifts),
     howToReadVersion: HOW_TO_READ_VERSION,
     ...(options.howToRead !== false && { howToRead: [...HOW_TO_READ] }),
     generatedAt: new Date(now).toISOString(),
@@ -94,6 +99,7 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true,
     requests,
     reactQuery,
     renders,
+    ...(layoutShifts && { layoutShifts }),
     diagnostics: buildDiagnostics(),
   };
 };

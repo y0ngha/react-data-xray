@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 
+import { getLayoutShifts } from '../../../core/render/layoutShifts.js';
 import { getCommits } from '../../../core/render/monitor.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Button } from '../../components/Button.js';
@@ -31,7 +32,8 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
   const now = useNow(TICK_MS, paused);
   // 몰림은 버튼과 같게 전체 기록으로 판정한다(대상으로 좁혀도 어긋나지 않게).
   const all = useRecords();
-  const layout = layoutTimeline(records, getCommits(), now, width, classOf, all);
+  // 레이아웃 이동은 유휴 큐에서 그때까지 분석된 것만 그린다.
+  const layout = layoutTimeline(records, getCommits(), now, width, classOf, all, getLayoutShifts());
   const onHover = (bar: BarLayout | null) => {
     setHovered(bar);
     hover(bar?.record ?? null);
@@ -53,7 +55,7 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
       </div>
       <Muted>
         Hover a bar to see request info; click for details (headers, Request/Response Body). If render ticks appear right after a burst,
-        each request triggers a separate render.
+        each request triggers a separate render. A pink mark from the top is a layout shift; click it to open the response that caused it.
       </Muted>
     </div>
   );

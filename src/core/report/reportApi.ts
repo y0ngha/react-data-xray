@@ -3,6 +3,7 @@ import { getNativeFetch } from '../capture/nativeFetch.js';
 import { whenSourcesResolved } from '../capture/requestContext.js';
 import { isRenderMonitoring, resetRenderStats, setRenderMonitoring } from '../render/monitor.js';
 import { resetCacheAudit } from '../reactQuery/cacheAudit.js';
+import { resetLayoutShifts } from '../render/layoutShifts.js';
 import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
@@ -156,6 +157,7 @@ const reset = (): void => {
   clearRecords();
   resetRenderStats();
   resetCacheAudit();
+  resetLayoutShifts();
 };
 
 const snapshot = async (name: string): Promise<RdxReport> => {

@@ -42,6 +42,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
 3. `reactQuery.findings`: follow each item's `fix`.
 4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
+5. `layoutShifts` (Chrome/Edge only; absent in Safari and Firefox): largest shift first. `cause.component` is usually where to reserve the space; `cause.endpoint` is the response whose arrival moved the screen.
 
 ## 4. Confirm the root cause (required before fixing)
 
@@ -61,6 +62,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 | New callback (`changedProps.newCallback`) | `useCallback` in the parent |
 | Context change | Split frequently-changing and stable values into separate contexts; `useMemo` for Provider value |
 | React Query key problem | Follow `reactQuery.findings[].fix` |
+| Layout shift after a response (`layoutShifts[].cause`) | Reserve the space before the data arrives: make the loading skeleton the final size, set `min-height` on the container, and give images `width`/`height` (or `aspect-ratio`). Re-measure that the shift score drops |
 
 ## 6. Constraints
 
@@ -71,7 +73,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 ## 7. Re-measure and report
 
 1. Run the same scenario again following the same steps as section 2, then save with `snapshot('after-<scenario>')`.
-2. Compare before and after: `count` · `duplicates` · `sameResponses` per endpoint; `renders` · `avoidable` per component.
+2. Compare before and after: `count` · `duplicates` · `sameResponses` per endpoint; `renders` · `avoidable` per component; `layoutShifts[].value` per component (compare does not diff it — read both reports).
 3. If a metric did not improve, revert that change.
 4. Report to the user in a table: what was fixed and why (code location), before/after numbers, and anything that could not be confirmed.
 
