@@ -16,6 +16,7 @@ export type FindingKind =
   | 'request-burst'
   | 'refetch-after-mutation'
   | 'n-plus-one'
+  | 'waterfall'
   | 'react-query'
   | 'render-storm'
   | 'avoidable-renders'
@@ -62,6 +63,7 @@ const KIND_ORDER: Record<FindingKind, number> = {
   'request-burst': 0,
   'refetch-after-mutation': 0,
   'n-plus-one': 0,
+  waterfall: 0,
   'react-query': 1,
   'render-storm': 2,
   'avoidable-renders': 2,
@@ -174,6 +176,30 @@ const nPlusOneFindings = (entries: RequestSection['nPlusOne']): Ranked[] =>
     detail: `requests.nPlusOne[${i}]`,
     rank: [n.count - 1, 0, n.count],
   }));
+/**
+ * 워터폴마다 하나. 고칠 곳은 마지막 요청을 보낸 컴포넌트(앞 응답이 와야 마운트돼 요청한다)다.
+ * savings.ms 는 모두 병렬로 보냈을 때 줄어들 지연의 어림(응답 시간 합 − 가장 긴 응답 시간)이다.
+ */
+const waterfallFindings = (waterfalls: RequestSection['waterfalls']): Ranked[] =>
+  waterfalls.map((w, i): Ranked => {
+    const last = w.chain[w.chain.length - 1];
+    const ms = w.latencyMs - Math.max(...w.chain.map((s) => s.ms));
+    const by = last.component ? `<${last.component}>` : 'the sending component';
+    return {
+      kind: 'waterfall',
+      severity: 'medium',
+      target: {
+        endpoint: last.endpoint,
+        ...(last.component && { component: last.component }),
+        ...(last.location && { location: last.location }),
+      },
+      evidence: { depth: w.depth, latencyMs: w.latencyMs, count: w.count },
+      savings: { ms },
+      fix: `${w.chain.map((s) => s.endpoint).join(' -> ')} runs in series: ${by} mounts only after the previous response and then requests ${last.endpoint}. If it does not need that data, start it in parallel or prefetch it; if it does, join on the server or move it into a route loader.`,
+      detail: `requests.waterfalls[${i}]`,
+      rank: [0, ms, w.depth],
+    };
+  });
 
 const reactQueryFindings = (reactQuery: ReactQuerySection): Ranked[] =>
   reactQuery.findings.flatMap((f, i): Ranked[] => {
@@ -341,6 +367,7 @@ export const buildSummary = (
     ...burstFindings(requests.bursts),
     ...followUpFindings(requests.followUps),
     ...nPlusOneFindings(requests.nPlusOne),
+    ...waterfallFindings(requests.waterfalls),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),
   ].sort(byRank);
@@ -354,6 +381,8 @@ export const buildSummary = (
   const ms = avoidableMs > 0 ? `, ${avoidableMs}${capped ? '+' : ''}ms` : '';
   const verdict = [
     `${plural(problems.wasteEndpoints.length, 'endpoint')} with wasted requests (${plural(wastedRequests, 'request')})`,
+    // 워터폴은 있을 때만 말한다(없는 보고서의 verdict 는 그대로)
+    ...(requests.waterfalls.length > 0 ? [plural(requests.waterfalls.length, 'request waterfall')] : []),
     `${plural(avoidable.length, 'component', capped)} with avoidable renders (${plural(avoidableRenders, 'render', capped)}${ms})`,
     plural(rqCount, 'React Query finding'),
     `RDX badge ${problems.issues}${renders.monitoring ? '' : ' (render monitoring was off)'}`,

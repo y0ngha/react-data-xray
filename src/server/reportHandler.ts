@@ -1,9 +1,33 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { access, chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 
-import { DEFAULT_REPORT_NAME, isReportName, isTabId, reportFileFor, TAB_STALE_MS, TABS_INDEX } from '../shared/reportPath.js';
+import {
+  COMMAND_PATH,
+  DEFAULT_REPORT_NAME,
+  isReportName,
+  isTabId,
+  reportFileFor,
+  SERVER_FILE,
+  TAB_STALE_MS,
+  TABS_INDEX,
+} from '../shared/reportPath.js';
+import {
+  cancelCommand,
+  createCommand,
+  finishCommand,
+  getCommand,
+  isCliActive,
+  isCommandLive,
+  liveTabs,
+  markCliActive,
+  seeTab,
+  storeFor,
+  takeCommands,
+  type Store,
+  type TabNotice,
+} from './commandQueue.js';
 
 interface TabEntry {
   id: string;
@@ -52,6 +76,14 @@ export interface RdxReportOptions {
    * Vite 의 server.allowedHosts 와 같은 형식이다: '.example.com' 은 하위 도메인까지, true 는 모두 허용.
    */
   allowedHosts?: readonly string[] | true;
+  /**
+   * CLI·MCP 의 명령 경로(#69)를 어디서 쓸 수 있는지. 기본 'local': 같은 PC(루프백)에서 온 요청만 탭으로 등록하고 명령을 넘기며,
+   * 명령 경로도 루프백에서만 받는다. 'lan' 이면 `vite --host` 로 연 LAN 의 기기도 탭으로 등록된다(같은 망의 다른 기기가 탭인 척
+   * 명령을 받아 갈 수 있다. 명령 경로 자체는 여전히 토큰이 있어야 한다).
+   */
+  commands?: 'local' | 'lan';
+  /** CLI·MCP 의 명령 경로. 미들웨어가 보고서 경로(`path`)에 맞춰 넘긴다. 기본 `/__rdx/command` */
+  commandPath?: string;
 }
 
 /** 서버마다 다른 요청 객체(connect 의 IncomingMessage, Next 의 Web Request)에서 처리에 필요한 것만 꺼낸 것 */
@@ -64,13 +96,30 @@ export interface ReportRequest {
   contentType: string | undefined;
   /** 본문. MAX_REPORT_BYTES 까지만 읽는다 */
   body: ReadableStream<Uint8Array> | null;
+  /** TAB_HEADER 값. 탭의 받아 가기에만 붙는다 */
+  tabHeader?: string;
+  /** TOKEN_HEADER 값. CLI·MCP 의 명령 요청에만 붙는다 */
+  token?: string;
+  /** 요청을 보낸 쪽의 주소(소켓). 없으면(Next) Host 이름으로 루프백인지 본다 */
+  remoteAddress?: string;
+  /** 이 요청을 받은 dev 서버 자신의 주소(소켓의 로컬 주소에서 만든다). 없으면(Next) .server.json 에 주소를 쓰지 않는다 */
+  serverUrl?: string;
 }
 
 export interface ReportReply {
   status: number;
   /** REPORT_HEADER 에 붙일 값. 없으면 붙이지 않는다 */
   mark?: '1' | 'forbidden-host';
+  /** JSON 본문(명령 경로, 탭에 넘길 명령). 없으면 본문 없이 답한다 */
+  body?: string;
+  /** 탭에 CLI_ACTIVE_HEADER 를 붙여 5초마다 받아 가게 한다 */
+  cliActive?: boolean;
 }
+
+/** 본문이 크거나 JSON 이 아니다 */
+const failure = (error: unknown): ReportReply => ({ status: error instanceof TooLargeError ? 413 : 400, mark: '1' });
+
+const json = (status: number, value: unknown): ReportReply => ({ status, mark: '1', body: JSON.stringify(value) });
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -111,12 +160,14 @@ const isTrusted = ({ host, origin }: ReportRequest, allowedHosts: readonly strin
   }
 };
 
-const writeJson = async (file: string, value: unknown): Promise<void> => {
+const writeJson = async (file: string, value: unknown, mode?: number): Promise<void> => {
   // 임시 파일에 쓰고 이름을 바꾼다. 탭 여러 개가 동시에 보내거나 AI 가 읽는 도중이어도 잘린 JSON 을 보지 않는다.
   // Next dev 는 같은 모듈을 여러 번 평가하기도 해서(서버 번들마다) 모듈 안 순번으로는 이름이 겹칠 수 있다. 무작위 이름을 쓴다.
   const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`);
+  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, mode === undefined ? undefined : { mode });
   await rename(temp, file);
+  // umask 와 상관없이 맞춘다. Windows 는 권한 비트가 없어 무시한다.
+  if (mode !== undefined) await chmod(file, mode).catch(() => undefined);
 };
 
 const readIndex = async (file: string): Promise<TabEntry[]> => {
@@ -170,47 +221,203 @@ const updateTabIndex = (folder: string, entry: TabEntry, report: object): Promis
     if (!(await hasEntry(indexFile, entry))) await mergeIndex(folder, indexFile, entry);
   });
 
-const writeReport = async (folder: string, req: ReportRequest, query: URLSearchParams): Promise<ReportReply> => {
-  const name = query.get('name');
-  const tab = query.get('tab');
-  const report: unknown = JSON.parse(await readBody(req.body));
+/** 탭이 보낸 값(탭 목록에 보이는 값). 페이지가 정한 값이라 길이만 자르고, 보여 주는 쪽(CLI)이 다듬는다 */
+const tabNotice = (tab: string, query: URLSearchParams): TabNotice => {
+  const ago = Number(query.get('focusedAgo') ?? Number.NaN);
+  return {
+    id: tab,
+    path: (query.get('path') ?? '').slice(0, 300),
+    title: (query.get('title') ?? '').slice(0, 200),
+    // 보내지 않은 이전 브라우저 코드는 보이는 것으로 본다
+    visible: query.get('visible') !== '0',
+    ...(Number.isFinite(ago) && ago >= 0 && { focusedAgo: ago }),
+  };
+};
+
+/** 이 탭에 맡긴 명령이 있으면 본문으로 넘긴다. 없으면 본문 없이 답한다(대부분의 주기) */
+const replyWithCommands = (store: Store, tab: string): ReportReply => {
+  const now = Date.now();
+  const commands = takeCommands(store, tab, now);
+  const cliActive = isCliActive(store, now);
+  return commands.length > 0 ? { ...json(200, { commands }), cliActive } : { status: 204, mark: '1', cliActive };
+};
+
+/** 토큰이 들어 있어 이 사용자만 읽게 한다 */
+const SERVER_FILE_MODE = 0o600;
+
+const exists = (file: string): Promise<boolean> =>
+  access(file).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * 명령 경로의 토큰과 dev 서버 자신의 주소를 SERVER_FILE 에 적는다. CLI 는 이 파일에서 토큰을 읽고, `--url` 이 없으면 주소도 읽는다.
+ * 주소는 요청이 보낸 Host·Origin 이 아니라 서버가 받은 소켓에서 만든 것만 쓴다. LAN 의 다른 기기가 보낸 Origin 을 적으면
+ * CLI 가 토큰을 그 기기로 보내게 된다. 주소를 모르면(Next) 지난번에 적은 주소를 그대로 둔다(없으면 CLI 가 --url 을 묻는다).
+ * 내용이 바뀌었거나 파일이 지워졌을 때만 쓰고, 쓰기에 성공한 뒤에야 기억한다.
+ */
+const writeServerFile = async (folder: string, store: Store, serverUrl: string | undefined, commandPath: string): Promise<void> => {
+  const file = join(folder, SERVER_FILE);
+  if (serverUrl) store.serverUrl = serverUrl;
+  if (!store.serverUrl) {
+    const saved = (await readFile(file, 'utf8').then(JSON.parse, () => null)) as { url?: unknown } | null;
+    if (typeof saved?.url === 'string') store.serverUrl = saved.url;
+  }
+  // CLI 는 commandPath 로 보낸다(보고서 경로를 바꿨으면 명령 경로도 따라 바뀐다).
+  const content = JSON.stringify({ token: store.token, url: store.serverUrl, commandPath });
+  if (store.written === content && (await exists(file))) return;
   await mkdir(folder, { recursive: true });
   // 실행할 때마다 바뀌는 파일이라 저장소에 올리지 않는다. 이미 있으면 그대로 둔다.
   await writeFile(join(folder, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined);
+  await writeJson(file, { token: store.token, url: store.serverUrl, commandPath, updatedAt: Date.now() }, SERVER_FILE_MODE);
+  store.written = content;
+};
+
+const LOOPBACK_ADDRESS = /^(127\.|::1$|::ffff:127\.)/;
+
+/**
+ * 같은 PC 에서 온 요청인지. 소켓 주소가 있으면(connect 미들웨어) 그것으로, 없으면(Next 의 Web Request) Host 이름으로 본다.
+ * Host 는 보내는 쪽이 꾸밀 수 있어, Next 에서는 LAN 의 기기가 Host 를 localhost 로 꾸며 보내는 것까지는 막지 못한다.
+ */
+const isLocalPeer = (req: ReportRequest): boolean => {
+  if (req.remoteAddress !== undefined) return LOOPBACK_ADDRESS.test(req.remoteAddress);
+  const name = hostnameOf(req.host);
+  return name === 'localhost' || name.endsWith('.localhost') || name === '127.0.0.1' || name === '[::1]';
+};
+
+const writeReport = async (
+  folder: string,
+  commandPath: string,
+  req: ReportRequest,
+  query: URLSearchParams,
+  commands: boolean,
+): Promise<ReportReply> => {
+  const name = query.get('name');
+  const tab = query.get('tab');
+  const report: unknown = JSON.parse(await readBody(req.body));
+  const store = storeFor(folder);
+  // .rdx 와 .gitignore 도 여기서 만든다.
+  await writeServerFile(folder, store, req.serverUrl, commandPath);
   if (tab !== null && typeof report === 'object' && report !== null) {
-    const entry: TabEntry = {
-      id: tab,
-      path: (query.get('path') ?? '').slice(0, 300),
-      title: (query.get('title') ?? '').slice(0, 200),
-      updatedAt: Date.now(),
-      file: reportFileFor(tab),
-    };
+    const notice = tabNotice(tab, query);
+    const entry: TabEntry = { id: tab, path: notice.path, title: notice.title, updatedAt: Date.now(), file: reportFileFor(tab) };
     await updateTabIndex(folder, entry, report);
+    // 탭 파일은 어디서 온 탭이든 쓰지만, 명령을 받는 탭으로는 같은 PC 의 탭만 등록한다(commands: 'lan' 이면 LAN 도).
+    // JSON 본문의 POST 는 다른 사이트가 preflight 없이 보낼 수 없어, TAB_HEADER 없이도 탭 알림으로 받는다.
+    if (!commands) {
+      if (query.get('idle') !== '1') await writeJson(join(folder, `${DEFAULT_REPORT_NAME}.json`), report);
+      return { status: 204, mark: '1' };
+    }
+    seeTab(store, notice, Date.now());
     // 열려 있다는 알림만이면 "가장 최근에 바뀐 탭"을 바꾸지 않는다.
-    if (query.get('idle') === '1') return { status: 204, mark: '1' };
+    if (query.get('idle') !== '1') await writeJson(join(folder, `${DEFAULT_REPORT_NAME}.json`), report);
+    return replyWithCommands(store, tab);
   }
   await writeJson(join(folder, `${name ?? DEFAULT_REPORT_NAME}.json`), report);
   return { status: 204, mark: '1' };
 };
 
+/** 탭이 맡은 명령을 마치고 결과를 알린다: `POST /__rdx/report?command=<id>&tab=<id>` */
+const writeCommandResult = async (folder: string, req: ReportRequest, query: URLSearchParams): Promise<ReportReply> => {
+  const id = query.get('command') ?? '';
+  const tab = query.get('tab') ?? '';
+  const result: unknown = JSON.parse(await readBody(req.body));
+  return finishCommand(storeFor(folder), id, tab, result, Date.now()) ? { status: 204, mark: '1' } : { status: 404, mark: '1' };
+};
+
+const sameToken = (given: string | undefined, token: string): boolean => {
+  if (given === undefined) return false;
+  const [a, b] = [Buffer.from(given), Buffer.from(token)];
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+
 /**
- * rdx 보고서 요청(GET 은 있는지 묻기, POST 는 쓰기)을 처리한다. connect 미들웨어와 Next.js route handler 가 같이 쓴다.
+ * CLI·MCP 가 쓰는 명령 경로(#69). 모든 요청에 SERVER_FILE 의 토큰(TOKEN_HEADER)이 있어야 한다. 그 파일을 읽을 수 있는
+ * 같은 PC 의 도구만 쓰게 해, `vite --host` 로 연 LAN 의 다른 기기나 리바인딩한 사이트가 탭을 조작하지 못하게 한다.
+ * - `GET /__rdx/command`: 연결된 탭 목록
+ * - `POST /__rdx/command` `{ op: 'reset' | 'snapshot', name?, tab?, timeoutMs? }`: 탭에 명령을 맡긴다(202, 명령 id)
+ * - `GET /__rdx/command/<id>`: 명령이 끝났는지
+ * - `DELETE /__rdx/command/<id>`: 기다리기를 그만둔다(시간 초과·Ctrl+C·MCP 취소). 아직 실행하지 않았으면 실행하지 않는다
+ * 탭은 업로드·받아 가기 응답으로 명령을 받아 window.__RDX__ 의 reset·snapshot 을 부른다.
+ */
+const handleCommand = async (
+  folder: string,
+  commandPath: string,
+  req: ReportRequest,
+  path: string,
+  commands: boolean,
+): Promise<ReportReply> => {
+  if (!commands)
+    return json(403, {
+      error: 'not-local',
+      message: "the command path only accepts requests from this machine (rdx({ commands: 'lan' }) to allow LAN)",
+    });
+  const store = storeFor(folder);
+  // 토큰 파일이 아직 없으면(브라우저가 아직 오지 않았으면) 지금 써서 CLI 가 다시 읽고 보내게 한다.
+  await writeServerFile(folder, store, req.serverUrl, commandPath);
+  if (!sameToken(req.token, store.token)) return json(403, { error: 'token', message: `missing or wrong ${SERVER_FILE} token` });
+  const now = Date.now();
+  markCliActive(store, now);
+  const id = path.slice(commandPath.length + 1);
+  if (req.method === 'GET') {
+    if (path === commandPath) return json(200, { tabs: liveTabs(store, now) });
+    const command = getCommand(store, id, now);
+    return command ? json(200, command) : json(404, { error: `unknown or expired command: ${id}` });
+  }
+  if (req.method === 'DELETE') {
+    const cancelled = path === commandPath ? undefined : cancelCommand(store, id, now);
+    return cancelled ? json(200, cancelled) : json(404, { error: `unknown or expired command: ${id}` });
+  }
+  if (path !== commandPath) return { status: 405, mark: '1' };
+  if (!req.contentType?.startsWith('application/json')) return { status: 403, mark: '1' };
+  const created = createCommand(store, JSON.parse(await readBody(req.body)), now);
+  if (!created.ok)
+    return json(created.status, { error: created.error, reason: created.reason, ...(created.tabs && { tabs: created.tabs }) });
+  return json(202, { command: created.command, others: created.others });
+};
+
+/**
+ * rdx 보고서 요청(GET 은 있는지 묻기, POST 는 쓰기)과 명령 경로를 처리한다. connect 미들웨어와 Next.js route handler 가 같이 쓴다.
  * 보고서는 `<root>/<dir>/report.json`(이름을 주면 `<이름>.json`, 탭은 `tabs/<id>.json`)에 쓴다.
  */
-export const createReportHandler = (root: string, { dir = '.rdx', allowedHosts = [] }: RdxReportOptions = {}) => {
+export const createReportHandler = (
+  root: string,
+  { dir = '.rdx', allowedHosts = [], commands = 'local', commandPath = COMMAND_PATH }: RdxReportOptions = {},
+) => {
   const folder = join(root, dir);
   return async (req: ReportRequest): Promise<ReportReply> => {
     // 브라우저가 "처리기는 있지만 이 주소는 막혔다"를 알고 안내할 수 있게 표시한다.
     if (!isTrusted(req, allowedHosts)) return { status: 403, mark: 'forbidden-host' };
-    // 브라우저가 보고서를 보내기 전에 이 처리기가 있는지 묻는다(없으면 프록시가 원격으로 넘길 수 있다).
-    if (req.method === 'GET') return { status: 204, mark: '1' };
+    const url = new URL(req.url, 'http://x');
+    const query = url.searchParams;
+    // 명령을 주고받는 쪽(탭 등록·받아 가기·결과, 명령 경로)은 같은 PC 에서 온 요청만 받는다(commands: 'lan' 이면 LAN 도).
+    const commandsAllowed = commands === 'lan' || isLocalPeer(req);
+    if (url.pathname === commandPath || url.pathname.startsWith(`${commandPath}/`))
+      return handleCommand(folder, commandPath, req, url.pathname, commandsAllowed).catch(failure);
+    const tab = query.get('tab');
+    if (req.method === 'GET') {
+      // TAB_HEADER 가 없는 GET(다른 사이트의 <img> 등)은 아무것도 바꾸지 않는 핸드셰이크로 답한다.
+      const fromTab = commandsAllowed && req.tabHeader === '1' && tab !== null && isTabId(tab) && tab !== TABS_INDEX;
+      // 탭이 실행 직전에 명령이 아직 살아 있는지 묻는다(204 면 실행, 410 이면 CLI 가 포기했다).
+      if (fromTab && query.has('command'))
+        return { status: isCommandLive(storeFor(folder), query.get('command')!, tab, Date.now()) ? 204 : 410, mark: '1' };
+      // 탭이 맡은 명령을 받아 간다(보고서가 그대로라 올리지 않는 주기). 열려 있다는 알림도 된다.
+      if (fromTab) {
+        const store = storeFor(folder);
+        await writeServerFile(folder, store, req.serverUrl, commandPath);
+        seeTab(store, tabNotice(tab, query), Date.now());
+        return replyWithCommands(store, tab);
+      }
+      // 브라우저가 보고서를 보내기 전에 이 처리기가 있는지 묻는다(없으면 프록시가 원격으로 넘길 수 있다).
+      return { status: 204, mark: '1' };
+    }
     if (!req.contentType?.startsWith('application/json')) return { status: 403, mark: '1' };
+    if (query.has('command')) return commandsAllowed ? writeCommandResult(folder, req, query).catch(failure) : { status: 403, mark: '1' };
     // window.__RDX__.snapshot(이름) 은 ?name= 으로 따로 저장한다. 파일 이름이 되므로 경로를 만들 수 있는 글자는 받지 않는다.
-    const query = new URL(req.url, 'http://x').searchParams;
     const name = query.get('name');
     if (name !== null && !isReportName(name)) return { status: 400, mark: '1' };
-    const tab = query.get('tab');
     if (tab !== null && (!isTabId(tab) || tab === TABS_INDEX || name !== null)) return { status: 400, mark: '1' };
-    return writeReport(folder, req, query).catch((error: unknown) => ({ status: error instanceof TooLargeError ? 413 : 400, mark: '1' }));
+    return writeReport(folder, commandPath, req, query, commandsAllowed).catch(failure);
   };
 };
