@@ -14,6 +14,7 @@ import {
   isMemoized,
   jsxLocationOf,
   libraryPackageOf,
+  locationOfFrame,
   resolveJsxLocation,
   toCurrent,
   unionRect,
@@ -250,5 +251,26 @@ describe('React 19 의 JSX 위치(_debugStack)', () => {
     await Promise.resolve();
     flushQueue();
     expect(await resolved).toBe('src/Middle.tsx:10');
+  });
+
+  it('경로에 괄호가 든 위치(Next.js 라우트 그룹)도 경로와 줄을 읽는다 (#128)', () => {
+    expect(locationOfFrame('at <anonymous> (siglens/src/app/[locale]/(home)/page.tsx:12:3)')).toBe('src/app/[locale]/(home)/page.tsx:12');
+    expect(locationOfFrame('at Card (http://localhost:3000/src/app/(shop)/(list)/Card.tsx?t=1:4:2)')).toBe(
+      'src/app/(shop)/(list)/Card.tsx:4',
+    );
+    expect(locationOfFrame('Card@http://localhost:3000/src/app/(group)/a.tsx:1:2')).toBe('src/app/(group)/a.tsx:1');
+    expect(locationOfFrame('at http://localhost:3000/src/app/(group)/a.tsx:7:2')).toBe('src/app/(group)/a.tsx:7');
+  });
+
+  it('소스맵이 라우트 그룹 경로로 바꾼 JSX 위치를 돌려준다 (#128)', async () => {
+    const inlineMap = (map: object) => `data:application/json;base64,${btoa(JSON.stringify(map))}`;
+    const code = `a\nb\nrender()\n//# sourceMappingURL=${inlineMap({ version: 3, sources: ['/Users/me/app/src/app/(home)/page.tsx'], mappings: ';;AASE' })}`;
+    mockFetch.mockImplementation(async () => new Response(code));
+    const fiber = fiberWithStack(['at <anonymous> (http://localhost:3000/src/app/home-page.tsx:3:1)']);
+    const resolved = resolveJsxLocation(fiber);
+    flushQueue();
+    await Promise.resolve();
+    flushQueue();
+    expect(await resolved).toBe('src/app/(home)/page.tsx:10');
   });
 });

@@ -64,8 +64,9 @@ const RUNTIME_FRAME = new RegExp(
 // 경로 패턴(/react/ 등)은 앱 폴더 이름과 겹칠 수 있어 함수 이름만 본다.
 const isLibraryOrMarkerFrame = (line: string): boolean =>
   line.includes('react-stack-top-frame') || JSX_RUNTIME_CALL.test(line) || isLibraryFrame(line);
-// V8 "at fn (url:1:2)"·"at url:1:2", Firefox·Safari "fn@url:1:2" 의 주소와 줄
-const FRAME_LOCATION = /(?:\(|@|at )((?:[a-z]+:\/\/)?[^\s()@]+):(\d+):\d+\)?$/;
+// V8 "at fn (url:1:2)"·"at url:1:2", Firefox·Safari "fn@url:1:2" 의 주소와 줄.
+// 경로에는 괄호가 들 수 있다(Next.js 라우트 그룹 app/(home)/page.tsx, #128). 가장 왼쪽의 `(`·`@`·`at ` 뒤부터 끝의 `:줄:열` 앞까지를 경로로 본다.
+const FRAME_LOCATION = /(?:\(|@|at )((?:[a-z]+:\/\/)?[^\s@]+?):(\d+):\d+\)?$/;
 
 /** React 19 의 _debugStack 에서, 이 element 를 만든(JSX 를 쓴) 앱 코드 프레임 */
 const jsxFrameOf = (fiber: Fiber): string | undefined =>
