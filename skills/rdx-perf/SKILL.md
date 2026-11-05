@@ -72,7 +72,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 ## 7. Re-measure and report
 
 1. Run the same scenario again following the same steps as section 2, then save with `snapshot('after-<scenario>')`.
-2. Compare before and after: `count` · `duplicates` · `sameResponses` per endpoint; `renders` · `avoidable` per component.
+2. Compare before and after with `await window.__RDX__.compare('before-<scenario>', 'after-<scenario>')`. Read `warnings` first (different page, window, config, truncated render instances, an unfinished report). `totals` gives requests, wasted requests, renders, and avoidable renders with a `verdict`; each row of `requests`, `renders`, and `reactQuery.fetchCauses` has `verdict` (`improved` / `regressed` / `unchanged` / `unknown`, judged by waste first, then by total count). A row with `status: 'unknown'` was left out by one report's row limit — do not report it as fixed; its known side is in `before` / `after`.
 3. If a metric did not improve, revert that change.
 4. Report to the user in a table: what was fixed and why (code location), before/after numbers, and anything that could not be confirmed.
 

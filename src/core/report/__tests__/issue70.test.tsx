@@ -23,7 +23,7 @@ import { installReportApi } from '../reportApi.js';
 import { buildSummary } from '../summarySection.js';
 
 // howToRead 문구(와 문구에 들어가는 RENDER_STORM·WINDOW_MS)가 바뀌면 이 두 값을 함께 고친다. 판은 하나 올린다.
-const EXPECTED_HOW_TO_READ = { version: 7, hash: '8418da3d5dac' };
+const EXPECTED_HOW_TO_READ = { version: 8, hash: '2c63e776c5ef' };
 
 type Endpoint = RequestSection['endpoints'][number];
 type Component = RenderSection['components'][number];
@@ -62,6 +62,7 @@ const renders = (components: Component[], monitoring = true): RenderSection => (
   windowSeconds: 10,
   truncated: false,
   droppedInstances: 0,
+  omitted: { components: 0, renders: 0, avoidable: 0 },
   components,
 });
 const noQuery: ReactQuerySection = { found: false, findings: [] };
@@ -285,6 +286,15 @@ describe('howToRead 판과 빼기 (#70)', () => {
 
   it('compare_ignores_summary: 비교용 보고서에는 summary·howToRead 가 들어가지 않는다', () => {
     const c = toComparable(buildReport(false, 0, false));
-    expect(Object.keys(c).sort()).toEqual(['complete', 'config', 'incompleteReasons', 'reactQuery', 'renders', 'requests', 'resetAt']);
+    expect(Object.keys(c).sort()).toEqual([
+      'complete',
+      'config',
+      'incompleteReasons',
+      'page',
+      'reactQuery',
+      'renders',
+      'requests',
+      'resetAt',
+    ]);
   });
 });

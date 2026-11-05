@@ -11,7 +11,7 @@ export interface ReactQuerySection {
   fetchCauses?: Array<Omit<FetchCauseInfo, 'label'> & { causeLabel: string; count: number }>;
 }
 
-const MAX_FETCH_CAUSES = 20;
+export const MAX_FETCH_CAUSES = 20;
 
 const fetchCausesOf = (records: readonly RequestRecord[], classes: ReadonlyMap<number, RequestClass>): ReactQuerySection['fetchCauses'] => {
   const groups = new Map<string, NonNullable<ReactQuerySection['fetchCauses']>[number]>();
