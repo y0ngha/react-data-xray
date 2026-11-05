@@ -56,7 +56,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
-  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.stats);
+  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.stats, analysis.ignored);
   const { open, show, hide, popup, settings, updateDock, saveDock, changeDock } = usePanelVisibility();
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
   const portal = useOwnLayerPortal();
@@ -97,8 +97,8 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
     [show],
   );
   const actions = useMemo<RequestActions>(
-    () => ({ open: openRequest, hover: setHovered, classOf: analysis.classOf }),
-    [analysis.classOf, openRequest],
+    () => ({ open: openRequest, hover: setHovered, classOf: analysis.classOf, ignored: analysis.ignored }),
+    [analysis.classOf, analysis.ignored, openRequest],
   );
 
   const pickTitle =

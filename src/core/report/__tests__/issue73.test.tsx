@@ -73,7 +73,7 @@ describe('보고서의 고칠 위치와 섹션 공통 id (#73)', () => {
       wasteExamples: [],
     };
     const summary = buildSummary(
-      { total: 3, dropped: 0, endpoints: [endpoint], nPlusOne: [], waterfalls: [] },
+      { total: 3, dropped: 0, endpoints: [endpoint], nPlusOne: [], waterfalls: [], bursts: [], burstsOmitted: 0, followUps: [] },
       { found: false, findings: [] },
       { monitoring: true, windowSeconds: 10, truncated: false, droppedInstances: 0, components: [] },
       new Map(),

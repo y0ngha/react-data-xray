@@ -17,6 +17,8 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 export type FindingKind =
   | 'duplicate'
   | 'same-response'
+  | 'request-burst'
+  | 'refetch-after-mutation'
   | 'n-plus-one'
   | 'waterfall'
   | 'unused-response'
@@ -68,6 +70,11 @@ export interface TopFinding {
    */
   savings?: { requests?: number; renders?: number; ms?: number; renderMs?: number };
   fix?: string;
+  /**
+   * 같은 요청을 함께 다루는 다른 항목의 경로. 몰림 finding 에는 그 몰림의 요청을 이미 센 항목(엔드포인트 행·N+1),
+   * 그 항목들에는 절감을 그쪽에 맡기고 summary 에서 뺀 몰림(requests.bursts[i])이 온다
+   */
+  relatedFindings?: string[];
   /** 상세 항목의 경로(예: requests.endpoints[0]). 보고서 범위 밖이라 상세 행이 없으면 두지 않는다 */
   detail?: string;
 }
@@ -87,14 +94,17 @@ export interface ReportSummary {
 const KIND_ORDER: Record<FindingKind, number> = {
   duplicate: 0,
   'same-response': 0,
+  // 몰림은 원인을 말해 주지 않는 묶음이라, 같은 요청을 짚는 구체적인 요청 finding(중복·N+1 등) 뒤에 둔다.
+  'request-burst': 1,
+  'refetch-after-mutation': 0,
   'n-plus-one': 0,
   waterfall: 0,
   'unused-response': 0,
-  'react-query': 1,
-  'render-storm': 2,
-  'avoidable-renders': 2,
-  'layout-shift': 3,
-  remount: 4,
+  'react-query': 2,
+  'render-storm': 3,
+  'avoidable-renders': 3,
+  'layout-shift': 4,
+  remount: 5,
 };
 
 // 고칠 것이 없는 React Query finding(아직 없는 쿼리를 무효화한 것은 정상이다)
@@ -145,6 +155,78 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
     ];
   });
 
+type Burst = RequestSection['bursts'][number];
+type FollowUp = RequestSection['followUps'][number];
+
+const BURST_FIX =
+  'These requests fired together outside page entry (no page load or navigation nearby). Find what triggers them at once in the top endpoints: fetch the list in one request instead of per item, share one fetch between components (a common ancestor or React Query), or debounce the trigger (input, scroll, resize).';
+
+// 몰림의 요청을 이미 센 구체적인 finding 의 종류(그 finding 의 detail 이 몰림의 overlaps 에 온다)
+const SPECIFIC: ReadonlySet<FindingKind> = new Set(['duplicate', 'same-response', 'n-plus-one']);
+
+/**
+ * 진입과 무관한 몰림. 배지는 세지 않는다(버튼이 1초 깜빡일 뿐이다). 줄일 양은 몰림이 한 건이 되는 것으로 보되,
+ * 다른 finding 이 이미 센 요청은 뺀다. 그런 요청이 절반 이상이면 몰림은 짚지 않고, 그 finding 들의 relatedFindings 에 몰림을 단다.
+ */
+const burstFindings = (bursts: readonly Burst[], specific: readonly Ranked[]): Ranked[] => {
+  const byDetail = new Map(specific.filter((f) => SPECIFIC.has(f.kind) && f.detail).map((f) => [f.detail!, f]));
+  return bursts.flatMap((b, i): Ranked[] => {
+    const top = b.topEndpoints[0];
+    if (b.kind !== 'waste' || !top) return [];
+    const related = (b.overlaps ?? []).filter((o) => byDetail.has(o.detail));
+    const claimed = related.reduce((n, o) => n + o.requests, 0);
+    const detail = `requests.bursts[${i}]`;
+    if (claimed * 2 >= b.count) {
+      related.forEach((o) => {
+        const f = byDetail.get(o.detail)!;
+        f.relatedFindings = [...(f.relatedFindings ?? []), detail];
+      });
+      return [];
+    }
+    const saved = Math.max(0, b.count - 1 - claimed);
+    return [
+      {
+        kind: 'request-burst',
+        severity: 'medium',
+        target: { id: top.endpointId, endpoint: top.endpoint },
+        evidence: {
+          count: b.count,
+          spanMs: b.to - b.from,
+          wasted: b.wasted,
+          endpoints: b.topEndpoints.length,
+          ...(claimed > 0 && { counted: claimed }),
+        },
+        savings: { requests: saved },
+        fix: BURST_FIX,
+        detail,
+        ...(related.length > 0 && { relatedFindings: related.map((o) => o.detail) }),
+        rank: [saved, 0, b.count],
+      },
+    ];
+  });
+};
+
+const followUpFix = (f: FollowUp): string =>
+  `After ${f.mutation}, ${f.refetched} was refetched and the response was unchanged. Narrow the invalidation after this mutation to the queries it actually changes (a more specific queryKey, exact: true), or update the cache from the mutation response (setQueryData) instead of refetching.`;
+
+/** 변경 뒤 재조회가 같은 응답을 받은 쌍. 폴링과 겹친 것(periodic)은 변경 때문이 아닐 수 있고, 무시한 엔드포인트는 의도된 반복이라 뺀다 */
+const followUpFindings = (list: readonly FollowUp[]): Ranked[] =>
+  list.flatMap((f, i): Ranked[] =>
+    f.sameResponse > 0 && !f.periodic && !f.ignored
+      ? [
+          {
+            kind: 'refetch-after-mutation',
+            severity: 'medium',
+            target: { id: f.refetchedId, endpoint: f.refetched, ...(f.queryKey && { queryKeys: [f.queryKey] }) },
+            evidence: { mutations: f.mutations, count: f.count, sameResponse: f.sameResponse },
+            savings: { requests: f.sameResponse },
+            fix: followUpFix(f),
+            detail: `requests.followUps[${i}]`,
+            rank: [f.sameResponse, 0, f.count],
+          },
+        ]
+      : [],
+  );
 /** 항목마다 보낸 요청(N+1). 의도된 경우(가상화 목록)도 있어 배지는 세지 않는다(medium). 한 번에 받으면 나머지 요청이 준다 */
 const nPlusOneFindings = (entries: RequestSection['nPlusOne']): Ranked[] =>
   entries.map((n, i) => ({
@@ -414,10 +496,12 @@ export const buildSummary = (
   layoutShifts: readonly LayoutShiftRow[] = [],
 ): ReportSummary => {
   const problems = countProblems(requests.endpoints, storms);
+  const specific = [...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)), ...nPlusOneFindings(requests.nPlusOne)];
   const shifts = layoutShiftFindings(layoutShifts);
   const all = [
-    ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
-    ...nPlusOneFindings(requests.nPlusOne),
+    ...specific,
+    ...burstFindings(requests.bursts, specific),
+    ...followUpFindings(requests.followUps),
     ...waterfallFindings(requests.waterfalls),
     ...unusedFindings(requests.endpoints),
     ...reactQueryFindings(reactQuery),
@@ -453,8 +537,8 @@ export const buildSummary = (
 /** summary 를 먼저 읽으라는 줄. buildReport 가 howToRead 맨 앞에 둔다. 폭주 기준은 배지가 쓰는 상수로 만든다. */
 export const SUMMARY_HOW_TO_READ: readonly string[] = [
   'Read summary first. summary.verdict is a one-line count of the problems (a + after a number means the render rows hit their limit and there may be more); summary.topFindings lists up to 10 things to fix, in the order to fix them, and summary.omitted is how many more were left out.',
-  `topFindings[].severity high means the RDX button badge counts it (an endpoint with wasted requests, or a component group — name and JSX location — with an instance rendering ${RENDER_STORM}+ times within the last ${WINDOW_MS / 1000}s; the same rule and count as summary.badge); medium means it can be reduced but the badge does not count it. Within a severity, requests come first, then React Query, renders, layout shifts (a component whose shifts add up to a score of ${LARGE_LAYOUT_SHIFT}+, largest evidence.score first), and remounts; within each, the largest estimated savings (requests or renders saved, then ms) comes first.`,
+  `topFindings[].severity high means the RDX button badge counts it (an endpoint with wasted requests, or a component group — name and JSX location — with an instance rendering ${RENDER_STORM}+ times within the last ${WINDOW_MS / 1000}s; the same rule and count as summary.badge); medium means it can be reduced but the badge does not count it. Within a severity, requests come first (request bursts after the other request findings), then React Query, renders, layout shifts (a component whose shifts add up to a score of ${LARGE_LAYOUT_SHIFT}+, largest evidence.score first), and remounts; within each, the largest estimated savings (requests or renders saved, then ms) comes first.`,
   'topFindings[].detail is the path of the full entry in this report (e.g. requests.endpoints[0], or renders.components[2].libraries[0] for a library component folded into the app component that renders it); read it and confirm in code before fixing. target.location is the listed caller that sent the most wasted requests, the JSX location (renderedAt), or the call site (stack); it is absent when unknown. savings is an estimate (ms values are dev-build sums).',
   // 섹션 공통 id(report/ids.ts). topFindings 의 target.id 로 상세 행을 찾아가는 법이라 summary 줄에 둔다.
-  "id fields link the same endpoint or component across sections, summary and compare. They are strings built from names and locations (not numbers), so they stay the same across runs: an endpoint is ep:<endpoint> (e.g. ep:GET /items/:id), a component is c:<name>@<renderedAt> (c:<name> when the JSX location is unknown). requests.endpoints[].id and renders.components[].id name the rows; endpointId and componentId (and causedBy[].id, heaviestCommits[].startedBy.id) refer to them from networkCauses, requests.nPlusOne, requests.waterfalls[].chain and layoutShifts. componentId in requests.nPlusOne, requests.waterfalls[].chain and request findings is name-only because the sending component's JSX location is not known: it matches the renders.components rows whose id is c:<name> or starts with c:<name>@. summary.topFindings[].target.id is the row to fix (ep: for request findings, c: for render, remount and layout-shift findings; absent for React Query findings, which use queryKeys), and target.endpointId / componentId is the other endpoint or component the finding involves. compare rows carry the same id. A location still being source-mapped can change the id, so compare snapshots (complete true), not periodic files.",
+  "id fields link the same endpoint or component across sections, summary and compare. They are strings built from names and locations (not numbers), so they stay the same across runs: an endpoint is ep:<endpoint> (e.g. ep:GET /items/:id), a component is c:<name>@<renderedAt> (c:<name> when the JSX location is unknown). requests.endpoints[].id and renders.components[].id name the rows; endpointId and componentId (and causedBy[].id, heaviestCommits[].startedBy.id) refer to them from networkCauses, requests.nPlusOne, requests.waterfalls[].chain, requests.bursts[].topEndpoints, requests.followUps (mutationId, refetchedId) and layoutShifts. componentId in requests.nPlusOne, requests.waterfalls[].chain and request findings is name-only because the sending component's JSX location is not known: it matches the renders.components rows whose id is c:<name> or starts with c:<name>@. summary.topFindings[].target.id is the row to fix (ep: for request findings, c: for render, remount and layout-shift findings; absent for React Query findings, which use queryKeys), and target.endpointId / componentId is the other endpoint or component the finding involves. compare rows carry the same id. A location still being source-mapped can change the id, so compare snapshots (complete true), not periodic files.",
 ];

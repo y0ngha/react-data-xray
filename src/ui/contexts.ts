@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 
 import type { RequestClass } from '../core/requests/classify.js';
 import type { RequestRecord } from '../core/requests/types.js';
+import type { IgnoreMatcher } from '../shared/ignoredEndpoints.js';
 
 /** 검사 결과에서 연 요청 상세: 컴포넌트가 실제로 쓰는 응답 위치 */
 export interface Focus {
@@ -16,6 +17,8 @@ export interface RequestActions {
   hover: (record: RequestRecord | null) => void;
   /** 요청 분류(낭비·확인 필요·정상). 화면 전체가 같은 기준을 쓴다. */
   classOf: (record: RequestRecord) => RequestClass;
+  /** 무시 판정(패널·configure). 몰림은 무시한 엔드포인트의 요청을 세지 않는다 */
+  ignored?: IgnoreMatcher;
 }
 
 const RequestActionsContext = createContext<RequestActions>({

@@ -5,6 +5,7 @@ import { countProblems, findRenderStorms, stormItems, type RenderStorm, type Was
 import { analyzeBursts, burstWindowMs, type BurstWindow } from '../../core/requests/bursts.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
+import type { IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 import { useInterval } from './useInterval.js';
 import { useRenderMonitoring } from './useRenderMonitoring.js';
 
@@ -29,8 +30,13 @@ const recentRecords = (records: readonly RequestRecord[], now: number): RequestR
  * - 창의 응답이 모두 끝나고 1초가 지났다. 응답을 받은 뒤 주소를 바꾸는 데이터 라우터의 이동을 기다린다(알림은 최대 1초 늦다).
  * - 또는 창이 시작하고 1초가 지났고 몰림이 1초 넘게 이어진다. 끝나지 않는 반복도 1~2초 안에 알린다.
  */
-const wasteWindowsToAlert = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass, now: number): BurstWindow[] =>
-  analyzeBursts(recentRecords(records, now), classOf)
+const wasteWindowsToAlert = (
+  records: readonly RequestRecord[],
+  classOf: (r: RequestRecord) => RequestClass,
+  now: number,
+  ignored?: IgnoreMatcher,
+): BurstWindow[] =>
+  analyzeBursts(recentRecords(records, now), classOf, ignored)
     .filter((seg) => !seg.entry)
     .flatMap((seg) =>
       seg.windows.filter(
@@ -73,6 +79,7 @@ export const useProblemSignal = (
   records: readonly RequestRecord[],
   classOf: (r: RequestRecord) => RequestClass,
   endpoints: readonly WasteRow[] = [],
+  ignored?: IgnoreMatcher,
 ) => {
   useRenderMonitoring();
   const [signal, setSignal] = useState<Signal>({ storming: NO_STORMS, lastBurst: 0, alert: false });
@@ -83,7 +90,7 @@ export const useProblemSignal = (
     if (ticks.current++ % FIND_CLIENTS_EVERY === 0) findQueryClients();
     const storming = findRenderStorms(now);
     // useInterval 이 최신 콜백을 쓰므로 records 는 늘 지금 기록이다.
-    const waste = wasteWindowsToAlert(records, classOf, now);
+    const waste = wasteWindowsToAlert(records, classOf, now, ignored);
     setSignal((prev) => {
       const newStorm = [...storming.keys()].some((key) => !prev.storming.has(key));
       const { last, fresh } = followBursts(waste, prev.lastBurst);
