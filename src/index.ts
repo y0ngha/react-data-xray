@@ -1,5 +1,6 @@
 // 순서가 중요하다: 렌더 감시는 react-dom 보다 먼저 평가돼야 React 의 commit 을 받을 수 있다.
 import { ignoreComponent } from './core/render/monitor.js';
+import { configure as configureDev, type RdxConfig } from './core/config.js';
 import { installCapture } from './core/capture/install.js';
 import { scheduleLoadOrderCheck } from './core/diagnostics/loadOrder.js';
 import { installReportApi } from './core/report/reportApi.js';
@@ -8,6 +9,7 @@ import type { RdxDevtoolsProps } from './ui/RdxDevtools.js';
 import { SafeRdxDevtools as Devtools } from './ui/SafeRdxDevtools.js';
 
 export type { RdxDevtoolsProps } from './ui/RdxDevtools.js';
+export type { RdxConfig } from './core/config.js';
 
 // 같은 페이지에 rdx 가 두 벌 평가됐는지(모노레포에서 경로가 둘로 갈리는 등) 보는 표식. 모듈 상태가 따로라 각 설치 함수의 가드로는 막지 못한다.
 const INSTALLED = Symbol.for('react-data-xray.installed');
@@ -47,3 +49,9 @@ if (process.env.NODE_ENV !== 'production') ignoreComponent(Devtools);
 /** production 빌드에서는 아무것도 그리지 않는 빈 컴포넌트로 바뀐다. */
 export const RdxDevtools: (props: RdxDevtoolsProps) => ReturnType<typeof Devtools> | null =
   process.env.NODE_ENV !== 'production' ? Devtools : () => null;
+
+/**
+ * 판정 기준과 무시 목록을 코드에서 정한다. `import 'react-data-xray'` 바로 뒤, 앱이 요청을 보내기 전에 부른다.
+ * production 빌드에서는 아무것도 하지 않는다.
+ */
+export const configure: (options?: RdxConfig) => void = process.env.NODE_ENV !== 'production' ? configureDev : () => undefined;

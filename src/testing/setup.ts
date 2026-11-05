@@ -5,6 +5,7 @@ import { cleanup } from '@testing-library/react';
 import { afterEach, beforeEach } from 'vitest';
 
 import { installCapture } from '../core/capture/install.js';
+import { resetConfig } from '../core/config.js';
 import { flushQueue } from '../core/scheduler/idleQueue.js';
 import { clearRecords } from '../core/requests/store.js';
 import { mockFetch, resetMockFetch } from './fetchMock.js';
@@ -19,6 +20,7 @@ if (isBrowser) {
 }
 
 beforeEach(() => {
+  resetConfig(); // 한 테스트의 configure() 가 다음 테스트의 판정 기준을 바꾸지 않게
   if (!isBrowser) return;
   clearRecords();
   resetMockFetch();
