@@ -19,7 +19,8 @@ Commands:
   mcp                      Run an MCP server over stdio with the same tools (claude mcp add rdx -- npx react-data-xray mcp)
 
 Options:
-  --url <url>      Dev server address (default: RDX_URL, then the address the dev server saved in .rdx/.server.json)
+  --url <url>      Dev server address (default: RDX_URL, then the address the dev server saved in .rdx/.server.json;
+                   Next.js: required)
   --tab <id>       Tab to run in (default: the visible tab focused most recently; see the tabs command)
   --dir <dir>      Report folder (default: .rdx)
   --timeout <s>    Seconds to wait for the tab to run a command (default: 90)
@@ -27,7 +28,7 @@ Options:
 The first command can take up to a minute to reach the tab (it checks every 60s while no CLI is in use), later ones about 5s.
 
 Exit codes: 0 ok, 1 failed, 2 usage, 3 dev server unreachable or without rdx, 4 no tab connected, 5 timed out,
-6 several tabs open and none focused recently (pass --tab).`;
+6 several tabs open and none focused recently (pass --tab), 130 cancelled (Ctrl+C).`;
 
 export interface CliIo {
   stdout: Writable;
@@ -35,6 +36,8 @@ export interface CliIo {
   stdin: Readable;
   cwd: string;
   env: Record<string, string | undefined>;
+  /** Ctrl+C */
+  signal?: AbortSignal;
 }
 
 /** 패키지 버전(MCP 의 serverInfo). dist/cli 와 src/cli 둘 다 두 단계 위가 package.json 이다 */
@@ -89,6 +92,7 @@ export const main = async (argv: readonly string[], io: CliIo): Promise<number> 
     cwd: io.cwd,
     timeoutMs: timeout * 1000,
     env: io.env,
+    signal: io.signal,
   };
   switch (command) {
     case 'reset':

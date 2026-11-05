@@ -15,17 +15,16 @@ import {
 export const DEFAULT_COMMAND_TIMEOUT_MS = 90 * 1000;
 /** CLI 가 준 기다리는 시간의 상한. 그 이상은 이 값으로 줄인다 */
 export const MAX_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
-/** CLI 의 시간 제한보다 서버가 조금 더 들고 있는다(CLI 가 마지막으로 묻는 사이) */
-const TTL_MARGIN_MS = 10 * 1000;
 /** 끝난 명령의 결과를 CLI 가 읽을 시간 */
 const KEEP_FINISHED_MS = 2 * 60 * 1000;
 /** 끝나지 않은 명령도 이보다 오래되면 지운다(탭이 받아 가기만 하고 끝내지 못하는 경우의 상한) */
 const MAX_AGE_MS = 60 * 60 * 1000;
 /**
- * 이 시간 안에 받아 가기·업로드가 있었던 탭을 연결된 탭으로 본다. CLI·MCP 를 쓰지 않을 때 탭은 1분마다 받아 가고,
- * 오래 가려진 탭은 브라우저가 타이머를 1분에 한 번으로 늦추므로(Chrome 의 intensive throttling) 1분보다 길게 둔다.
+ * 이 시간 안에 받아 가기·업로드가 있었던 탭을 연결된 탭으로 본다. CLI·MCP 를 쓰지 않을 때 탭은 55초마다 받아 가고,
+ * 오래 가려진 탭은 브라우저가 타이머를 1분에 한 번으로 늦춘다(Chrome 의 intensive throttling). 한 번 빠져도 끊긴 것으로 보지 않게
+ * 가장 느린 주기의 두 배 남짓으로 둔다.
  */
-export const TAB_LIVE_MS = 75 * 1000;
+export const TAB_LIVE_MS = 130 * 1000;
 /** 탭을 고르지 않았을 때, 보이는 탭이 여럿이면 이 시간 안에 포커스를 받은 탭만 고른다. 없으면 고르지 않고 묻는다 */
 export const RECENT_FOCUS_MS = 2 * 60 * 1000;
 // 한 탭에 쌓아 둘 명령 수. 넘으면 새 명령을 받지 않는다(같은 PC 의 도구가 실수로 반복해 보내는 경우).
@@ -52,7 +51,7 @@ export interface CommandEntry extends RdxCommand {
   tab: string;
   status: CommandStatus;
   createdAt: number;
-  /** 받아 가지 않으면 이 시각에 expired 가 된다(CLI 의 시간 제한 + 여유) */
+  /** 이 시각에 끝나지 않았으면 expired 가 된다(CLI 의 시간 제한과 같다. 그 뒤로는 CLI 가 기다리지 않으므로 실행하지 않는다) */
   expiresAt: number;
   finishedAt?: number;
   error?: string;
@@ -63,10 +62,10 @@ export interface Store {
   commands: Map<string, CommandEntry>;
   /** 명령 경로의 토큰. dev 서버(프로세스)가 처음 요청을 받을 때 만들어 SERVER_FILE 에 쓴다 */
   token: string;
-  /** SERVER_FILE 에 마지막으로 쓴 내용 */
+  /** SERVER_FILE 에 마지막으로 쓴 내용(쓰기에 성공한 것만) */
   written?: string;
-  /** 브라우저 출처(SERVER_FILE 의 url) */
-  origin?: string;
+  /** dev 서버 자신의 주소(SERVER_FILE 의 url). 요청이 보낸 Host·Origin 이 아니라 서버가 받은 소켓의 주소에서 만든다 */
+  serverUrl?: string;
   /** 이 시각까지 CLI·MCP 가 쓰는 중으로 본다 */
   cliActiveUntil: number;
 }
@@ -91,9 +90,18 @@ const isLive = (store: Store, tab: string, now: number): boolean => {
   return t !== undefined && now - t.seenAt <= TAB_LIVE_MS;
 };
 
+const MAY_HAVE_RUN = 'the tab received the command but did not report back in time; it may have run';
+const DID_NOT_RUN = 'the tab did not pick up the command in time; it did not run';
+
+const expire = (c: CommandEntry, now: number, error: string): void => {
+  c.status = 'expired';
+  c.finishedAt = now;
+  c.error = error;
+};
+
 /**
- * 받아 가지 않은 채 시간 제한이 지난 명령, 받아 간 탭이 닫힌(연결이 끊긴) 명령은 expired 로 둔다. 받아 간 탭이 계속
- * 알리는 동안은 오래 걸려도 그대로 둔다(소스맵을 기다리는 snapshot 등). 얼마나 기다릴지는 CLI 의 --timeout 이 정한다.
+ * CLI 의 시간 제한(expiresAt)이 지난 명령, 받아 간 탭이 닫힌(연결이 끊긴) 명령은 expired 로 둔다. 그 뒤로는 CLI 가 기다리지
+ * 않으므로 늦게 받아 가 실행하지 않게 한다. 받아 간 뒤 시간이 지난 명령은 실행됐을 수도 있다고 알린다.
  */
 const prune = (store: Store, now: number): void => {
   store.tabs.forEach((t, id) => now - t.seenAt > TAB_LIVE_MS && store.tabs.delete(id));
@@ -102,12 +110,8 @@ const prune = (store: Store, now: number): void => {
       store.commands.delete(id);
       return;
     }
-    const lost = c.status === 'sent' && !isLive(store, c.tab, now);
-    if ((c.status === 'pending' && now > c.expiresAt) || lost) {
-      c.status = 'expired';
-      c.finishedAt = now;
-      c.error = lost ? 'the tab stopped responding before finishing the command' : 'the tab did not pick up the command in time';
-    }
+    if (c.status === 'pending' && now >= c.expiresAt) expire(c, now, DID_NOT_RUN);
+    else if (c.status === 'sent' && (now >= c.expiresAt || !isLive(store, c.tab, now))) expire(c, now, MAY_HAVE_RUN);
   });
 };
 
@@ -191,7 +195,7 @@ export const createCommand = (store: Store, input: unknown, now: number): Create
     tab: target.id,
     status: 'pending',
     createdAt: now,
-    expiresAt: now + timeoutOf(timeoutMs) + TTL_MARGIN_MS,
+    expiresAt: now + timeoutOf(timeoutMs),
   };
   store.commands.set(command.id, command);
   return { ok: true, command, others: tabs.filter((t) => t !== target) };
@@ -219,6 +223,22 @@ export const finishCommand = (store: Store, id: string, tab: string, result: unk
   command.finishedAt = now;
   if (ok !== true) command.error = typeof error === 'string' ? error.slice(0, 500) : 'the tab reported a failure';
   return true;
+};
+
+/** 탭이 실행 직전에 묻는다: 이 탭이 받아 간, 아직 시간이 남은 명령인지 */
+export const isCommandLive = (store: Store, id: string, tab: string, now: number): boolean => {
+  prune(store, now);
+  const command = store.commands.get(id);
+  return command?.tab === tab && command.status === 'sent';
+};
+
+/** CLI 가 기다리기를 그만뒀다(시간 초과, Ctrl+C, MCP 취소). 아직 끝나지 않은 명령을 더는 실행하지 않게 한다 */
+export const cancelCommand = (store: Store, id: string, now: number): CommandEntry | undefined => {
+  prune(store, now);
+  const command = store.commands.get(id);
+  if (command?.status === 'pending') expire(command, now, 'cancelled before the tab picked it up; it did not run');
+  else if (command?.status === 'sent') expire(command, now, `cancelled; ${MAY_HAVE_RUN}`);
+  return command;
 };
 
 export const getCommand = (store: Store, id: string, now: number): CommandEntry | undefined => {

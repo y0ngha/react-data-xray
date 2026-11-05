@@ -6,11 +6,11 @@ import { resetCacheAudit } from '../reactQuery/cacheAudit.js';
 import { readStored, writeStored } from '../../shared/storage.js';
 import { clearRecords } from '../requests/store.js';
 import { getResetAt, writeResetAt } from './resetAt.js';
-import { buildReport, type RdxReport } from './buildReport.js';
+import { buildReport, type RdxReport, type ReportOptions } from './buildReport.js';
 import { buildDiagnostics, type RdxDiagnostics } from '../diagnostics/diagnostics.js';
 import { MESSAGES } from '../diagnostics/messages.js';
 import { setReportPluginState } from './endpointState.js';
-import { notePolled, receiveCommands, shouldPoll, tabState } from './commands.js';
+import { notePolled, notePollSent, receiveCommands, shouldPoll, tabState } from './commands.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 
 // 처리기가 이 Host 를 막았을 때의 안내는 MESSAGES.forbiddenHost 한곳에 둔다(Vite·webpack·Next.js 를 함께 적는다).
@@ -102,8 +102,8 @@ export const tabReportPath = (dir = '.rdx'): string => `${dir}/${reportFileFor(g
 
 /** 브라우저 도구를 쓰는 AI·개발자가 부르는 창구 */
 export interface RdxApi {
-  /** 지금까지 모은 결과 */
-  report: () => RdxReport;
+  /** 지금까지 모은 결과. `report({ howToRead: false })` 는 howToRead 를 뺀다(howToReadVersion 은 남는다) */
+  report: (options?: ReportOptions) => RdxReport;
   /** 측정을 새로 시작한다: 요청 기록과 렌더 통계를 비운다 */
   reset: () => void;
   /** 보고서를 이름 붙여 저장한다(.rdx/<name>.json). 고치기 전후를 비교할 때 쓴다. 저장하지 못하면(플러그인 없음 등) 거부된다 */
@@ -133,14 +133,15 @@ const keepRenderMonitoring = (): void => {
 export const NO_PLUGIN_MESSAGE =
   '[react-data-xray] The dev server has no rdx plugin; could not save. Use window.__RDX__.report() to retrieve the report.';
 
-const report = (): RdxReport => {
+// 파일로 남기는 보고서(snapshot·주기 업로드)는 나중에 읽을 쪽을 모르므로 늘 howToRead 를 싣는다.
+const report = (options?: ReportOptions): RdxReport => {
   const monitoring = isRenderMonitoring();
   keepRenderMonitoring();
-  return buildReport(monitoring);
+  return buildReport(monitoring, Date.now(), true, options);
 };
 
 const HANDSHAKE_RETRY_MS = 3000;
-// dev 서버가 꺼지면 계속 실패하므로 이만큼 연속 실패하면 멈춘다. 서버가 돌아오면 Vite 가 페이지를 다시 열어 처음부터 확인한다.
+// 이만큼 연속으로 올리지 못하면 올리기를 쉬고 받아 가기(본문 없는 GET)만 가끔 보낸다. 받아 가기가 되면 다시 올린다.
 const MAX_UPLOAD_FAILURES = 3;
 
 type Endpoint = 'ready' | 'forbidden-host' | 'missing';
@@ -250,18 +251,21 @@ const startUpload = async (): Promise<void> => {
   let last = '';
   let lastSent = 0;
   let failures = 0;
-  let timer = 0;
   const upload = async () => {
-    const { generatedAt, ...content } = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
+    const full = buildReport(isRenderMonitoring(), Date.now(), false); // 주기 업로드는 큐를 비우지 않는다
+    const { generatedAt: _generatedAt, ...content } = full;
     const key = changeKeyOf(content);
     const idle = key === last;
     const tab = getTabId();
     // 그대로여도 열려 있다는 것은 가끔 알린다(서버가 오래 갱신 없는 탭 파일을 지운다).
-    // 올리지 않는 주기에도 CLI·MCP 가 맡긴 명령을 본문 없는 GET 으로 받아 간다(#69). CLI 를 쓰지 않을 때는 1분마다.
-    const quiet = idle && Date.now() - lastSent < TAB_HEARTBEAT_MS;
+    // 올리지 않는 주기에도 CLI·MCP 가 맡긴 명령을 본문 없는 GET 으로 받아 간다(#69). CLI 를 쓰지 않을 때는 1분 안쪽마다.
+    // 업로드가 계속 실패하면(dev 서버를 다시 띄우는 중 등) 올리기를 쉬고 받아 가기만 한다. 받아 가기가 되면 다시 올린다.
+    const quiet = failures >= MAX_UPLOAD_FAILURES || (idle && Date.now() - lastSent < TAB_HEARTBEAT_MS);
     if (quiet && !shouldPoll(Date.now())) return;
     const query = new URLSearchParams({ tab, path: location.pathname, title: document.title, ...tabState() });
     if (idle) query.set('idle', '1');
+    // 받아 가기 주기는 보낸 때부터 센다(업로드도 응답으로 명령을 받으므로 받아 가기로 친다).
+    notePollSent(Date.now());
     const res = await send(
       `${REPORT_PATH}?${query}`,
       quiet
@@ -270,7 +274,7 @@ const startUpload = async (): Promise<void> => {
             method: 'POST',
             credentials: 'omit',
             headers: { 'content-type': 'application/json', [TAB_HEADER]: '1' },
-            body: JSON.stringify({ generatedAt, ...content }),
+            body: JSON.stringify(full), // summary 가 맨 앞에 오도록 키 순서를 그대로 둔다
           },
     ).catch(() => null);
     if (res?.ok) {
@@ -279,15 +283,14 @@ const startUpload = async (): Promise<void> => {
         lastSent = Date.now();
       }
       failures = 0;
-      notePolled(res, Date.now());
+      notePolled(res);
       await receiveCommands(send, res, tab, { reset, snapshot });
       return;
     }
-    // 잠깐 실패하면 다음 주기에 다시 보내고, 계속 실패하면 멈춘다.
-    failures++;
-    if (failures >= MAX_UPLOAD_FAILURES) window.clearInterval(timer);
+    // 잠깐 실패하면 다음 주기에 다시 보낸다. 받아 가기의 실패는 세지 않는다(그때는 이미 쉬는 중이거나 보고서가 그대로다).
+    if (!quiet) failures++;
   };
-  timer = window.setInterval(() => void upload(), UPLOAD_MS);
+  window.setInterval(() => void upload(), UPLOAD_MS);
   await upload();
 };
 

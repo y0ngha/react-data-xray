@@ -63,14 +63,14 @@ const openTab = (tab: string, behave: 'ok' | 'fail' | 'silent' = 'ok', page: Rec
 };
 afterEach(() => browsers.splice(0).forEach((stop) => stop()));
 
-const run = async (argv: string[], env: Record<string, string> = {}) => {
+const run = async (argv: string[], env: Record<string, string> = {}, signal?: AbortSignal) => {
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   let out = '';
   let err = '';
   stdout.on('data', (d) => (out += String(d)));
   stderr.on('data', (d) => (err += String(d)));
-  const io: CliIo = { stdout, stderr, stdin: new PassThrough(), cwd: root, env };
+  const io: CliIo = { stdout, stderr, stdin: new PassThrough(), cwd: root, env, signal };
   const code = await main(argv, io);
   return { code, out, err };
 };
@@ -86,7 +86,8 @@ const waitForTab = async (tab: string) => {
   throw new Error(`tab ${tab} did not connect`);
 };
 
-describe('rdx CLI(#69)', () => {
+// 실제 dev 서버 미들웨어와 탭 흉내로 왕복하므로 부하가 있으면 기본 5초를 넘길 수 있다
+describe('rdx CLI(#69)', { timeout: 20_000 }, () => {
   it('열린 탭이 없으면 4 로 끝나며 이유를 알린다. 토큰 파일이 아직 없어도 dev 서버가 쓴 파일을 다시 읽어 보낸다', async () => {
     const { code, err } = await run(['reset', '--url', base]);
     expect(code).toBe(4);
@@ -157,7 +158,24 @@ describe('rdx CLI(#69)', () => {
     openTab('mute', 'silent');
     await waitForTab('mute');
     const slow = await run(['reset', '--url', base, '--tab', 'mute', '--timeout', '0.3']);
-    expect(slow).toMatchObject({ code: 5, err: expect.stringContaining('did not finish') });
+    // 탭이 받아 갔으므로 실행됐을 수도 있다고 알린다
+    expect(slow).toMatchObject({ code: 5, err: expect.stringContaining('may have run') });
+  });
+
+  it('시간 제한이나 Ctrl+C 로 그만두면 dev 서버에서 명령을 거둬, 뒤늦게 받아 가는 탭이 실행하지 않는다', async () => {
+    const { token } = JSON.parse(await readFile(join(root, '.rdx', '.server.json'), 'utf8')) as { token: string };
+    const pollOnce = (tab: string) => fetch(`${base}/__rdx/report?tab=${tab}&visible=1`, { headers: { 'x-rdx-tab': '1' } });
+    await pollOnce('late');
+    const slow = await run(['reset', '--url', base, '--tab', 'late', '--timeout', '0.2']);
+    expect(slow).toMatchObject({ code: 5, err: expect.stringContaining('did not run') });
+    expect((await pollOnce('late')).status).toBe(204);
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 100);
+    const cancelled = await run(['snapshot', 'never', '--url', base, '--tab', 'late'], {}, abort.signal);
+    expect(cancelled).toMatchObject({ code: 130, err: expect.stringContaining('It did not run') });
+    expect((await pollOnce('late')).status).toBe(204);
+    const { tabs } = (await (await fetch(`${base}/__rdx/command`, { headers: { 'x-rdx-token': token } })).json()) as { tabs: unknown[] };
+    expect(tabs.length).toBeGreaterThan(0);
   });
 
   it('compare 는 두 보고서 파일을 비교해 출력하고 compare-<전>-<후>.json 에도 쓴다', async () => {

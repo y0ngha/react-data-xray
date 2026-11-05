@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildReport } from '../buildReport.js';
+import { SUMMARY_HOW_TO_READ } from '../summarySection.js';
 
 // 섹션 파일로 나누기 전 howToRead 14줄. 내용과 순서를 고정한다.
 const ORIGINAL_HOW_TO_READ: string[] = [
@@ -21,8 +22,10 @@ const ORIGINAL_HOW_TO_READ: string[] = [
 ];
 
 describe('보고서 섹션 분리', () => {
-  it('how_to_read_order: howToRead 앞 14줄은 분리 전과 내용·순서가 같다', () => {
-    // 이슈 작업이 더하는 줄(*_HOW_TO_READ_EXTRA)은 뒤에 붙으므로 앞 14줄만 본다.
-    expect(buildReport(false, 0, false).howToRead.slice(0, ORIGINAL_HOW_TO_READ.length)).toEqual(ORIGINAL_HOW_TO_READ);
+  it('how_to_read_order: summary 줄 다음 14줄은 분리 전과 내용·순서가 같다', () => {
+    // 이슈 작업이 더하는 줄(*_HOW_TO_READ_EXTRA)은 뒤에 붙고, summary 를 먼저 읽으라는 줄(#70)만 앞에 온다.
+    const lines = buildReport(false, 0, false).howToRead ?? [];
+    expect(lines.slice(0, SUMMARY_HOW_TO_READ.length)).toEqual(SUMMARY_HOW_TO_READ);
+    expect(lines.slice(SUMMARY_HOW_TO_READ.length, SUMMARY_HOW_TO_READ.length + ORIGINAL_HOW_TO_READ.length)).toEqual(ORIGINAL_HOW_TO_READ);
   });
 });

@@ -11,6 +11,7 @@ import { main } from '../main.js';
 let root = '';
 let server: Server;
 let base = '';
+const deleted: string[] = [];
 
 const REPORT = {
   requests: { endpoints: [{ endpoint: 'GET /a', count: 2, duplicates: 1, sameResponses: 0 }] },
@@ -26,10 +27,26 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     res.setHeader('x-rdx-report', '1');
     res.setHeader('content-type', 'application/json');
-    if (req.method === 'POST') {
+    if (req.method === 'DELETE') {
+      deleted.push(req.url ?? '');
+      res.end(JSON.stringify({ id: 'c2', op: 'snapshot', tab: 'fake', status: 'expired' }));
+    } else if (req.method === 'POST') {
       res.statusCode = 202;
-      res.end(JSON.stringify({ command: { id: 'c1', op: 'reset', tab: 'fake', status: 'done' }, others: [] }));
-    } else res.end(JSON.stringify({ tabs: [{ id: 'fake', path: '/', title: '', seenAt: Date.now(), activeAt: 0 }] }));
+      let text = '';
+      req.on('data', (d) => (text += String(d)));
+      req.on('end', () =>
+        res.end(
+          JSON.stringify({
+            command: text.includes('"slow"')
+              ? { id: 'c2', op: 'snapshot', name: 'slow', tab: 'fake', status: 'pending' }
+              : { id: 'c1', op: 'reset', tab: 'fake', status: 'done' },
+            others: [],
+          }),
+        ),
+      );
+    } else if (req.url?.startsWith('/__rdx/command/c2'))
+      res.end(JSON.stringify({ id: 'c2', op: 'snapshot', tab: 'fake', status: 'pending' }));
+    else res.end(JSON.stringify({ tabs: [{ id: 'fake', path: '/', title: '', seenAt: Date.now(), activeAt: 0 }] }));
   });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const a = server.address();
@@ -102,5 +119,14 @@ describe('rdx mcp(#69)', () => {
     expect(byId.get(2)?.error?.code).toBe(-32601);
     expect(byId.get(3)?.error?.code).toBe(-32602);
     expect(byId.get(4)?.result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('No report at') }] });
+  });
+
+  it('클라이언트가 도구 호출을 취소하면(notifications/cancelled) 기다리던 명령을 dev 서버에서 거둔다', async () => {
+    const replies = await session([
+      { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'snapshot', arguments: { name: 'slow' } } },
+      { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 9, reason: 'user' } },
+    ]);
+    expect(deleted).toEqual(['/__rdx/command/c2']);
+    expect(replies[0].result).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('Cancelled') }] });
   });
 });

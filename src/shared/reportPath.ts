@@ -60,5 +60,8 @@ export const TAB_HEADER = 'x-rdx-tab';
 export const CLI_ACTIVE_HEADER = 'x-rdx-cli';
 /** CLI·MCP 가 명령 경로를 쓴 뒤 이만큼은 탭이 5초마다 받아 간다 */
 export const CLI_ACTIVE_MS = 10 * 60 * 1000;
-/** CLI·MCP 가 쓰지 않을 때 탭이 받아 가는 주기(열려 있다는 알림도 된다) */
-export const QUIET_POLL_MS = 60 * 1000;
+/**
+ * CLI·MCP 가 쓰지 않을 때 탭이 받아 가는 주기(열려 있다는 알림도 된다). 오래 가려진 탭은 브라우저가 타이머를 1분에 한 번만 깨우므로
+ * 1분보다 짧게 두어 깰 때마다 받아 가게 한다.
+ */
+export const QUIET_POLL_MS = 55 * 1000;

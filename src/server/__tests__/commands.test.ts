@@ -1,15 +1,17 @@
 // @vitest-environment node
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, unlink } from 'node:fs/promises';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
+  cancelCommand,
   createCommand,
   DEFAULT_COMMAND_TIMEOUT_MS,
   finishCommand,
   getCommand,
+  isCommandLive,
   liveTabs,
   MAX_TABS,
   RECENT_FOCUS_MS,
@@ -21,6 +23,7 @@ import {
 } from '../commandQueue.js';
 import { rdxReportMiddleware } from '../middleware.js';
 import { createRdxReportRoute } from '../next.js';
+import { createReportHandler, type ReportRequest } from '../reportHandler.js';
 
 let root = '';
 let server: Server;
@@ -132,7 +135,7 @@ describe('명령 경로(#69)', () => {
     expect((await cli('/__rdx/command/nope')).status).toBe(404);
   });
 
-  it('업로드(보고서가 바뀐 주기)의 응답으로도 명령을 넘기고, 브라우저 출처를 .server.json 에 적는다', async () => {
+  it('업로드(보고서가 바뀐 주기)의 응답으로도 명령을 넘기고, dev 서버 자신의 주소를 .server.json 에 적는다', async () => {
     await poll('tabA');
     const created = (await (await command({ op: 'reset', tab: 'tabA' })).json()) as { command: { id: string } };
     const next = await fetch(`${base}/__rdx/report?tab=tabA`, { method: 'POST', headers: { ...json, origin: base }, body: '{}' });
@@ -197,38 +200,60 @@ describe('명령 경로(#69)', () => {
 describe('명령 큐', () => {
   const tab = (id: string, extra: Partial<TabNotice> = {}): TabNotice => ({ id, path: '/', title: '', visible: true, ...extra });
 
-  it('받아 가지 않은 명령은 CLI 의 시간 제한(+여유)이 지나면 expired 다', () => {
+  it('받아 가지 않은 명령은 CLI 의 시간 제한이 되는 그때 expired 가 되어, 늦게 받아 가 실행되지 않는다', () => {
     const store = storeFor('/ttl');
     seeTab(store, tab('t'), 0);
     const created = createCommand(store, { op: 'reset', timeoutMs: 1000 }, 0);
     if (!created.ok) throw new Error('not created');
-    seeTab(store, tab('t'), 5000);
-    expect(getCommand(store, created.command.id, 5000)).toMatchObject({ status: 'pending' });
-    seeTab(store, tab('t'), 12_000);
-    expect(takeCommands(store, 't', 12_000)).toEqual([]);
-    expect(getCommand(store, created.command.id, 12_000)).toMatchObject({ status: 'expired' });
-    expect(finishCommand(store, created.command.id, 't', { ok: true }, 12_001)).toBe(false);
+    expect(getCommand(store, created.command.id, 999)).toMatchObject({ status: 'pending' });
+    seeTab(store, tab('t'), 1000);
+    expect(takeCommands(store, 't', 1000)).toEqual([]);
+    expect(getCommand(store, created.command.id, 1000)).toMatchObject({ status: 'expired', error: expect.stringContaining('did not run') });
+    expect(finishCommand(store, created.command.id, 't', { ok: true }, 1001)).toBe(false);
     // 시간 제한을 주지 않으면 기본값
     const legacy = createCommand(store, { op: 'reset' }, 0);
-    expect(legacy.ok && legacy.command.expiresAt).toBeGreaterThan(DEFAULT_COMMAND_TIMEOUT_MS);
+    expect(legacy.ok && legacy.command.expiresAt).toBe(DEFAULT_COMMAND_TIMEOUT_MS);
   });
 
-  it('받아 간 명령은 탭이 계속 알리는 동안 시간이 지나도 expired 가 되지 않고, 탭이 끊기면 expired 다', () => {
+  it('받아 간 명령도 CLI 의 시간 제한이 지나면(탭이 계속 알려도) 실행됐을 수 있다며 expired 다. 탭이 끊기면 그 전에도 expired 다', () => {
     const store = storeFor('/sent');
     seeTab(store, tab('t'), 0);
-    const created = createCommand(store, { op: 'snapshot', name: 'slow', timeoutMs: 1000 }, 0);
+    const created = createCommand(store, { op: 'snapshot', name: 'slow', timeoutMs: 30_000 }, 0);
     if (!created.ok) throw new Error('not created');
     takeCommands(store, 't', 10);
-    for (let now = 10_000; now <= 200_000; now += 10_000) seeTab(store, tab('t'), now);
-    expect(getCommand(store, created.command.id, 200_000)).toMatchObject({ status: 'sent' });
-    expect(finishCommand(store, created.command.id, 't', { ok: true }, 200_001)).toBe(true);
-    const lost = createCommand(store, { op: 'reset' }, 200_002);
-    if (!lost.ok) throw new Error('not created');
-    takeCommands(store, 't', 200_003);
-    expect(getCommand(store, lost.command.id, 200_003 + TAB_LIVE_MS + 1)).toMatchObject({
+    expect(isCommandLive(store, created.command.id, 't', 20)).toBe(true);
+    expect(isCommandLive(store, created.command.id, 'other', 20)).toBe(false);
+    for (let now = 5000; now <= 30_000; now += 5000) seeTab(store, tab('t'), now);
+    expect(getCommand(store, created.command.id, 30_000)).toMatchObject({
       status: 'expired',
-      error: expect.stringContaining('stopped'),
+      error: expect.stringContaining('may have run'),
     });
+    expect(isCommandLive(store, created.command.id, 't', 30_000)).toBe(false);
+    // 늦게 온 결과는 받지 않는다
+    expect(finishCommand(store, created.command.id, 't', { ok: true }, 30_001)).toBe(false);
+    const lost = createCommand(store, { op: 'reset', timeoutMs: 600_000 }, 30_002);
+    if (!lost.ok) throw new Error('not created');
+    takeCommands(store, 't', 30_003);
+    expect(getCommand(store, lost.command.id, 30_000 + TAB_LIVE_MS + 1)).toMatchObject({ status: 'expired' });
+  });
+
+  it('CLI 가 그만두면(DELETE) 아직 받아 가지 않은 명령은 실행하지 않고, 받아 간 명령은 실행됐을 수 있다고 남긴다', () => {
+    const store = storeFor('/cancel');
+    seeTab(store, tab('t'), 0);
+    const waiting = createCommand(store, { op: 'reset' }, 0);
+    if (!waiting.ok) throw new Error('not created');
+    expect(cancelCommand(store, waiting.command.id, 1)).toMatchObject({ status: 'expired', error: expect.stringContaining('did not run') });
+    expect(takeCommands(store, 't', 2)).toEqual([]);
+    const sent = createCommand(store, { op: 'reset' }, 3);
+    if (!sent.ok) throw new Error('not created');
+    takeCommands(store, 't', 4);
+    expect(cancelCommand(store, sent.command.id, 5)).toMatchObject({ status: 'expired', error: expect.stringContaining('may have run') });
+    expect(isCommandLive(store, sent.command.id, 't', 6)).toBe(false);
+    expect(cancelCommand(store, 'nope', 7)).toBeUndefined();
+  });
+
+  it('가장 느린 받아 가기(가려진 탭, 1분에 한 번)보다 오래 연결된 탭으로 본다', () => {
+    expect(TAB_LIVE_MS).toBeGreaterThan(2 * 60_000);
   });
 
   it('탭을 고르지 않으면 보이는 탭 중 최근에 포커스를 받은 탭, 그런 탭이 없으면 고르지 않는다', () => {
@@ -270,5 +295,137 @@ describe('명령 큐', () => {
       return r.ok ? 202 : r.status;
     });
     expect(statuses.slice(-2)).toEqual([202, 429]);
+  });
+});
+
+describe('명령 경로 보안(#69 2차)', () => {
+  const tabHeaders = { 'x-rdx-tab': '1' };
+  const make = async (options: Parameters<typeof createReportHandler>[1] = {}) => {
+    const dir = await mkdtemp(join(tmpdir(), 'rdx-sec2-'));
+    return { dir, handle: createReportHandler(dir, options) };
+  };
+  const req = (over: Partial<ReportRequest>): ReportRequest => ({
+    method: 'GET',
+    url: '/__rdx/report',
+    host: 'localhost:5173',
+    origin: undefined,
+    contentType: undefined,
+    body: null,
+    remoteAddress: '127.0.0.1',
+    serverUrl: 'http://localhost:5173',
+    ...over,
+  });
+  const body = (text: string) => new Response(text).body;
+  const savedFile = async (dir: string) =>
+    JSON.parse(await readFile(join(dir, '.rdx', '.server.json'), 'utf8')) as { url?: string; token: string };
+
+  it('LAN 의 기기가 자기 Host·Origin 으로 보내도 .server.json 의 주소는 dev 서버 자신의 주소다(토큰을 다른 기기로 보내지 않게)', async () => {
+    const { dir, handle } = await make();
+    const lan = { host: '10.0.0.9:5173', origin: 'http://10.0.0.9:5173', remoteAddress: '10.0.0.9', contentType: 'application/json' };
+    expect((await handle(req({ ...lan, method: 'POST', url: '/__rdx/report?tab=lanTab', body: body('{}') }))).status).toBe(204);
+    expect((await savedFile(dir)).url).toBe('http://localhost:5173');
+    // 주소를 모르는 요청(Next)은 지난번 주소를 지우지 않는다
+    await handle(
+      req({ method: 'POST', url: '/__rdx/report?tab=t', contentType: 'application/json', body: body('{}'), serverUrl: undefined }),
+    );
+    expect((await savedFile(dir)).url).toBe('http://localhost:5173');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('dev 서버를 다시 띄워도 서버가 정한 지난 주소를 지우지 않고(새 토큰), 처음부터 주소를 모르면 url 을 쓰지 않는다', async () => {
+    const { dir } = await make();
+    await createReportHandler(dir)(req({ url: '/__rdx/report?tab=t', tabHeader: '1' }));
+    const before = await savedFile(dir);
+    expect(before.url).toBe('http://localhost:5173');
+    // 재시작: 프로세스 전역 저장소가 새로 생긴다. 주소를 모르는 요청(Next)이 먼저 와도 파일의 주소를 이어 쓴다
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for('react-data-xray.commandStores')];
+    await createReportHandler(dir)(req({ url: '/__rdx/report?tab=t', tabHeader: '1', serverUrl: undefined }));
+    const after = await savedFile(dir);
+    expect(after.url).toBe('http://localhost:5173');
+    expect(after.token).not.toBe(before.token);
+    const fresh = await make();
+    await fresh.handle(req({ url: '/__rdx/report?tab=t', tabHeader: '1', serverUrl: undefined }));
+    expect((await savedFile(fresh.dir)).url).toBeUndefined();
+    await rm(dir, { recursive: true, force: true });
+    await rm(fresh.dir, { recursive: true, force: true });
+  });
+
+  it('LAN 에서 온 탭은 등록하지 않고 명령도 넘기지 않으며, 명령 경로·결과도 받지 않는다. commands: lan 이면 받는다', async () => {
+    const { dir, handle } = await make();
+    const lan = { host: '192.168.0.2:5173', remoteAddress: '192.168.0.2' };
+    expect((await handle(req({ ...lan, url: '/__rdx/report?tab=spoof', tabHeader: '1' }))).status).toBe(204);
+    const { token } = await savedFile(dir).catch(async () => {
+      await handle(req({ url: '/__rdx/command' }));
+      return savedFile(dir);
+    });
+    const tabs = await handle(req({ url: '/__rdx/command', token }));
+    expect(JSON.parse(tabs.body!)).toEqual({ tabs: [] });
+    // LAN 에서 토큰을 가져도 명령 경로는 받지 않는다
+    expect((await handle(req({ ...lan, url: '/__rdx/command', token }))).status).toBe(403);
+    expect(
+      (
+        await handle(
+          req({ ...lan, method: 'POST', url: '/__rdx/report?command=x&tab=spoof', contentType: 'application/json', body: body('{}') }),
+        )
+      ).status,
+    ).toBe(403);
+    // Host 를 localhost 로 꾸며도 소켓 주소로 본다
+    expect(
+      (await handle(req({ host: 'localhost:5173', remoteAddress: '192.168.0.2', url: '/__rdx/report?tab=spoof2', tabHeader: '1' }))).status,
+    ).toBe(204);
+    expect(JSON.parse((await handle(req({ url: '/__rdx/command', token }))).body!)).toEqual({ tabs: [] });
+    const lanOk = await make({ commands: 'lan' });
+    await lanOk.handle(req({ ...lan, url: '/__rdx/report?tab=lanTab', tabHeader: '1' }));
+    const lanToken = (await savedFile(lanOk.dir)).token;
+    const listed = JSON.parse((await lanOk.handle(req({ url: '/__rdx/command', token: lanToken }))).body!) as {
+      tabs: Array<{ id: string }>;
+    };
+    expect(listed.tabs.map((t) => t.id)).toEqual(['lanTab']);
+    await rm(dir, { recursive: true, force: true });
+    await rm(lanOk.dir, { recursive: true, force: true });
+  });
+
+  it('소켓 주소가 없으면(Next) Host 이름이 루프백일 때만 탭으로 받는다', async () => {
+    const { dir, handle } = await make();
+    await handle(req({ url: '/__rdx/report?tab=nextLocal', tabHeader: '1', remoteAddress: undefined, serverUrl: undefined }));
+    await handle(
+      req({ host: '192.168.0.2:3000', url: '/__rdx/report?tab=nextLan', tabHeader: '1', remoteAddress: undefined, serverUrl: undefined }),
+    );
+    const { token } = await savedFile(dir);
+    const listed = JSON.parse((await handle(req({ url: '/__rdx/command', token, remoteAddress: undefined }))).body!) as {
+      tabs: Array<{ id: string }>;
+    };
+    expect(listed.tabs.map((t) => t.id)).toEqual(['nextLocal']);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('.server.json 은 이 사용자만 읽을 수 있고(0600), 지워지면 다음 요청에 다시 쓴다', async () => {
+    const { dir, handle } = await make();
+    await handle(req({ url: '/__rdx/report?tab=t', tabHeader: '1' }));
+    const file = join(dir, '.rdx', '.server.json');
+    // Windows 에는 권한 비트가 없다
+    expect(process.platform === 'win32' || ((await stat(file)).mode & 0o777) === 0o600).toBe(true);
+    const { token } = await savedFile(dir);
+    await unlink(file);
+    await handle(req({ url: '/__rdx/report?tab=t', tabHeader: '1' }));
+    expect((await savedFile(dir)).token).toBe(token);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('DELETE /__rdx/command/<id> 로 기다리기를 그만두면 탭이 실행 직전에 물을 때 410 이다', async () => {
+    const { dir, handle } = await make();
+    await handle(req({ url: '/__rdx/report?tab=t', tabHeader: '1' }));
+    const { token } = await savedFile(dir);
+    const created = await handle(
+      req({ method: 'POST', url: '/__rdx/command', token, contentType: 'application/json', body: body('{"op":"reset"}') }),
+    );
+    const { command: c } = JSON.parse(created.body!) as { command: { id: string } };
+    await handle(req({ url: '/__rdx/report?tab=t', tabHeader: '1' }));
+    expect((await handle(req({ url: `/__rdx/report?command=${c.id}&tab=t`, ...tabHeaders, tabHeader: '1' }))).status).toBe(204);
+    expect((await handle(req({ method: 'DELETE', url: `/__rdx/command/${c.id}`, token }))).status).toBe(200);
+    expect((await handle(req({ url: `/__rdx/report?command=${c.id}&tab=t`, tabHeader: '1' }))).status).toBe(410);
+    expect((await handle(req({ method: 'DELETE', url: `/__rdx/command/${c.id}` }))).status).toBe(403);
+    expect((await handle(req({ method: 'DELETE', url: '/__rdx/command/nope', token }))).status).toBe(404);
+    await rm(dir, { recursive: true, force: true });
   });
 });

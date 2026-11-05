@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { scheduleLoadOrderCheck } from '../core/diagnostics/loadOrder.js';
-import { isWastefulStat } from '../core/requests/endpointStats.js';
 import type { RequestRecord } from '../core/requests/types.js';
 import { RequestActionsProvider, type Focus, type RequestActions } from './contexts.js';
 import { BUTTON_SIZE, FloatingButton } from './FloatingButton.js';
@@ -57,8 +56,7 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
 
   const { ignored, toggle: toggleIgnore } = useIgnoredEndpoints();
   const analysis = useRequestAnalysis(ignored);
-  const wasteNames = useMemo(() => analysis.stats.filter(isWastefulStat).map((s) => s.endpoint), [analysis.stats]);
-  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.wasteCount, wasteNames);
+  const signal = useProblemSignal(analysis.records, analysis.classOf, analysis.stats);
   const { open, show, hide, popup, settings, updateDock, saveDock, changeDock } = usePanelVisibility();
   const { position, handlers } = useDraggable(BUTTON_SIZE, open ? hide : show);
   const portal = useOwnLayerPortal();
@@ -162,12 +160,12 @@ export const RdxDevtools = ({ hotkey = DEFAULT_HOTKEY }: RdxDevtoolsProps) => {
           position={position}
           issues={signal.issues}
           alert={signal.alert}
-          breakdown={{ waste: signal.wasteEndpoints, storming: signal.stormingNames }}
-          onSelect={(next, key) => {
+          breakdown={{ waste: signal.wasteEndpoints, storming: signal.storming }}
+          onSelect={(next, key, fallbacks) => {
             show();
             setSelected(null);
             setTab(next);
-            if (next === 'requests' || next === 'renders') focusItem(next, key);
+            if (next === 'requests' || next === 'renders') focusItem(next, key, fallbacks);
           }}
           handlers={handlers}
         />

@@ -119,6 +119,8 @@ export const serveMcp = async (input: Readable, output: Writable, opts: CliOptio
   const write = (value: unknown) => output.write(`${JSON.stringify(value)}\n`);
   // 답하지 않은 요청. 끝나면 뺀다(오래 도는 서버에서 끝난 요청을 쌓아 두지 않게).
   const pending = new Set<Promise<unknown>>();
+  // 도는 중인 요청의 취소 손잡이(id 별)
+  const running = new Map<string | number, AbortController>();
   for await (const line of createInterface({ input, crlfDelay: Infinity })) {
     if (!line.trim()) continue;
     let message: JsonRpcRequest;
@@ -132,12 +134,23 @@ export const serveMcp = async (input: Readable, output: Writable, opts: CliOptio
       write(failure(null, -32600, 'Invalid Request'));
       continue;
     }
+    // 클라이언트가 기다리던 도구 호출을 취소했다. 기다리던 명령을 dev 서버에서 거둔다(아직 받아 가지 않았으면 실행하지 않는다).
+    if (message.method === 'notifications/cancelled') {
+      const requestId = (message.params as { requestId?: unknown } | undefined)?.requestId;
+      if (typeof requestId === 'string' || typeof requestId === 'number') running.get(requestId)?.abort();
+      continue;
+    }
     // 도구 호출은 탭을 기다리느라 오래 걸릴 수 있어 다음 요청(ping 등)을 막지 않게 따로 답한다.
     const { id } = message;
-    const task: Promise<unknown> = handleMessage(message, opts, version)
+    const abort = new AbortController();
+    if (id !== undefined && id !== null) running.set(id, abort);
+    const task: Promise<unknown> = handleMessage(message, { ...opts, signal: abort.signal }, version)
       .then((reply) => reply && write(reply))
       .catch((error: unknown) => id !== undefined && write(failure(id, -32603, String(error))))
-      .finally(() => pending.delete(task));
+      .finally(() => {
+        pending.delete(task);
+        if (id !== undefined && id !== null) running.delete(id);
+      });
     pending.add(task);
   }
   await Promise.all(pending);

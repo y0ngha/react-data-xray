@@ -5,7 +5,7 @@ import { COMMAND_PATH, isReportName, REPORT_HEADER, SERVER_FILE, TOKEN_HEADER, t
 
 /** CLI·MCP 가 함께 쓰는 설정 */
 export interface CliOptions {
-  /** dev 서버 주소. 없으면 RDX_URL, 그다음 `.rdx/.server.json`(dev 서버가 브라우저 출처를 적어 둔다) */
+  /** dev 서버 주소. 없으면 RDX_URL, 그다음 `.rdx/.server.json`(dev 서버가 자기 주소를 적어 둔다) */
   url?: string;
   /** 명령을 맡길 탭 id. 없으면 dev 서버가 고른다(보이는 탭 중 최근에 포커스를 받은 탭) */
   tab?: string;
@@ -17,10 +17,12 @@ export interface CliOptions {
   env?: Record<string, string | undefined>;
   /** 테스트에서 바꾼다 */
   pollMs?: number;
+  /** 기다리기를 그만둔다(Ctrl+C, MCP 의 취소). 그만두면 dev 서버에 알려 아직 실행하지 않은 명령은 실행하지 않게 한다 */
+  signal?: AbortSignal;
 }
 
 /** 종료 코드. 에이전트가 문구를 읽지 않아도 갈래를 알 수 있게 나눈다 */
-export const EXIT = { ok: 0, failed: 1, usage: 2, server: 3, noTab: 4, timeout: 5, pickTab: 6 } as const;
+export const EXIT = { ok: 0, failed: 1, usage: 2, server: 3, noTab: 4, timeout: 5, pickTab: 6, cancelled: 130 } as const;
 
 /** 사용자에게 보여 줄 문구와 종료 코드를 가진 실패 */
 export class CliError extends Error {
@@ -57,7 +59,7 @@ interface Server {
   token?: string;
 }
 
-/** dev 서버가 적어 둔 `.rdx/.server.json`(토큰, 브라우저 출처) */
+/** dev 서버가 적어 둔 `.rdx/.server.json`(토큰, dev 서버 자신의 주소) */
 const readServerFile = async (opts: CliOptions): Promise<{ url?: string; token?: string }> => {
   const saved = (await readJsonFile(join(opts.cwd, opts.dir, SERVER_FILE)).catch(() => null)) as Record<string, unknown> | null;
   return {
@@ -72,7 +74,7 @@ const resolveServer = async (opts: CliOptions): Promise<Server> => {
   const base = opts.url ?? opts.env?.RDX_URL ?? saved.url;
   if (base) return { base, token: saved.token };
   throw new CliError(
-    `Could not find the dev server address. Pass --url (e.g. --url http://localhost:5173), or open the app once so the dev server writes ${opts.dir}/${SERVER_FILE}.`,
+    `Could not find the dev server address. Pass --url (e.g. --url http://localhost:5173), or open the app once so the dev server writes ${opts.dir}/${SERVER_FILE}. Next.js cannot record its address: always pass --url (or RDX_URL).`,
     EXIT.usage,
   );
 };
@@ -135,10 +137,20 @@ const call = async (opts: CliOptions, path: string, init?: RequestInit): Promise
     );
   if (mark !== '1')
     throw new CliError(
-      `${server.base} has no rdx command path (${res.status}). Attach the rdx dev server plugin (react-data-xray/vite, react-data-xray/middleware) and update react-data-xray. Next.js: add app/%5F_rdx/command/[[...id]]/route.ts with export { GET, POST } from 'react-data-xray/next'.`,
+      `${server.base} has no rdx command path (${res.status}). Attach the rdx dev server plugin (react-data-xray/vite, react-data-xray/middleware) and update react-data-xray. Next.js: add app/%5F_rdx/command/[[...id]]/route.ts with export { GET, POST, DELETE } from 'react-data-xray/next' and pass --url.`,
       EXIT.server,
     );
-  if (res.status === 403) throw new CliError(TOKEN_HINT, EXIT.server);
+  if (res.status === 403) {
+    const reason = res.headers.get('content-type')?.startsWith('application/json')
+      ? ((await res.json().catch(() => ({}))) as { error?: string }).error
+      : undefined;
+    throw new CliError(
+      reason === 'not-local'
+        ? `The dev server at ${server.base} only accepts commands from this machine. Use a localhost URL, or attach the plugin with commands: 'lan'.`
+        : TOKEN_HINT,
+      EXIT.server,
+    );
+  }
   // 실패(4xx)에도 처리기는 이유를 JSON 으로 준다. 본문이 없는 답(204)만 빈 객체다.
   if (res.status === 204 || !res.headers.get('content-type')?.startsWith('application/json')) return { status: res.status, body: {} };
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
@@ -184,15 +196,23 @@ export const runCommand = async (opts: CliOptions, op: CommandOp, name?: string)
   }
   const others = (created.body.others as TabInfo[] | undefined) ?? [];
   const deadline = Date.now() + opts.timeoutMs;
+  /** 기다리기를 그만둔다. dev 서버에 알려, 아직 받아 가지 않은 명령은 실행하지 않고 늦은 결과도 받지 않게 한다 */
+  const giveUp = async (current: CommandState, why: 'timeout' | 'cancelled'): Promise<never> => {
+    const { body } = await call(opts, `${COMMAND_PATH}/${current.id}`, { method: 'DELETE' }).catch(() => ({ body: {} }));
+    const status = (body as Partial<CommandState>).status === 'done' ? 'done' : current.status;
+    const ran = status === 'pending' ? 'It did not run.' : 'The tab received it, so it may have run.';
+    if (why === 'cancelled') throw new CliError(`Cancelled the ${op} command for tab ${current.tab}. ${ran}`, EXIT.cancelled);
+    throw new CliError(
+      `Tab ${current.tab} did not ${status === 'pending' ? 'pick up' : 'finish'} the ${op} command within ${opts.timeoutMs / 1000}s. ${ran} ${NO_TAB_HINT}`,
+      EXIT.timeout,
+    );
+  };
   // 탭은 업로드·받아 가기 주기에 받아 가므로 결과를 짧은 간격으로 묻는다. 한 번에 하나씩 차례로 묻는다.
   const wait = async (current: CommandState): Promise<CommandState> => {
     if (current.status !== 'pending' && current.status !== 'sent') return current;
-    if (Date.now() > deadline)
-      throw new CliError(
-        `Tab ${current.tab} did not ${current.status === 'pending' ? 'pick up' : 'finish'} the ${op} command within ${opts.timeoutMs / 1000}s. ${NO_TAB_HINT}`,
-        EXIT.timeout,
-      );
-    await sleep(opts.pollMs ?? 250);
+    if (opts.signal?.aborted) return giveUp(current, 'cancelled');
+    if (Date.now() >= deadline) return giveUp(current, 'timeout');
+    await sleep(Math.min(opts.pollMs ?? 250, Math.max(0, deadline - Date.now())));
     const { status, body } = await call(opts, `${COMMAND_PATH}/${current.id}`);
     if (status !== 200) throw new CliError(String(body.error ?? `status ${status}`), EXIT.timeout);
     return wait(body as unknown as CommandState);

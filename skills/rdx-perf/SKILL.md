@@ -14,7 +14,7 @@ AI-generated pages often ship without verifying actual render and request costs.
 3. Check whether the report plugin is attached to the dev server.
    - Vite: `rdx()` in `plugins` (`import { rdx } from 'react-data-xray/vite'`)
    - webpack: `rdxReportMiddleware()` in `devServer.setupMiddlewares` (`react-data-xray/middleware`)
-   - Next.js App Router: `app/%5F_rdx/report/route.ts` (or `src/app/...`) containing `export { GET, POST } from 'react-data-xray/next'`. To drive it from the terminal (step 7), also `app/%5F_rdx/command/[[...id]]/route.ts` with the same line.
+   - Next.js App Router: `app/%5F_rdx/report/route.ts` (or `src/app/...`) containing `export { GET, POST } from 'react-data-xray/next'`. To drive it from the terminal (step 7), also `app/%5F_rdx/command/[[...id]]/route.ts` with `export { GET, POST, DELETE } from 'react-data-xray/next'`, and pass `--url` to the command (Next.js cannot record its own address).
 4. If any of these is missing, explain how to add it and stop. Do not modify the user's build config without permission.
 5. Two ways to read the report:
    - File: the plugin writes `.rdx/report.json` every 5s (relative to the directory where the dev command runs).
@@ -37,11 +37,12 @@ Start each scenario from a clean state. Use the browser tool directly if availab
 
 ## 3. Read the results
 
-The `howToRead` field in the report is authoritative. This document does not duplicate it (fields grow with each rdx version), so read it before reading the results. Only the order of inspection is prescribed here.
+The `howToRead` field in the report is authoritative. This document does not duplicate it (fields grow with each rdx version), so read it before reading the results. Once you have read a given `howToReadVersion`, later calls can use `window.__RDX__.report({ howToRead: false })` to leave it out. Only the order of inspection is prescribed here.
 
-1. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
-2. `reactQuery.findings`: follow each item's `fix`.
-3. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
+1. `summary` first: `summary.verdict` is a one-line count, and `summary.topFindings` lists what to fix in order (severity `high` is what the RDX button badge counts). Open each finding's `detail` path for the full entry and start from `target.location`.
+2. `requests.endpoints`: highest waste first. `ignored: true` means the user marked it as intentional — skip it.
+3. `reactQuery.findings`: follow each item's `fix`.
+4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
 
 ## 4. Confirm the root cause (required before fixing)
 
