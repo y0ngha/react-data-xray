@@ -7,6 +7,7 @@ import { interceptRequestOrigins } from './requestOrigins.js';
 import { interceptXhr } from './xhrInterceptor.js';
 import { onActionNames } from '../requests/serverActionNames.js';
 import { touchRecords } from '../requests/store.js';
+import { trackLayoutShifts } from '../render/layoutShifts.js';
 
 let installed = false;
 let fetchWrapped = false;
@@ -29,6 +30,8 @@ export const installCapture = (): void => {
   installedAt = typeof performance === 'undefined' ? null : performance.now();
   trackRefetchTriggers();
   trackNavigation();
+  // 응답이 도착해 화면이 밀린 것을 잇는다. 지원하지 않는 브라우저(Safari, Firefox)에서는 아무것도 하지 않는다.
+  trackLayoutShifts();
   // fetch·XHR 이 없는 환경(Jest + jsdom 등)에서도 import 만으로 깨지지 않게, 있는 것만 감싼다.
   if (typeof window.fetch === 'function' && typeof Response !== 'undefined') {
     keepNativeFetch(window.fetch.bind(window));

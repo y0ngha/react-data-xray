@@ -78,3 +78,6 @@ export const safeDecode = (text: string): string => {
     return text;
   }
 };
+
+/** 소수 셋째 자리까지(레이아웃 이동 점수처럼 1 보다 작은 값) */
+export const round3 = (n: number): number => Math.round(n * 1000) / 1000;

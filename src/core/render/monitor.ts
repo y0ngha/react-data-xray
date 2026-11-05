@@ -46,6 +46,8 @@ const commitListeners = new Set<() => void>();
 let commitSeq = 0;
 // 렌더 탭, 타임라인, 전체 표시가 동시에 켤 수 있어 사용 수를 센다.
 let users = 0;
+// 지금 감시를 켠 시각(꺼져 있으면 null). 그 전의 레이아웃 이동은 원인을 찾을 렌더 기록이 없다.
+let monitoringSince: number | null = null;
 // reset·감시 중단 때 올린다. 그 전에 걸린 분석 step 은 버린다.
 let epoch = 0;
 
@@ -254,6 +256,8 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
   let at = 0;
   let totalMs: number | undefined;
   let startedBy: string | undefined;
+  // 이 commit 에서 응답을 직접 받아 렌더된 첫(가장 위) 컴포넌트. 형제가 밀린 레이아웃 이동의 원인을 짐작하는 데 쓴다.
+  let networkCause: Commit['networkCause'];
   const mine = epoch;
   // 위에서 아래로 내려가며, 가장 가까운 렌더된 조상의 네트워크 원인과 렌더를 시작한 조상을 자식에게 넘긴다.
   enqueue(() => {
@@ -265,6 +269,10 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
         const event = recordRender(p, now, seq, p.parent < 0 ? {} : inheritedBy[p.parent]);
         if (event.ms !== undefined) totalMs = (totalMs ?? 0) + event.ms;
         if (startedBy === undefined && STARTS_RENDER.has(event.reason)) startedBy = getComponentName(p.fiber);
+        if (!networkCause && event.cause && event.cause.via !== 'parent') {
+          const entry = entries.get(p.fiber);
+          networkCause = { cause: event.cause, component: getComponentName(p.fiber), location: entry?.location };
+        }
         inheritedBy[at] = {
           cause: event.cause,
           origin: event.origin ?? { name: getComponentName(p.fiber), reason: event.reason, from: entries.get(p.fiber) },
@@ -281,7 +289,7 @@ const onCommit = (root: { current: Fiber; containerInfo?: unknown }): void => {
       if (entry.skips.length > MAX_EVENTS_PER_COMPONENT) entry.skips.shift();
       active.add(entry);
     });
-    commits.push({ id: ++commitSeq, time: now, count: pending.length, ms: totalMs, startedBy });
+    commits.push({ id: ++commitSeq, time: now, count: pending.length, ms: totalMs, startedBy, ...(networkCause && { networkCause }) });
     if (commits.length > MAX_COMMITS) commits.shift();
     commitListeners.forEach((listener) => listener());
     return true;
@@ -299,8 +307,11 @@ export const subscribeCommits = (listener: () => void): (() => void) => {
 
 /** 렌더 감시를 켜고 끈다. 여러 곳에서 켤 수 있어 켠 수만큼 꺼야 멈춘다. */
 export const setRenderMonitoring = (on: boolean): void => {
+  const before = users;
   users = Math.max(0, users + (on ? 1 : -1));
+  if (before === 0 && users > 0) monitoringSince = Date.now();
   if (users > 0) return;
+  monitoringSince = null;
   epoch++;
   active.clear();
   commits.length = 0;
@@ -491,3 +502,114 @@ export const getEndpointRenders = (
   windowMs = WINDOW_MS,
   options: Omit<EndpointRendersOptions, 'maxInstances'> = {},
 ): Map<string, EndpointRenders> => drain(endpointRendersSteps(now, windowMs, options));
+
+/** fiber 가 rdx 패널(렌더 감시에서 빼는 컴포넌트) 안에 있는지. 레이아웃 이동에서 패널 자신이 밀린 것은 뺀다. */
+export const isIgnoredFiber = (fiber: Fiber): boolean => {
+  for (let f: Fiber | null = fiber; f; f = f.return) if (ignoredTypes.has(f.type)) return true;
+  return false;
+};
+
+const entryOfFiber = (fiber: Fiber): RenderEntry | undefined =>
+  entries.get(fiber) ?? (fiber.alternate ? entries.get(fiber.alternate) : undefined);
+
+/** 이 컴포넌트를 그리는 JSX 위치. 렌더 기록이 있으면 소스맵으로 바꾼 위치를 쓴다. */
+export const renderedAtOf = (fiber: Fiber): string | undefined => entryOfFiber(fiber)?.location ?? jsxLocationOf(fiber);
+
+/** 렌더 감시를 켠 시각(ms epoch). 꺼져 있으면 null */
+export const renderMonitoringSince = (): number | null => monitoringSince;
+
+// 레이아웃 이동은 commit 뒤 다음 그리기에서 생긴다. 이보다 앞선 렌더는 그 이동을 일으킨 commit 으로 보지 않는다.
+export const SHIFT_COMMIT_GAP_MS = 1000;
+// 이동 시각보다 늦은 렌더를 받아 주는 폭(한 프레임). 이동 시각 이전의 렌더가 있으면 늦은 것은 쓰지 않는다.
+const SHIFT_LATE_MS = 16;
+
+export interface ShiftCause {
+  cause: NetworkCause;
+  /** 그 응답으로 렌더된 컴포넌트(부모를 따라 렌더됐으면 같은 응답을 직접 받은 조상) */
+  component: string;
+  location?: string;
+  /** 밀린 컴포넌트와 그 조상에서는 원인을 못 찾아, 이동 직전 응답으로 렌더된 commit 으로 짐작했다(형제가 커져 밀린 경우) */
+  inferred?: true;
+}
+
+/**
+ * 이동 시각 time 의 원인으로 볼 렌더 시각. time 이전(1초 안)의 가장 늦은 시각을 고르고, 없을 때만 time 뒤 한 프레임 안의
+ * 가장 이른 시각을 고른다.
+ */
+const pickShiftTime = (times: readonly number[], time: number): number | undefined => {
+  let before: number | undefined;
+  let after: number | undefined;
+  times.forEach((t) => {
+    if (t <= time) {
+      if (t >= time - SHIFT_COMMIT_GAP_MS && (before === undefined || t > before)) before = t;
+    } else if (t <= time + SHIFT_LATE_MS && (after === undefined || t < after)) after = t;
+  });
+  return before ?? after;
+};
+
+/** 기록(시간순)에서 time + SHIFT_LATE_MS 까지의 렌더 시각들(이동 시각 앞뒤의 후보만) */
+const candidateTimes = (events: readonly RenderEvent[], time: number): number[] => {
+  const out: number[] = [];
+  for (let i = events.length - 1; i >= 0; i--) {
+    const t = events[i].time;
+    if (t > time + SHIFT_LATE_MS) continue;
+    out.push(t);
+    if (t <= time) break; // 이동 시각 이전의 마지막 렌더까지만 보면 된다
+  }
+  return out;
+};
+
+const eventAt = (entry: RenderEntry, t: number): RenderEvent | undefined => {
+  for (let i = entry.events.length - 1; i >= 0; i--) {
+    if (entry.events[i].time === t) return entry.events[i];
+    if (entry.events[i].time < t) return undefined;
+  }
+  return undefined;
+};
+
+/** 밀린 컴포넌트와 그 조상에서 원인을 못 찾았을 때: 이동 직전에 응답으로 렌더된 commit(어느 컴포넌트든) */
+const inferredShiftCause = (time: number): ShiftCause | undefined => {
+  const withCause = commits.filter((c) => c.networkCause && c.time >= time - SHIFT_COMMIT_GAP_MS && c.time <= time + SHIFT_LATE_MS);
+  const at = pickShiftTime(
+    withCause.map((c) => c.time),
+    time,
+  );
+  // 같은 밀리초에 여러 commit 이 있으면 마지막 것
+  let commit: Commit | undefined;
+  for (const c of withCause) if (c.time === at) commit = c;
+  if (!commit?.networkCause) return undefined;
+  const { cause, component, location } = commit.networkCause;
+  return { cause, component, ...(location && { location }), inferred: true };
+};
+
+/**
+ * 레이아웃 이동(time, ms epoch, Date.now 시계)을 일으킨 네트워크 원인. fiber 와 그 조상 가운데 이동 직전(1초 안) 가장 늦은
+ * commit 에서 렌더된 것을 아래부터 보고, 처음 만난 네트워크 원인(`cause.record`)을 쓴다. 거기서 못 찾으면 이동 직전에
+ * 응답으로 렌더된 commit 으로 짐작한다(inferred). 렌더 기록이 없으면(감시가 꺼져 있었음) 없다.
+ */
+export const shiftCauseOf = (fiber: Fiber, time: number): ShiftCause | undefined => {
+  const chain: RenderEntry[] = [];
+  for (let f: Fiber | null = fiber; f; f = f.return) {
+    const entry = isComposite(f) ? entryOfFiber(f) : undefined;
+    if (entry && chain[chain.length - 1] !== entry) chain.push(entry);
+  }
+  const latest = pickShiftTime(
+    chain.flatMap((entry) => candidateTimes(entry.events, time)),
+    time,
+  );
+  if (latest === undefined) return inferredShiftCause(time);
+  const atLatest = chain.map((entry) => eventAt(entry, latest));
+  const at = atLatest.findIndex((e) => e?.cause);
+  if (at < 0) return inferredShiftCause(time);
+  const { record } = atLatest[at]!.cause!;
+  // 부모를 따라 렌더됐으면, 같은 commit 에서 같은 응답을 직접 받은 조상까지 올라간다.
+  let owner = at;
+  for (let i = at; i < chain.length; i++) {
+    const e = atLatest[i];
+    if (e?.cause?.record !== record) continue;
+    owner = i;
+    if (e.cause.via !== 'parent') break;
+  }
+  const entry = chain[owner];
+  return { cause: atLatest[owner]!.cause!, component: entry.name, ...(entry.location && { location: entry.location }) };
+};

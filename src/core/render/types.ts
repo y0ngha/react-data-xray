@@ -177,4 +177,6 @@ export interface Commit {
   ms?: number;
   /** 이 commit 을 시작한 컴포넌트(스스로 state·context 가 바뀌었거나 마운트된 가장 위 컴포넌트) */
   startedBy?: string;
+  /** 이 commit 에서 응답을 직접 받아 렌더된 첫(가장 위) 컴포넌트와 그 원인 */
+  networkCause?: { cause: NetworkCause; component: string; location?: string };
 }

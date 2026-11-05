@@ -22,6 +22,7 @@ import {
   type RenderSection,
 } from './renderSection.js';
 import { buildRequestSection, REQUEST_HOW_TO_READ, REQUEST_HOW_TO_READ_EXTRA, type RequestSection } from './requestSection.js';
+import { LAYOUT_SHIFT_HOW_TO_READ, layoutShiftRows, MAX_LAYOUT_SHIFT_ROWS, type LayoutShiftRow } from './layoutShiftSection.js';
 import { getResetAt } from './resetAt.js';
 import { buildSummary, SUMMARY_HOW_TO_READ, type ReportSummary } from './summarySection.js';
 import { findRenderStorms } from '../problems.js';
@@ -57,6 +58,8 @@ export interface RdxReport {
   requests: RequestSection;
   reactQuery: ReactQuerySection;
   renders: RenderSection;
+  /** 레이아웃 이동(점수 큰 순)과 그 원인 응답·컴포넌트. 브라우저가 layout-shift 를 주지 않으면(Safari, Firefox) 없다 */
+  layoutShifts?: LayoutShiftRow[];
   /** rdx 가 제대로 붙었는지(window.__RDX__.doctor() 와 같다). 결과를 읽기 전에 problems 를 먼저 본다 */
   diagnostics: RdxDiagnostics;
 }
@@ -81,9 +84,10 @@ export interface BuildContext {
 /**
  * HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침,
  * 4: config 줄과 설정 안내 줄(#78), 5: complete·incompleteReasons 줄 #71, 6: requests.nPlusOne 줄과 config.nPlusOne #85,
- * 7: requests.endpoints[].renders #84, 8: waterfalls 줄 #86, 9: unused 줄 #87, 10: renders.omitted·reactQuery.fetchCausesOmitted·compare 판정 줄 #72).
+ * 7: requests.endpoints[].renders #84, 8: waterfalls 줄 #86, 9: unused 줄 #87, 10: layoutShifts 줄 #89,
+ * 11: renders.omitted·reactQuery.fetchCausesOmitted·compare 판정 줄 #72).
  */
-export const HOW_TO_READ_VERSION = 10;
+export const HOW_TO_READ_VERSION = 11;
 
 // 섹션별 줄을 읽는 순서로 잇는다.
 export const HOW_TO_READ: readonly string[] = [
@@ -105,6 +109,7 @@ export const HOW_TO_READ: readonly string[] = [
   ...REQUEST_HOW_TO_READ_EXTRA,
   ...RENDER_HOW_TO_READ_EXTRA,
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
+  ...LAYOUT_SHIFT_HOW_TO_READ,
   'complete is false when some analysis that feeds this report had not finished; incompleteReasons says why: pending-analysis (pendingAnalysis steps still queued), source-maps (still resolving, so some callers are http addresses), source-map-timeout (snapshot waited 2s for source maps and gave up), query-keys (React Query request contexts not looked up yet). The periodic .rdx/report.json waits for none of these, and report() is a quick read that finishes the queue but does not wait for source maps. For before/after comparisons use window.__RDX__.snapshot(name), which finishes the queue and waits up to 2s for source maps, and check that its complete is true.',
   'Check diagnostics.problems first: if rdx was loaded after react-dom (renderHook.commitsSeen is 0) or requests went out before it loaded (capture.requestsBeforeInstall), the rest of the report is incomplete. Each problem says how to fix it.',
   'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), nPlusOne (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, nPlusOne, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
@@ -145,6 +150,8 @@ const buildReportParts = (
   const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf, endpointRenders);
   const reactQuery = buildReactQuerySection(records, classes);
   const { section: renders, beyondCap: renderBeyondCap } = buildRenderSectionParts(monitoring, now, withBeyondCap);
+  const allShifts = layoutShiftRows(now);
+  const layoutShifts = allShifts?.slice(0, MAX_LAYOUT_SHIFT_ROWS);
   // 섹션을 만든 뒤에 읽는다(만드는 동안 큐에 들어간 일도 센다). 읽기만 하고 비우지 않는다.
   const pendingAnalysis = pendingSteps();
   const sourcesResolved = areSourcesResolved();
@@ -157,7 +164,7 @@ const buildReportParts = (
   ];
   const report: RdxReport = {
     // 순위만 매긴다: 위 섹션이 이미 계산한 값과, 배지가 쓰는 렌더 폭주 기준(core/problems.ts)
-    summary: buildSummary(requests, reactQuery, renders, findRenderStorms(now)),
+    summary: buildSummary(requests, reactQuery, renders, findRenderStorms(now), allShifts),
     howToReadVersion: HOW_TO_READ_VERSION,
     ...(options.howToRead !== false && { howToRead: [...HOW_TO_READ] }),
     complete: incompleteReasons.length === 0,
@@ -172,6 +179,7 @@ const buildReportParts = (
     requests,
     reactQuery,
     renders,
+    ...(layoutShifts && { layoutShifts }),
     diagnostics: buildDiagnostics(),
   };
   return { report, renderBeyondCap };

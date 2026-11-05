@@ -44,6 +44,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
    Then `requests.waterfalls`: serial request chains (a response mounted the component that sent the next request), largest `latencyMs` first.
 3. `reactQuery.findings`: follow each item's `fix`.
 4. `renders.components`: most avoidable renders first. The component to fix is usually the ancestor in `causedBy`, not the component itself.
+5. `layoutShifts` (Chrome/Edge only; absent in Safari and Firefox): largest shift first. `cause.component` is usually where to reserve the space; `cause.endpoint` is the response whose arrival moved the screen.
 
 ## 4. Confirm the root cause (required before fixing)
 
@@ -65,6 +66,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 | Context change | Split frequently-changing and stable values into separate contexts; `useMemo` for Provider value |
 | Request waterfall (`requests.waterfalls`: a response mounts the component that sends the next request) | Open the later request's `location` and check whether it uses the earlier response. If it does not, start it in parallel (lift it next to the first request) or prefetch it. If it does, join the data on the server (one endpoint) or move both requests into a route loader. rdx does not check the data dependency — confirm it in code |
 | React Query key problem | Follow `reactQuery.findings[].fix` |
+| Layout shift after a response (`layoutShifts[].cause`) | Reserve the space before the data arrives: make the loading skeleton the final size, set `min-height` on the container, and give images `width`/`height` (or `aspect-ratio`). Re-measure that the shift score drops |
 | Unused response (`requests.endpoints[].unused`, summary kind `unused-response`) | Confirm in code that nothing reads the data — not in effects, event handlers, refs, or transformed copies. If truly unused, remove the request or fetch it only when needed (`enabled` condition, on interaction). Otherwise leave it: this flag is a review hint, not proof of waste |
 
 ## 6. Constraints
@@ -76,7 +78,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 ## 7. Re-measure and report
 
 1. Run the same scenario again following the same steps as section 2, then save with `snapshot('after-<scenario>')` (or `npx react-data-xray snapshot after-<scenario>`).
-2. Compare before and after: `npx react-data-xray compare before-<scenario> after-<scenario>` (reads the two files, so it works across tabs and reloads; `window.__RDX__.compare` only sees snapshots saved in that tab). Read `warnings` first (different page, window, config, truncated render instances, dropped requests, an unfinished report). `totals` gives requests, wasted requests, renders, and avoidable renders with a `verdict`; each row of `requests`, `renders`, and `reactQuery.fetchCauses` has `verdict`: `improved` / `regressed` / `unchanged` for rows in both reports (waste first — duplicates + sameResponses, avoidable — then total count), `new` / `gone` for rows in only one report (`regressed` instead of `new` when the new row has waste, `improved` instead of `gone` when the gone row had waste), and `unknown` when it cannot be told. A row with `status: 'unknown'` was left out by one report's row limit — do not report it as fixed; its known side is in `before` / `after`.
+2. Compare before and after: `npx react-data-xray compare before-<scenario> after-<scenario>` (reads the two files, so it works across tabs and reloads; `window.__RDX__.compare` only sees snapshots saved in that tab). Read `warnings` first (different page, window, config, truncated render instances, dropped requests, an unfinished report). `totals` gives requests, wasted requests, renders, and avoidable renders with a `verdict`; each row of `requests`, `renders`, and `reactQuery.fetchCauses` has `verdict`: `improved` / `regressed` / `unchanged` for rows in both reports (waste first — duplicates + sameResponses, avoidable — then total count), `new` / `gone` for rows in only one report (`regressed` instead of `new` when the new row has waste, `improved` instead of `gone` when the gone row had waste), and `unknown` when it cannot be told. A row with `status: 'unknown'` was left out by one report's row limit — do not report it as fixed; its known side is in `before` / `after`. `layoutShifts[].value` per component is not diffed by compare — read both reports.
 3. If a metric did not improve, revert that change.
 4. Report to the user in a table: what was fixed and why (code location), before/after numbers, and anything that could not be confirmed.
 

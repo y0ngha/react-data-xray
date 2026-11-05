@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 
+import { getLayoutShifts, type LayoutShift } from '../../../core/render/layoutShifts.js';
 import { getCommits } from '../../../core/render/monitor.js';
+import { getRecords } from '../../../core/requests/store.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
@@ -25,16 +27,24 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
   useRenderMonitoring();
   const [paused, setPaused] = useState(false);
   const [hovered, setHovered] = useState<BarLayout | null>(null);
-  const { hover, classOf } = useRequestActions();
+  const [missing, setMissing] = useState<string | null>(null);
+  const { hover, classOf, open } = useRequestActions();
   const boxRef = useRef<HTMLDivElement>(null);
   const width = Math.max(MIN_WIDTH, useElementWidth(boxRef, DEFAULT_WIDTH));
   const now = useNow(TICK_MS, paused);
   // 몰림은 버튼과 같게 전체 기록으로 판정한다(대상으로 좁혀도 어긋나지 않게).
   const all = useRecords();
-  const layout = layoutTimeline(records, getCommits(), now, width, classOf, all);
+  // 레이아웃 이동은 유휴 큐에서 그때까지 분석된 것만 그린다.
+  const layout = layoutTimeline(records, getCommits(), now, width, classOf, all, getLayoutShifts());
   const onHover = (bar: BarLayout | null) => {
     setHovered(bar);
     hover(bar?.record ?? null);
+  };
+  // 이동은 요청 기록을 들지 않고 id 만 둔다. 누를 때 지금 목록에서 찾고, 밀려났으면 그렇다고 알린다.
+  const onShiftClick = (shift: LayoutShift) => {
+    const record = shift.cause && getRecords().find((r) => r.id === shift.cause!.recordId);
+    setMissing(record ? null : (shift.cause?.endpoint ?? null));
+    if (record) open(record);
   };
   return (
     <div>
@@ -48,7 +58,7 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
         </span>
       </div>
       <div ref={boxRef} style={{ position: 'relative' }}>
-        <TimelineChart layout={layout} hovered={hovered?.record ?? null} onHover={onHover} />
+        <TimelineChart layout={layout} hovered={hovered?.record ?? null} onHover={onHover} onShiftClick={onShiftClick} />
         {hovered && (
           <TimelineTooltip
             record={hovered.record}
@@ -60,9 +70,11 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
           />
         )}
       </div>
+      {missing && <output style={{ display: 'block', color: color.review }}>Request no longer in the list: {missing}</output>}
       <Muted>
         Hover a bar to see request info; click for details (headers, Request/Response Body). If render ticks appear right after a burst,
-        each request triggers a separate render. An arrow means the next request waited for the previous response (waterfall).
+        each request triggers a separate render. An arrow means the next request waited for the previous response (waterfall). A pink mark
+        from the top is a layout shift; click it to open the response that caused it (a faded mark is a likely cause).
       </Muted>
     </div>
   );

@@ -1,9 +1,11 @@
+import { round3 } from '../../shared/format.js';
 import { N_PLUS_ONE_FIX } from '../requests/nPlusOne.js';
 import { round1 } from '../../shared/format.js';
 import { countProblems, type RenderStorm } from '../problems.js';
 import type { CacheFindingKind } from '../reactQuery/cacheAudit.js';
 import { WINDOW_MS } from '../render/summary.js';
 import { RENDER_STORM } from '../render/types.js';
+import { LARGE_LAYOUT_SHIFT, MAX_LAYOUT_SHIFT_ROWS, type LayoutShiftRow } from './layoutShiftSection.js';
 import type { ReactQuerySection } from './reactQuerySection.js';
 import { MAX_RENDER_GROUPS, type RenderSection } from './renderSection.js';
 import type { RequestSection } from './requestSection.js';
@@ -19,6 +21,7 @@ export type FindingKind =
   | 'react-query'
   | 'render-storm'
   | 'avoidable-renders'
+  | 'layout-shift'
   | 'remount';
 
 export interface TopFinding {
@@ -49,7 +52,7 @@ export interface ReportSummary {
   verdict: string;
   /** RDX 버튼 배지가 이 보고서를 만든 때 세는 문제 수와 그 내역(배지와 같은 함수로 센다) */
   badge: { issues: number; wasteEndpoints: number; stormingComponents: number };
-  /** 고칠 순서대로(severity, 그다음 요청 → React Query → 렌더 → 재마운트, 그다음 추정 절감이 큰 순) 최대 10개 */
+  /** 고칠 순서대로(severity, 그다음 요청 → React Query → 렌더 → 레이아웃 이동 → 재마운트, 그다음 추정 절감이 큰 순) 최대 10개 */
   topFindings: TopFinding[];
   /** topFindings 에 싣지 못한 finding 수 */
   omitted: number;
@@ -65,7 +68,8 @@ const KIND_ORDER: Record<FindingKind, number> = {
   'react-query': 1,
   'render-storm': 2,
   'avoidable-renders': 2,
-  remount: 3,
+  'layout-shift': 3,
+  remount: 4,
 };
 
 // 고칠 것이 없는 React Query finding(아직 없는 쿼리를 무효화한 것은 정상이다)
@@ -318,6 +322,49 @@ const renderFindings = (renders: RenderSection, storms: ReadonlyMap<string, Rend
   return [...rows, ...rest];
 };
 
+const LAYOUT_SHIFT_FIX =
+  'Reserve the space before the data arrives: give the loading skeleton the final size, set min-height on the container, and set width/height (or aspect-ratio) on images.';
+
+/**
+ * 같은 컴포넌트·위치·원인 요청의 이동 점수를 합쳐(보고서에 싣기 전 전부로), 합이 LARGE_LAYOUT_SHIFT 이상인 것만 올린다.
+ * 밀린 컴포넌트도 원인 요청도 모르는 이동은 고칠 곳이 없어 올리지 않는다. moved 는 올린 것 중 밀린 컴포넌트(이름·위치)의 수다.
+ */
+const layoutShiftFindings = (rows: readonly LayoutShiftRow[]): { findings: Ranked[]; moved: number } => {
+  const groups = new Map<string, { first: number; rows: LayoutShiftRow[] }>();
+  rows.forEach((r, i) => {
+    const key = `${r.component ?? ''}|${r.renderedAt ?? ''}|${r.cause?.endpoint ?? ''}`;
+    const g = groups.get(key);
+    if (g) g.rows.push(r);
+    else groups.set(key, { first: i, rows: [r] });
+  });
+  const moved = new Set<string>();
+  const findings = Array.from(groups.values()).flatMap(({ first, rows: list }): Ranked[] => {
+    const score = round3(list.reduce((n, r) => n + r.value, 0));
+    const { component, renderedAt, cause } = list[0];
+    if (score < LARGE_LAYOUT_SHIFT || (!component && !cause)) return [];
+    if (component) moved.add(`${component}|${renderedAt ?? ''}`);
+    // 고칠 곳은 대개 응답을 받아 그리는 컴포넌트다(자리를 예약할 곳).
+    const location = cause?.renderedAt ?? renderedAt;
+    return [
+      {
+        kind: 'layout-shift',
+        severity: 'medium',
+        target: {
+          ...(cause && { endpoint: cause.endpoint }),
+          ...((cause?.component ?? component) && { component: cause?.component ?? component }),
+          ...(location && { location }),
+        },
+        evidence: { shifts: list.length, score, ...(cause?.inferred && { inferredCause: 1 }) },
+        fix: LAYOUT_SHIFT_FIX,
+        // 보고서에 싣는 앞 MAX_LAYOUT_SHIFT_ROWS 개 안에 있을 때만 상세 경로가 있다.
+        ...(first < MAX_LAYOUT_SHIFT_ROWS && { detail: `layoutShifts[${first}]` }),
+        rank: [score * 1000, 0, list.length],
+      },
+    ];
+  });
+  return { findings, moved: moved.size };
+};
+
 const byRank = (a: Ranked, b: Ranked): number =>
   (a.severity === b.severity ? 0 : a.severity === 'high' ? -1 : 1) ||
   KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
@@ -336,8 +383,10 @@ export const buildSummary = (
   reactQuery: ReactQuerySection,
   renders: RenderSection,
   storms: ReadonlyMap<string, RenderStorm>,
+  layoutShifts: readonly LayoutShiftRow[] = [],
 ): ReportSummary => {
   const problems = countProblems(requests.endpoints, storms);
+  const shifts = layoutShiftFindings(layoutShifts);
   const all = [
     ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
     ...nPlusOneFindings(requests.nPlusOne),
@@ -345,6 +394,7 @@ export const buildSummary = (
     ...unusedFindings(requests.endpoints),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),
+    ...shifts.findings,
   ].sort(byRank);
   const wastedRequests = problems.wasteEndpoints.reduce((n, e) => n + e.duplicates + e.sameResponses, 0);
   const avoidable = renders.components.filter((c) => c.avoidable > 0);
@@ -360,6 +410,8 @@ export const buildSummary = (
     ...(requests.waterfalls.length > 0 ? [plural(requests.waterfalls.length, 'request waterfall')] : []),
     `${plural(avoidable.length, 'component', capped)} with avoidable renders (${plural(avoidableRenders, 'render', capped)}${ms})`,
     plural(rqCount, 'React Query finding'),
+    // 큰 레이아웃 이동으로 밀린 컴포넌트(이름·위치)가 있을 때만 붙인다(지원하지 않는 브라우저와 이동이 없는 화면의 판정은 그대로다).
+    ...(shifts.moved > 0 ? [`${plural(shifts.moved, 'component')} moved by large layout shifts`] : []),
     `RDX badge ${problems.issues}${renders.monitoring ? '' : ' (render monitoring was off)'}`,
   ].join(', ');
   return {
@@ -373,6 +425,6 @@ export const buildSummary = (
 /** summary 를 먼저 읽으라는 줄. buildReport 가 howToRead 맨 앞에 둔다. 폭주 기준은 배지가 쓰는 상수로 만든다. */
 export const SUMMARY_HOW_TO_READ: readonly string[] = [
   'Read summary first. summary.verdict is a one-line count of the problems (a + after a number means the render rows hit their limit and there may be more); summary.topFindings lists up to 10 things to fix, in the order to fix them, and summary.omitted is how many more were left out.',
-  `topFindings[].severity high means the RDX button badge counts it (an endpoint with wasted requests, or a component group — name and JSX location — with an instance rendering ${RENDER_STORM}+ times within the last ${WINDOW_MS / 1000}s; the same rule and count as summary.badge); medium means it can be reduced but the badge does not count it. Within a severity, requests come first, then React Query, renders, and remounts; within each, the largest estimated savings (requests or renders saved, then ms) comes first.`,
+  `topFindings[].severity high means the RDX button badge counts it (an endpoint with wasted requests, or a component group — name and JSX location — with an instance rendering ${RENDER_STORM}+ times within the last ${WINDOW_MS / 1000}s; the same rule and count as summary.badge); medium means it can be reduced but the badge does not count it. Within a severity, requests come first, then React Query, renders, layout shifts (a component whose shifts add up to a score of ${LARGE_LAYOUT_SHIFT}+, largest evidence.score first), and remounts; within each, the largest estimated savings (requests or renders saved, then ms) comes first.`,
   'topFindings[].detail is the path of the full entry in this report (e.g. requests.endpoints[0], or renders.components[2].libraries[0] for a library component folded into the app component that renders it); read it and confirm in code before fixing. target.location is the listed caller that sent the most wasted requests, the JSX location (renderedAt), or the call site (stack); it is absent when unknown. savings is an estimate (ms values are dev-build sums).',
 ];
