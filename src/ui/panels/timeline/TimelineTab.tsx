@@ -49,11 +49,20 @@ export const TimelineTab = ({ records }: { records: readonly RequestRecord[] }) 
       </div>
       <div ref={boxRef} style={{ position: 'relative' }}>
         <TimelineChart layout={layout} hovered={hovered?.record ?? null} onHover={onHover} />
-        {hovered && <TimelineTooltip record={hovered.record} x={hovered.x} y={hovered.y + layout.laneH + 4} maxX={width} />}
+        {hovered && (
+          <TimelineTooltip
+            record={hovered.record}
+            // 앞 요청이 20초 창 밖이거나 대상 밖이어도 알려 준다(화살표는 둘 다 보일 때만 그린다)
+            waitedFor={hovered.record.waterfallFrom === undefined ? undefined : all.find((r) => r.id === hovered.record.waterfallFrom)}
+            x={hovered.x}
+            y={hovered.y + layout.laneH + 4}
+            maxX={width}
+          />
+        )}
       </div>
       <Muted>
         Hover a bar to see request info; click for details (headers, Request/Response Body). If render ticks appear right after a burst,
-        each request triggers a separate render.
+        each request triggers a separate render. An arrow means the next request waited for the previous response (waterfall).
       </Muted>
     </div>
   );

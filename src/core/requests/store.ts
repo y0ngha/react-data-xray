@@ -2,9 +2,10 @@ import { config } from '../config.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { registerOrigins } from './origins.js';
 import { markOverlapCancelled } from '../reactQuery/overlapCancel.js';
-import { currentCommitSeq } from '../render/commitCauses.js';
+import { currentCommitSeq, hasCommitRecords } from '../render/commitCauses.js';
 import { isAborted } from './aborted.js';
 import { repeatCauseStep } from './repeatCause.js';
+import { waterfallParentOf } from './waterfall.js';
 import { noteNPlusOneStage, resetNPlusOne } from './nPlusOne.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import { createByteCounter } from './byteLength.js';
@@ -85,19 +86,21 @@ export const createRecord = (
   };
   // 순서는 큐가 지키고, 판정은 startedAt 기준이라 늦어도 같다.
   enqueue(() => {
-    const duplicate = isStale(record) ? undefined : detectDuplicate(record);
+    if (isStale(record)) return true;
+    const duplicate = detectDuplicate(record);
     record.duplicateOf = duplicate?.id;
-    if (!isStale(record) && noteNPlusOneStage(record, 'deduped')) notify();
-    // 보낸 컴포넌트는 앞서 걸린 annotate step 이 채우므로, 그 뒤로 한 번 더 미룬다.
-    if (duplicate) {
-      const step = repeatCauseStep(record, duplicate.commitSeq);
+    if (noteNPlusOneStage(record, 'deduped')) notify();
+    // 반복 이유와 워터폴(앞 요청을 기다렸는지)은 보낸 컴포넌트를 채우는 annotate step 뒤에, useLayoutEffect 가 보낸 요청이면
+    // 다음 commit 의 렌더 기록 step 뒤에 정해야 하므로 한 step 으로 묶어 한 번 더 미룬다. 렌더 기록이 없으면(감시 꺼짐) 워터폴은 볼 것이 없다.
+    const repeat = duplicate && repeatCauseStep(record, duplicate.commitSeq);
+    if (repeat || hasCommitRecords())
       enqueue(() => {
-        const done = step();
-        // 요청 탭·상세·버튼이 다시 그리도록(반복 이유, StrictMode 판정에 쓰는 마운트 근거)
-        if (done && (record.repeatCause || record.mountEvidence)) notify();
-        return done;
+        if (repeat) repeat();
+        record.waterfallFrom = waterfallParentOf(record, records);
+        // 요청 탭·상세·버튼·타임라인이 다시 그리도록(반복 이유, StrictMode 판정에 쓰는 마운트 근거, 워터폴)
+        if (record.repeatCause || record.mountEvidence || record.waterfallFrom !== undefined) notify();
+        return true;
       });
-    }
     return true;
   });
   return record;

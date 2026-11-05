@@ -1,3 +1,4 @@
+import { pathOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { formatTime } from '../../../shared/format.js';
 import { useRequestActions } from '../../contexts.js';
@@ -9,6 +10,12 @@ interface TimelineChartProps {
   hovered: RequestRecord | null;
   onHover: (bar: BarLayout | null) => void;
 }
+
+// 패널이 여럿(팝업 창 포함) 떠도 같은 문서 안에서는 하나만 그려지므로 고정 id 로 둔다.
+const ARROW_ID = 'rdx-waterfall-arrow';
+
+const waterfallTitle = (from: RequestRecord, to: RequestRecord) =>
+  `Waterfall: ${to.method} ${pathOf(to.url)}${to.component ? ` (sent by <${to.component}>)` : ''} waited for ${from.method} ${pathOf(from.url)} — its response mounted the sender`;
 
 const burstLabel = (initial: boolean, count: number) => `${initial ? 'Screen entry burst' : 'Request burst'} ×${count}`;
 
@@ -68,7 +75,7 @@ const BurstBand = ({
   );
 };
 
-/** 요청 막대(호버하면 요약, 클릭하면 상세), 몰림 구간, 렌더 commit 눈금을 그린다. */
+/** 요청 막대(호버하면 요약, 클릭하면 상세), 워터폴 화살표, 몰림 구간, 렌더 commit 눈금을 그린다. */
 export const TimelineChart = ({ layout, hovered, onHover }: TimelineChartProps) => {
   const { open, classOf } = useRequestActions();
   const barFill = (record: RequestRecord) => {
@@ -90,6 +97,27 @@ export const TimelineChart = ({ layout, hovered, onHover }: TimelineChartProps) 
           chartWidth={layout.width}
           showLabel={labels[i]}
         />
+      ))}
+      {layout.links.length > 0 && (
+        <defs>
+          <marker id={ARROW_ID} viewBox="0 0 6 6" refX={6} refY={3} markerWidth={5} markerHeight={5} orient="auto">
+            <path d="M0,0 L6,3 L0,6 z" fill={color.review} />
+          </marker>
+        </defs>
+      )}
+      {layout.links.map((l) => (
+        <path
+          key={l.key}
+          // 앞 막대 끝에서 오른쪽으로 조금 나간 뒤 뒤 막대의 줄로 꺾어, 같은 줄이 아니어도 어느 막대로 가는지 보이게 한다.
+          d={`M${l.x1},${l.y1} C${l.x1 + 8},${l.y1} ${l.x2 - 8},${l.y2} ${l.x2},${l.y2}`}
+          fill="none"
+          stroke={color.review}
+          strokeWidth={1}
+          markerEnd={`url(#${ARROW_ID})`}
+          data-waterfall={`${l.from.id}-${l.to.id}`}
+        >
+          <title>{waterfallTitle(l.from, l.to)}</title>
+        </path>
       ))}
       {layout.bars.map((bar) => (
         <rect

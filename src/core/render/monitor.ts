@@ -97,6 +97,10 @@ export const strictModeSeen = (): boolean | null => (strictRendersSeen > 0 ? tru
 // 스스로 렌더를 시작하는 이유. 나머지(props·같은 내용·새 콜백·부모)는 조상이 시작한 렌더를 따라온 것이다.
 const STARTS_RENDER = new Set<RenderReason>(['mount', 'state', 'context']);
 
+/** 응답 객체로 확인한 원인(직접, 또는 직접 원인인 조상을 따라)의 요청 id. 시간으로만 짐작한 원인은 워터폴 근거로 쓰지 않는다. */
+const confirmedCauseOf = (cause: NetworkCause | undefined): number | undefined =>
+  cause && cause.via !== 'timing' && !cause.guessed ? cause.record.id : undefined;
+
 /** 이번 commit 에서 렌더된 컴포넌트를 기록한다. snap 은 commit 시점 값의 사본(React 가 fiber 를 재사용해 덮어쓴다). */
 const recordRender = (p: Pending, now: number, seq: number, inherited: Inherited): RenderEvent => {
   const { fiber, snap } = p;
@@ -119,7 +123,9 @@ const recordRender = (p: Pending, now: number, seq: number, inherited: Inherited
   noteCommitCause(
     entry.name,
     seq,
-    p.alt ? { time: now, deps: changedEffectDep(snap) } : { time: now, mounted: true, remount: remountAt(entry.name, now) },
+    p.alt
+      ? { time: now, deps: changedEffectDep(snap) }
+      : { time: now, mounted: true, remount: remountAt(entry.name, now), causedBy: confirmedCauseOf(event.cause) },
   );
   entry.events.push(event);
   if (entry.events.length > MAX_EVENTS_PER_COMPONENT) entry.events.shift();
