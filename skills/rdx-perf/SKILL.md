@@ -10,11 +10,12 @@ AI-generated pages often ship without verifying actual render and request costs.
 ## 1. Check setup
 
 1. Check that `react-data-xray` is in the app's `devDependencies`. If not, tell the user to install it with their package manager (`npm install -D react-data-xray`, `pnpm add -D react-data-xray`, `yarn add -D react-data-xray` or `bun add -d react-data-xray`) and continue once it is installed.
-2. Verify that the app entry file has `import { RdxDevtools } from 'react-data-xray'` and `<RdxDevtools />` (it must be imported before react-dom).
+2. Verify that the app entry file has `import { RdxDevtools } from 'react-data-xray'` and `<RdxDevtools />` (it must be imported before react-dom). In Next.js App Router, `import 'react-data-xray'` sits at the top of `instrumentation-client.ts` and `<RdxDevtools />` inside a `'use client'` Provider.
 3. Check whether the report plugin is attached to the dev server.
    - Vite: `rdx()` in `plugins` (`import { rdx } from 'react-data-xray/vite'`)
    - webpack: `rdxReportMiddleware()` in `devServer.setupMiddlewares` (`react-data-xray/middleware`)
-4. If either is missing, explain how to add it and stop. Do not modify the user's build config without permission.
+   - Next.js: there is no plugin to attach. Read the report with the browser tool (`window.__RDX__.report()`) and save each result to a file yourself; `snapshot()` cannot write `.rdx/` here.
+4. For Vite or webpack, if the plugin is missing, explain how to add it. Stop only when there is neither a plugin nor a browser tool, since then nothing can read the report. Do not modify the user's build config without permission.
 5. Two ways to read the report:
    - File: the plugin writes `.rdx/report.json` every 5s (relative to the directory where the dev command runs).
    - Browser tool: `window.__RDX__.report()`
@@ -42,7 +43,7 @@ The `howToRead` field in the report is authoritative. This document does not dup
 
 ## 4. Confirm the root cause (required before fixing)
 
-- Open code using the function name from `callers` and the `causedBy` / `renderedAt` paths. Lines that remain as http addresses have no source map — find them by function name.
+- Open code using the function name from `callers` and the `causedBy` / `renderedAt` paths. Lines that remain as http addresses (or `about://React/Server/…` frames from Next.js server components) have no resolved source map — find them by function name.
 - Verify the diagnosis against the code. Example: "cards off-screen are still polling" is wrong if LazyLoad unmounts off-screen cards.
 - If unsure, do not fix. Ask the user with the evidence.
 
