@@ -78,9 +78,10 @@ export interface BuildContext {
 /**
  * HOW_TO_READ 문구를 바꾸면 올린다(1: summary 전, 2: summary 를 먼저 읽으라는 줄을 더함 #70, 3: diagnostics 줄(#100)과 합침,
  * 4: config 줄과 설정 안내 줄(#78), 5: complete·incompleteReasons 줄 #71, 6: requests.nPlusOne 줄과 config.nPlusOne #85,
- * 7: requests.endpoints[].renders #84, 8: waterfalls 줄 #86, 9: unused 줄 #87, 10: layoutShifts 줄 #89).
+ * 7: requests.endpoints[].renders #84, 8: waterfalls 줄 #86, 9: unused 줄 #87, 10: layoutShifts 줄 #89,
+ * 12: requests.bursts·followUps 줄 #74(11 은 먼저 열린 #110 몫)).
  */
-export const HOW_TO_READ_VERSION = 10;
+export const HOW_TO_READ_VERSION = 12;
 
 // 섹션별 줄을 읽는 순서로 잇는다.
 export const HOW_TO_READ: readonly string[] = [

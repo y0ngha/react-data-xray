@@ -18,7 +18,7 @@ describe('이슈 15: 변경 요청 뒤 조회 묶기', () => {
       rec('GET', '/api/b', 1300),
       rec('GET', '/api/late', 2200), // 창 밖
       rec('GET', '/api/early', 1050), // 응답 전
-      rec('POST', '/api/other', 1200), // 조회 아님
+      rec('POST', '/api/other', 1500), // 조회 아님(1600 뒤 조회는 이 변경 요청 몫이다, #74)
     ];
     expect(followUps(save, records).map((f) => [f.endpoint, f.count])).toEqual([
       ['GET /api/a/:id', 2],

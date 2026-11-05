@@ -1,6 +1,8 @@
 import { hasNavigationIn } from '../capture/navigation.js';
 import type { RequestClass } from './classify.js';
 import { config } from '../config.js';
+import type { IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
+import { endpointOf } from './requestKey.js';
 import type { RequestRecord } from './types.js';
 
 /** 몰림을 재는 창 길이(기본 500ms, configure 의 burst.windowMs) */
@@ -26,13 +28,20 @@ export interface BurstWindow {
   end: number;
   /** 화면 진입(페이지 첫 로딩·화면 이동) 직후의 창인지 */
   entry: boolean;
+  /** 진입으로 본 근거. 페이지에 들어온 뒤 3초 안이면 initial-load, 아니면 화면 이동(navigation). 낭비 창에는 없다 */
+  entryReason?: EntryReason;
 }
+
+/** 진입 몰림의 근거: 페이지 첫 로딩, 또는 그 근처의 화면 이동 */
+export type EntryReason = 'initial-load' | 'navigation';
 
 /** 이어진 창들을 진입·낭비가 바뀌는 곳에서 자른 구간. 화면에 몰림으로 그린다. */
 export interface BurstSegment {
   from: number;
   to: number;
   entry: boolean;
+  /** 진입 구간이면 첫 창의 근거 */
+  entryReason?: EntryReason;
   /** 이 구간에 든 요청. 한 요청은 한 구간에만 든다. */
   records: RequestRecord[];
   windows: BurstWindow[];
@@ -79,12 +88,16 @@ export const isInitialLoad = (time: number): boolean => {
  * [창 시작 − 3초, 창의 마지막 응답 + 1초] 안에 있다. 뒤쪽을 응답 끝에서 재는 것은 데이터 라우터
  * (React Router loader, Next.js App Router 의 RSC 요청)가 새 화면의 응답을 받은 뒤에 주소를 바꾸기 때문이다.
  */
-const isEntryWindow = (from: number, end: number): boolean =>
-  isInitialLoad(from) || hasNavigationIn(from - INITIAL_LOAD_MS, end + ENTRY_LOOKAHEAD_MS);
+const entryReasonOf = (from: number, end: number): EntryReason | undefined => {
+  if (isInitialLoad(from)) return 'initial-load';
+  return hasNavigationIn(from - INITIAL_LOAD_MS, end + ENTRY_LOOKAHEAD_MS) ? 'navigation' : undefined;
+};
 
-const counted = (classOf: (r: RequestRecord) => RequestClass) => (r: RequestRecord) => {
+const counted = (classOf: (r: RequestRecord) => RequestClass, ignored: IgnoreMatcher | undefined) => (r: RequestRecord) => {
   // 새로고침 전 페이지의 기록은 이 페이지의 이동 기록과 맞춰 볼 수 없다.
   if (r.restored) return false;
+  // 무시한 엔드포인트(패널·configure)는 반복만이 아니라 첫 요청까지 세지 않는다. 의도된 반복(폴링·비콘)이 몰림을 만들지 않게.
+  if (ignored?.sourceOf(endpointOf(r))) return false;
   const c = classOf(r);
   return c !== 'ignored' && c !== 'strict-mode';
 };
@@ -107,8 +120,14 @@ const segmentsOfLoad = (records: RequestRecord[]): BurstSegment[] => {
       deque.push(pushed);
     }
     while (deque[0] < first) deque.shift();
-    const window: BurstWindow = { from: starts[first], to: starts[last], end: ends[deque[0]], entry: false };
-    window.entry = isEntryWindow(window.from, window.end);
+    const entryReason = entryReasonOf(starts[first], ends[deque[0]]);
+    const window: BurstWindow = {
+      from: starts[first],
+      to: starts[last],
+      end: ends[deque[0]],
+      entry: entryReason !== undefined,
+      ...(entryReason && { entryReason }),
+    };
     const prev = segments.at(-1);
     const sameRun = prev !== undefined && lastIdx >= 0 && window.from <= starts[lastIdx];
     if (!sameRun) runStart = segments.length;
@@ -122,6 +141,7 @@ const segmentsOfLoad = (records: RequestRecord[]): BurstSegment[] => {
         from: starts[startIdx],
         to: window.to,
         entry: window.entry,
+        ...(window.entryReason && { entryReason: window.entryReason }),
         records: sorted.slice(startIdx, last + 1),
         windows: [window],
         runTo: window.to,
@@ -135,12 +155,16 @@ const segmentsOfLoad = (records: RequestRecord[]): BurstSegment[] => {
 
 /**
  * 요청 몰림을 500ms 창 단위로 화면 진입·낭비로 가르고, 이어진 창을 판정이 바뀌는 곳에서 잘라 구간으로 돌려준다.
- * 버튼과 타임라인이 같이 써 같은 몰림을 같게 판정한다. 이유가 확실한 반복(무시·StrictMode)과 새로고침 전 기록은
- * 세지 않고, 페이지(load)마다 따로 찾는다. 끝나지 않는 반복은 진입 창을 지나면 낭비 구간이 된다.
+ * 버튼·타임라인·보고서가 같이 써 같은 몰림을 같게 판정한다. 무시한 엔드포인트(ignored)의 요청, StrictMode 반복,
+ * 새로고침 전 기록은 세지 않고, 페이지(load)마다 따로 찾는다. 끝나지 않는 반복은 진입 창을 지나면 낭비 구간이 된다.
  */
-export const analyzeBursts = (records: readonly RequestRecord[], classOf: (r: RequestRecord) => RequestClass): BurstSegment[] => {
+export const analyzeBursts = (
+  records: readonly RequestRecord[],
+  classOf: (r: RequestRecord) => RequestClass,
+  ignored?: IgnoreMatcher,
+): BurstSegment[] => {
   const byLoad = new Map<number, RequestRecord[]>();
-  for (const r of records.filter(counted(classOf))) {
+  for (const r of records.filter(counted(classOf, ignored))) {
     const load = r.load ?? 0;
     const group = byLoad.get(load);
     if (group) group.push(r);

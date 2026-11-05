@@ -3,6 +3,7 @@ import type { RequestClass } from '../../../core/requests/classify.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import type { LayoutShift } from '../../../core/render/layoutShifts.js';
 import type { Commit } from '../../../core/render/types.js';
+import type { IgnoreMatcher } from '../../../shared/ignoredEndpoints.js';
 
 const TIMELINE_MS = 20_000;
 const LANE_H = 6;
@@ -117,11 +118,13 @@ const visibleBursts = (
   all: readonly RequestRecord[],
   from: number,
   classOf: (r: RequestRecord) => RequestClass,
+  ignored: IgnoreMatcher | undefined,
 ) => {
   const shownIds = new Set(shown.map((r) => r.id));
   return analyzeBursts(
     all.filter((r) => r.startedAt >= from - burstWindowMs()),
     classOf,
+    ignored,
   ).flatMap((seg) => {
     const inView = seg.records.filter((r) => r.startedAt >= from);
     if (inView.length === 0 || !seg.records.some((r) => shownIds.has(r.id))) return [];
@@ -131,7 +134,7 @@ const visibleBursts = (
 
 /**
  * 최근 20초의 요청 막대, 워터폴 화살표, 요청 몰림 구간, 렌더 commit 눈금, 레이아웃 이동을 화면 좌표로 계산한다.
- * records 는 그릴 요청(대상으로 좁혔으면 그 안), all 은 몰림 판정에 쓸 전체 기록이다.
+ * records 는 그릴 요청(대상으로 좁혔으면 그 안), all 은 몰림 판정에 쓸 전체 기록, ignored 는 몰림에서 뺄 무시 판정이다.
  */
 export const layoutTimeline = (
   records: readonly RequestRecord[],
@@ -141,6 +144,7 @@ export const layoutTimeline = (
   classOf: (r: RequestRecord) => RequestClass,
   all: readonly RequestRecord[] = records,
   shifts: readonly LayoutShift[] = [],
+  ignored?: IgnoreMatcher,
 ): TimelineLayout => {
   const from = now - TIMELINE_MS;
   const x = (t: number) => ((t - from) / TIMELINE_MS) * width;
@@ -163,7 +167,7 @@ export const layoutTimeline = (
     commitBaseY: reqH + 6 + COMMIT_H,
     bars,
     links: waterfallLinks(bars),
-    bursts: visibleBursts(records, all, from, classOf).map((b) => ({
+    bursts: visibleBursts(records, all, from, classOf, ignored).map((b) => ({
       key: b.from,
       x: x(b.from) - 2,
       width: Math.max(4, x(b.to) - x(b.from) + 4),
