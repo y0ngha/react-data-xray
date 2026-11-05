@@ -75,8 +75,9 @@ const run = async (argv: string[], env: Record<string, string> = {}, signal?: Ab
   return { code, out, err };
 };
 
+// 실제 시간으로 왕복하므로 횟수가 아니라 넉넉한 기한으로 기다린다(부하가 크면 0.5초 안에 붙지 못한다, #114)
 const waitForTab = async (tab: string) => {
-  for (let i = 0; i < 50; i++) {
+  for (const deadline = Date.now() + 10_000; Date.now() < deadline;) {
     const { token } = JSON.parse(await readFile(join(root, '.rdx', '.server.json'), 'utf8').catch(() => '{}')) as { token?: string };
     const res = await fetch(`${base}/__rdx/command`, { headers: { 'x-rdx-token': token ?? '' } });
     const { tabs } = res.ok ? ((await res.json()) as { tabs: Array<{ id: string }> }) : { tabs: [] };
@@ -157,7 +158,8 @@ describe('rdx CLI(#69)', { timeout: 20_000 }, () => {
     expect(failed).toMatchObject({ code: 1, err: expect.stringContaining('plugin missing') });
     openTab('mute', 'silent');
     await waitForTab('mute');
-    const slow = await run(['reset', '--url', base, '--tab', 'mute', '--timeout', '0.3']);
+    // 탭 흉내가 20ms 마다 받아 가지만, 부하가 크면 0.3초 안에 받아 가지 못해 'did not run' 이 될 수 있다(#114)
+    const slow = await run(['reset', '--url', base, '--tab', 'mute', '--timeout', '2']);
     // 탭이 받아 갔으므로 실행됐을 수도 있다고 알린다
     expect(slow).toMatchObject({ code: 5, err: expect.stringContaining('may have run') });
   });
