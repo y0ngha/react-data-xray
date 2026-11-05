@@ -1,9 +1,9 @@
 import { attempt } from '../capture/attempt.js';
 import { getComponentName, getFiber, libraryPackageOf } from '../fiber/tree.js';
 import { isComposite, type Fiber } from '../fiber/types.js';
-import type { RequestRecord } from '../requests/types.js';
+import { endpointOf } from '../requests/requestKey.js';
 import { enqueue } from '../scheduler/idleQueue.js';
-import { isIgnoredFiber, renderedAtOf, shiftCauseOf } from './monitor.js';
+import { isIgnoredFiber, renderedAtOf, renderMonitoringSince, shiftCauseOf } from './monitor.js';
 import type { NetworkCause } from './types.js';
 
 // 오래 켜 둔 탭에서도 끝없이 늘지 않게 최근 이동만 둔다.
@@ -28,8 +28,13 @@ export interface LayoutShift {
   value: number;
   /** 밀린 노드를 그린 가장 가까운 앱 컴포넌트. 노드가 React 밖이거나 이미 지워졌으면 없다 */
   component?: { name: string; location?: string };
-  /** 그 컴포넌트(또는 조상)를 이동 직전 commit 에서 렌더한 네트워크 응답 */
-  cause?: { record: RequestRecord; via: NetworkCause['via']; component: string; location?: string };
+  /**
+   * 그 컴포넌트(또는 조상)를 이동 직전 commit 에서 렌더한 네트워크 응답. 요청 기록은 들지 않고 id 와 엔드포인트만 둔다
+   * (기록이 목록에서 밀려나면 상세는 열 수 없다). inferred 는 밀린 컴포넌트 쪽에서는 못 찾아 이동 직전 commit 으로 짐작한 것이다.
+   */
+  cause?: { recordId: number; endpoint: string; via: NetworkCause['via']; component: string; location?: string; inferred?: true };
+  /** 이동이 일어났을 때 렌더 감시가 꺼져 있어 원인을 찾을 수 없었다 */
+  causeUnavailable?: 'render-monitoring-off';
 }
 
 let supported = false;
@@ -59,6 +64,9 @@ const componentOf = (node: Node): Fiber | null | undefined => {
 /** 항목 하나를 잇는다. 밀린 노드가 모두 rdx 패널 것이면 null(기록하지 않는다). */
 const resolve = (entry: LayoutShiftEntry, time: number): LayoutShift | null => {
   const shift: LayoutShift = { id: ++nextId, time, value: entry.value };
+  const since = renderMonitoringSince();
+  const monitored = since !== null && since <= time;
+  if (!monitored) shift.causeUnavailable = 'render-monitoring-off';
   const sources = entry.sources ?? [];
   let own = sources.length > 0;
   // 밀린 노드가 여럿이면 원인 요청을 찾은 첫 노드를, 없으면 컴포넌트를 찾은 첫 노드를 쓴다.
@@ -67,25 +75,38 @@ const resolve = (entry: LayoutShiftEntry, time: number): LayoutShift | null => {
     if (fiber === null) continue;
     own = false;
     if (!fiber) continue;
-    const found = shiftCauseOf(fiber, time);
-    if (!shift.component || (found && !shift.cause)) {
+    const found = monitored ? shiftCauseOf(fiber, time) : undefined;
+    // 짐작한 원인(inferred)보다 밀린 컴포넌트 쪽에서 찾은 원인을 먼저 쓴다.
+    if (!shift.component || (found && (!shift.cause || (shift.cause.inferred && !found.inferred)))) {
       const location = renderedAtOf(fiber);
       shift.component = { name: getComponentName(fiber), ...(location && { location }) };
-      if (found) shift.cause = { record: found.cause.record, via: found.cause.via, component: found.component, location: found.location };
+      if (found) {
+        const { record, via } = found.cause;
+        shift.cause = {
+          recordId: record.id,
+          endpoint: endpointOf(record),
+          via,
+          component: found.component,
+          ...(found.location && { location: found.location }),
+          ...(found.inferred && { inferred: true }),
+        };
+      }
     }
-    if (shift.cause) break;
+    if (shift.cause && !shift.cause.inferred) break;
   }
   return own ? null : shift;
 };
 
-const record = (list: readonly LayoutShiftEntry[]): void => {
+/** offset: 콜백 때 잰 Date.now() - performance.now(). startTime 을 렌더 기록과 같은 Date.now 시계로 바꾼다. */
+const record = (list: readonly LayoutShiftEntry[], offset: number): void => {
   let at = 0;
   enqueue(() => {
     for (const end = Math.min(at + CHUNK, list.length); at < end; at++) {
       const entry = list[at];
       // 사용자 입력 직후 500ms 안의 이동은 브라우저도 CLS 에서 뺀다(입력에 따른 예상된 이동).
       if (entry.hadRecentInput) continue;
-      const time = performance.timeOrigin + entry.startTime;
+      // timeOrigin + startTime 은 Date.now 와 어긋날 수 있다(시스템 시간 조정, 잠자기 뒤 등). 콜백 때의 차이로 바꾼다.
+      const time = offset + entry.startTime;
       if (time < measuredFrom) continue;
       const shift = attempt(() => resolve(entry, time));
       if (!shift) continue;
@@ -107,7 +128,7 @@ export const trackLayoutShifts = (): void => {
   if (!(PerformanceObserver.supportedEntryTypes ?? []).includes('layout-shift')) return;
   attempt(() => {
     // buffered: rdx 를 불러오기 전(첫 그리기)의 이동도 받는다.
-    new PerformanceObserver((list) => record(list.getEntries() as unknown as LayoutShiftEntry[])).observe({
+    new PerformanceObserver((list) => record(list.getEntries() as unknown as LayoutShiftEntry[], Date.now() - performance.now())).observe({
       type: 'layout-shift',
       buffered: true,
     });

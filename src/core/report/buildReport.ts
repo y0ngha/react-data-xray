@@ -14,7 +14,7 @@ import {
 } from './reactQuerySection.js';
 import { buildRenderSection, RENDER_HOW_TO_READ, RENDER_HOW_TO_READ_EXTRA, type RenderSection } from './renderSection.js';
 import { buildRequestSection, REQUEST_HOW_TO_READ, REQUEST_HOW_TO_READ_EXTRA, type RequestSection } from './requestSection.js';
-import { buildLayoutShiftSection, LAYOUT_SHIFT_HOW_TO_READ, type LayoutShiftRow } from './layoutShiftSection.js';
+import { LAYOUT_SHIFT_HOW_TO_READ, layoutShiftRows, MAX_LAYOUT_SHIFT_ROWS, type LayoutShiftRow } from './layoutShiftSection.js';
 import { getResetAt } from './resetAt.js';
 import { buildSummary, SUMMARY_HOW_TO_READ, type ReportSummary } from './summarySection.js';
 import { findRenderStorms } from '../problems.js';
@@ -91,10 +91,11 @@ export const buildReport = (monitoring: boolean, now = Date.now(), drain = true,
   const requests = buildRequestSection(records, classes, ignored, drain ? queryContextOf : knownQueryContextOf);
   const reactQuery = buildReactQuerySection(records, classes);
   const renders = buildRenderSection(monitoring, now);
-  const layoutShifts = buildLayoutShiftSection(now);
+  const allShifts = layoutShiftRows(now);
+  const layoutShifts = allShifts?.slice(0, MAX_LAYOUT_SHIFT_ROWS);
   return {
     // 순위만 매긴다: 위 섹션이 이미 계산한 값과, 배지가 쓰는 렌더 폭주 기준(core/problems.ts)
-    summary: buildSummary(requests, reactQuery, renders, findRenderStorms(now), layoutShifts),
+    summary: buildSummary(requests, reactQuery, renders, findRenderStorms(now), allShifts),
     howToReadVersion: HOW_TO_READ_VERSION,
     ...(options.howToRead !== false && { howToRead: [...HOW_TO_READ] }),
     generatedAt: new Date(now).toISOString(),

@@ -1,15 +1,18 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_BODY, flush } from '../../../testing/fetchMock.js';
+import { RequestActionsProvider } from '../../../ui/contexts.js';
 import { shiftLabel } from '../../../ui/panels/timeline/TimelineChart.js';
+import { TimelineTab } from '../../../ui/panels/timeline/TimelineTab.js';
 import { layoutTimeline } from '../../../ui/panels/timeline/timelineLayout.js';
 import { buildReport } from '../../report/buildReport.js';
 import { buildSummary } from '../../report/summarySection.js';
+import { clearRecords, getRecords } from '../../requests/store.js';
 import { isQueuePending } from '../../scheduler/idleQueue.js';
 import { getLayoutShifts, layoutShiftSupported, resetLayoutShifts, trackLayoutShifts } from '../layoutShifts.js';
-import { ignoreComponent, resetRenderStats, setRenderMonitoring } from '../monitor.js';
+import { getCommits, ignoreComponent, resetRenderStats, setRenderMonitoring } from '../monitor.js';
 
 type Callback = (list: { getEntries: () => unknown[] }) => void;
 let observed: { callback: Callback; options: unknown } | undefined;
@@ -22,13 +25,14 @@ class FakeObserver {
   }
 }
 
-/** 브라우저가 layout-shift 항목을 보낸 것처럼 콜백을 부른다. at 은 ms epoch */
+/** 브라우저가 layout-shift 항목을 보낸 것처럼 콜백을 부른다. at 은 Date.now 시계의 ms epoch */
 const emitShift = (value: number, nodes: Array<Node | null>, extra: { hadRecentInput?: boolean; at?: number } = {}) =>
   observed!.callback({
     getEntries: () => [
       {
         value,
-        startTime: (extra.at ?? Date.now()) - performance.timeOrigin,
+        // 브라우저처럼 performance.now 시계로 준다(지금보다 얼마 앞인지만 맞춘다).
+        startTime: performance.now() - (Date.now() - (extra.at ?? Date.now())),
         hadRecentInput: extra.hadRecentInput ?? false,
         sources: nodes.map((node) => ({ node })),
       },
@@ -61,14 +65,9 @@ const loadPage = async () => {
 describe('지원하지 않는 브라우저 (#89)', () => {
   it('unsupported: PerformanceObserver 가 없거나 layout-shift 를 주지 않으면 오류 없이 꺼지고 보고서에 layoutShifts 가 없다', () => {
     expect(() => trackLayoutShifts()).not.toThrow(); // jsdom 에는 PerformanceObserver 가 없다
-    vi.stubGlobal(
-      'PerformanceObserver',
-      class {
-        static supportedEntryTypes = ['paint'];
-      },
-    );
+    vi.stubGlobal('PerformanceObserver', Object.assign(vi.fn(), { supportedEntryTypes: ['paint'] }));
     expect(() => trackLayoutShifts()).not.toThrow();
-    vi.stubGlobal('PerformanceObserver', class {}); // supportedEntryTypes 자체가 없는 옛 브라우저
+    vi.stubGlobal('PerformanceObserver', vi.fn()); // supportedEntryTypes 자체가 없는 옛 브라우저
     expect(() => trackLayoutShifts()).not.toThrow();
     vi.unstubAllGlobals();
     expect(layoutShiftSupported()).toBe(false);
@@ -83,6 +82,7 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
     vi.unstubAllGlobals();
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     setRenderMonitoring(false);
     resetRenderStats();
     resetLayoutShifts(0);
@@ -103,7 +103,10 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
     const [shift] = getLayoutShifts();
     expect(shift.value).toBe(0.2);
     expect(shift.component?.name).toBe('Footer');
-    expect(shift.cause?.record.url).toBe('/api/items');
+    // 요청 기록은 들지 않고 id 와 엔드포인트만 둔다.
+    expect(shift.cause).not.toHaveProperty('record');
+    expect(getRecords().find((r) => r.id === shift.cause?.recordId)?.url).toBe('/api/items');
+    expect(shift.cause?.endpoint).toBe('GET /api/items');
     // Footer 는 부모를 따라 렌더됐으므로, 응답을 직접 받은 Page 를 원인 컴포넌트로 쓴다.
     expect(shift.cause).toMatchObject({ component: 'Page', via: 'direct' });
 
@@ -123,7 +126,7 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
       detail: 'layoutShifts[0]',
     });
     expect(finding?.fix).toMatch(/min-height/);
-    expect(report.summary.verdict).toContain('1 component with large layout shifts');
+    expect(report.summary.verdict).toContain('1 component moved by large layout shifts');
   });
 
   it('recent_input: 입력 직후(hadRecentInput)의 이동은 뺀다', async () => {
@@ -147,16 +150,18 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
     emitShift(0.05, [footer]);
     setRenderMonitoring(true);
     emitShift(0.01, [footer], { at: Date.now() + 5000 });
-    emitShift(0.02, [null]); // 이미 지워진 노드
+    emitShift(0.02, [null], { at: Date.now() + 1 }); // 이미 지워진 노드(감시를 켠 뒤)
     await act(flush);
     const shifts = getLayoutShifts();
-    expect(shifts.map((s) => [s.component?.name, s.cause])).toEqual([
-      ['Footer', undefined],
-      ['Footer', undefined],
-      [undefined, undefined],
+    expect(shifts.map((s) => [s.component?.name, s.cause, s.causeUnavailable])).toEqual([
+      ['Footer', undefined, 'render-monitoring-off'],
+      ['Footer', undefined, undefined],
+      [undefined, undefined, undefined],
     ]);
     const report = buildReport(true);
     expect(report.layoutShifts?.map((r) => r.value)).toEqual([0.05, 0.02, 0.01]);
+    expect(report.layoutShifts?.[0].causeUnavailable).toBe('render-monitoring-off');
+    expect(report.howToRead?.some((l) => l.includes("causeUnavailable 'render-monitoring-off'"))).toBe(true);
     expect(report.summary.topFindings.some((f) => f.kind === 'layout-shift')).toBe(false);
     expect(report.summary.verdict).not.toContain('layout shift');
   });
@@ -183,6 +188,116 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
     expect(layout.shifts[0].height).toBe(40);
     expect(shiftLabel(layout.shifts[0].shift)).toMatch(/layout shift 0\.500 · moved: <Footer> · after GET \/api\/items rendered <Page>/);
     expect(shiftLabel({ id: 0, time: now, value: 0.1 })).toContain('no network cause found');
+    expect(shiftLabel({ id: 0, time: now, value: 0.1, causeUnavailable: 'render-monitoring-off' })).toContain('render monitoring was off');
+  });
+
+  it('clock_drift: performance 시계가 Date.now 와 어긋나도 콜백 때의 차이로 바꿔 직전 commit 을 찾는다', async () => {
+    setRenderMonitoring(true);
+    const footer = await loadPage();
+    // timeOrigin + now() 가 Date.now 보다 1분 앞선 브라우저(시스템 시간 조정 뒤 등)
+    vi.spyOn(performance, 'timeOrigin', 'get').mockReturnValue(performance.timeOrigin + 60_000);
+    vi.spyOn(performance, 'now').mockReturnValue(5_000);
+    observed!.callback({ getEntries: () => [{ value: 0.2, startTime: 5_000, hadRecentInput: false, sources: [{ node: footer }] }] });
+    vi.restoreAllMocks();
+    await act(flush);
+    const [shift] = getLayoutShifts();
+    expect(Math.abs(shift.time - Date.now())).toBeLessThan(200);
+    expect(shift.cause?.endpoint).toBe('GET /api/items');
+  });
+
+  it('pick_before: 이동 시각 이전 렌더가 있으면 한 프레임 안의 늦은 렌더보다 그것을 원인으로 본다', async () => {
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    setRenderMonitoring(true);
+    function Toggle() {
+      const [on, setOn] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOn(true)}>{on ? 'on' : 'off'}</button>
+          <Page />
+        </>
+      );
+    }
+    render(<Toggle />);
+    await act(flush);
+    await act(flush);
+    now += 500; // 응답과 무관한 다음 commit
+    fireEvent.click(screen.getByText('off'));
+    await act(flush);
+    expect(
+      getCommits()
+        .map((c) => c.time)
+        .slice(-2),
+    ).toEqual([now - 500, now]);
+    emitShift(0.2, [screen.getByText('footer')], { at: now - 10 }); // 다음 commit 10ms 전
+    await act(flush);
+    expect(getLayoutShifts()[0].cause).toMatchObject({ endpoint: 'GET /api/items', component: 'Page' });
+  });
+
+  it('inferred: 밀린 컴포넌트·조상에 원인이 없으면(위 형제가 커짐) 직전에 응답으로 렌더된 commit 을 likely 원인으로 둔다', async () => {
+    setRenderMonitoring(true);
+    const Content = () => <p>content</p>;
+    function Banner() {
+      const [text, setText] = useState<string | null>(null);
+      useEffect(() => {
+        void fetch('/api/banner')
+          .then((r) => r.json())
+          .then((json: typeof DEFAULT_BODY) => setText(json.data.list[0].title));
+      }, []);
+      return <div>{text ?? ''}</div>;
+    }
+    render(
+      <section>
+        <Banner />
+        <Content />
+      </section>,
+    );
+    await act(flush);
+    await act(flush);
+    emitShift(0.3, [screen.getByText('content')]);
+    await act(flush);
+    const [shift] = getLayoutShifts();
+    expect(shift.component?.name).toBe('Content');
+    expect(shift.cause).toMatchObject({ endpoint: 'GET /api/banner', component: 'Banner', inferred: true });
+    expect(shiftLabel(shift)).toContain('likely after GET /api/banner rendered <Banner>');
+    const row = buildReport(true).layoutShifts?.[0];
+    expect(row?.cause).toMatchObject({ endpoint: 'GET /api/banner', component: 'Banner', inferred: true });
+  });
+
+  it('evicted: 원인 요청이 목록에서 밀려났으면 이동 표시를 눌러도 상세 대신 그렇다고 알린다', async () => {
+    setRenderMonitoring(true);
+    const footer = await loadPage();
+    emitShift(0.2, [footer]);
+    await act(flush);
+    const open = vi.fn<(record: unknown) => void>();
+    const ui = render(
+      <RequestActionsProvider value={{ open, hover: () => undefined, classOf: () => 'ok' }}>
+        <TimelineTab records={getRecords()} />
+      </RequestActionsProvider>,
+    );
+    const mark = () => Array.from(ui.container.querySelectorAll('rect')).find((r) => r.textContent?.includes('layout shift'))!;
+    fireEvent.click(mark());
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ url: '/api/items' }));
+    act(() => clearRecords());
+    fireEvent.click(mark());
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status').textContent).toContain('Request no longer in the list: GET /api/items');
+  });
+
+  it('summary_all_shifts: summary 는 보고서에 싣는 20개로 자르기 전 전부로 묶는다', async () => {
+    setRenderMonitoring(true);
+    const footer = await loadPage();
+    for (let i = 0; i < 20; i++) emitShift(0.09, [null]);
+    for (let i = 0; i < 4; i++) emitShift(0.03, [footer]);
+    await act(flush);
+    const report = buildReport(true);
+    expect(report.layoutShifts).toHaveLength(20);
+    expect(report.layoutShifts?.some((r) => r.component === 'Footer')).toBe(false);
+    const finding = report.summary.topFindings.find((f) => f.kind === 'layout-shift');
+    expect(finding).toMatchObject({ target: { component: 'Page', endpoint: 'GET /api/items' }, evidence: { shifts: 4, score: 0.12 } });
+    expect(finding).not.toHaveProperty('detail'); // 실린 행 밖이라 상세 경로가 없다
+    // 컴포넌트도 원인도 모르는 이동(0.09 x 20)은 고칠 곳이 없어 올리지 않는다.
+    expect(report.summary.topFindings.filter((f) => f.kind === 'layout-shift')).toHaveLength(1);
   });
 
   it('summary_grouping: 같은 컴포넌트·원인의 작은 이동이 합쳐 0.1 을 넘으면 하나의 finding 이다', () => {
@@ -197,5 +312,19 @@ describe('레이아웃 이동을 응답과 컴포넌트로 잇는다 (#89)', () 
         evidence: { shifts: 2, score: 0.12 },
       }),
     ]);
+  });
+
+  it('verdict_components: verdict 는 밀린 컴포넌트(이름·위치)를 한 번씩만 세고, 컴포넌트를 모르는 이동은 세지 않는다', () => {
+    const empty = { total: 0, dropped: 0, endpoints: [] };
+    const renders = { monitoring: true, windowSeconds: 10, truncated: false, droppedInstances: 0, components: [] };
+    const card = { value: 0.2, secondsAgo: 1, component: 'Card', renderedAt: 'src/Card.tsx:3' };
+    const rows = [
+      { ...card, cause: { endpoint: 'GET /a', component: 'List' } },
+      { ...card, cause: { endpoint: 'GET /b', component: 'List' } },
+      { value: 0.3, secondsAgo: 1, cause: { endpoint: 'GET /c', component: 'Feed' } },
+    ];
+    const summary = buildSummary(empty, { findings: [] } as never, renders as never, new Map(), rows);
+    expect(summary.topFindings.filter((f) => f.kind === 'layout-shift')).toHaveLength(3);
+    expect(summary.verdict).toContain('1 component moved by large layout shifts');
   });
 });

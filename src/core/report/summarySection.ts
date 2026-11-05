@@ -1,15 +1,15 @@
+import { round3 } from '../../shared/format.js';
 import { countProblems, type RenderStorm } from '../problems.js';
 import type { CacheFindingKind } from '../reactQuery/cacheAudit.js';
 import { WINDOW_MS } from '../render/summary.js';
 import { RENDER_STORM } from '../render/types.js';
-import { LARGE_LAYOUT_SHIFT, type LayoutShiftRow } from './layoutShiftSection.js';
+import { LARGE_LAYOUT_SHIFT, MAX_LAYOUT_SHIFT_ROWS, type LayoutShiftRow } from './layoutShiftSection.js';
 import type { ReactQuerySection } from './reactQuerySection.js';
 import { MAX_RENDER_GROUPS, type RenderSection } from './renderSection.js';
 import type { RequestSection } from './requestSection.js';
 
 const MAX_TOP_FINDINGS = 10;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
-const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 export type FindingKind = 'duplicate' | 'same-response' | 'react-query' | 'render-storm' | 'avoidable-renders' | 'layout-shift' | 'remount';
 
@@ -239,8 +239,11 @@ const renderFindings = (renders: RenderSection, storms: ReadonlyMap<string, Rend
 const LAYOUT_SHIFT_FIX =
   'Reserve the space before the data arrives: give the loading skeleton the final size, set min-height on the container, and set width/height (or aspect-ratio) on images.';
 
-/** 같은 컴포넌트·위치·원인 요청의 이동 점수를 합쳐, 합이 LARGE_LAYOUT_SHIFT 이상인 것만 올린다. */
-const layoutShiftFindings = (rows: readonly LayoutShiftRow[]): Ranked[] => {
+/**
+ * 같은 컴포넌트·위치·원인 요청의 이동 점수를 합쳐(보고서에 싣기 전 전부로), 합이 LARGE_LAYOUT_SHIFT 이상인 것만 올린다.
+ * 밀린 컴포넌트도 원인 요청도 모르는 이동은 고칠 곳이 없어 올리지 않는다. moved 는 올린 것 중 밀린 컴포넌트(이름·위치)의 수다.
+ */
+const layoutShiftFindings = (rows: readonly LayoutShiftRow[]): { findings: Ranked[]; moved: number } => {
   const groups = new Map<string, { first: number; rows: LayoutShiftRow[] }>();
   rows.forEach((r, i) => {
     const key = `${r.component ?? ''}|${r.renderedAt ?? ''}|${r.cause?.endpoint ?? ''}`;
@@ -248,10 +251,12 @@ const layoutShiftFindings = (rows: readonly LayoutShiftRow[]): Ranked[] => {
     if (g) g.rows.push(r);
     else groups.set(key, { first: i, rows: [r] });
   });
-  return Array.from(groups.values()).flatMap(({ first, rows: list }): Ranked[] => {
+  const moved = new Set<string>();
+  const findings = Array.from(groups.values()).flatMap(({ first, rows: list }): Ranked[] => {
     const score = round3(list.reduce((n, r) => n + r.value, 0));
-    if (score < LARGE_LAYOUT_SHIFT) return [];
     const { component, renderedAt, cause } = list[0];
+    if (score < LARGE_LAYOUT_SHIFT || (!component && !cause)) return [];
+    if (component) moved.add(`${component}|${renderedAt ?? ''}`);
     // 고칠 곳은 대개 응답을 받아 그리는 컴포넌트다(자리를 예약할 곳).
     const location = cause?.renderedAt ?? renderedAt;
     return [
@@ -263,13 +268,15 @@ const layoutShiftFindings = (rows: readonly LayoutShiftRow[]): Ranked[] => {
           ...((cause?.component ?? component) && { component: cause?.component ?? component }),
           ...(location && { location }),
         },
-        evidence: { shifts: list.length, score },
+        evidence: { shifts: list.length, score, ...(cause?.inferred && { inferredCause: 1 }) },
         fix: LAYOUT_SHIFT_FIX,
-        detail: `layoutShifts[${first}]`,
+        // 보고서에 싣는 앞 MAX_LAYOUT_SHIFT_ROWS 개 안에 있을 때만 상세 경로가 있다.
+        ...(first < MAX_LAYOUT_SHIFT_ROWS && { detail: `layoutShifts[${first}]` }),
         rank: [score * 1000, 0, list.length],
       },
     ];
   });
+  return { findings, moved: moved.size };
 };
 
 const byRank = (a: Ranked, b: Ranked): number =>
@@ -293,12 +300,12 @@ export const buildSummary = (
   layoutShifts: readonly LayoutShiftRow[] = [],
 ): ReportSummary => {
   const problems = countProblems(requests.endpoints, storms);
-  const shiftFindings = layoutShiftFindings(layoutShifts);
+  const shifts = layoutShiftFindings(layoutShifts);
   const all = [
     ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),
-    ...shiftFindings,
+    ...shifts.findings,
   ].sort(byRank);
   const wastedRequests = problems.wasteEndpoints.reduce((n, e) => n + e.duplicates + e.sameResponses, 0);
   const avoidable = renders.components.filter((c) => c.avoidable > 0);
@@ -312,8 +319,8 @@ export const buildSummary = (
     `${plural(problems.wasteEndpoints.length, 'endpoint')} with wasted requests (${plural(wastedRequests, 'request')})`,
     `${plural(avoidable.length, 'component', capped)} with avoidable renders (${plural(avoidableRenders, 'render', capped)}${ms})`,
     plural(rqCount, 'React Query finding'),
-    // 큰 레이아웃 이동이 있을 때만 붙인다(지원하지 않는 브라우저와 이동이 없는 화면의 판정은 그대로다).
-    ...(shiftFindings.length > 0 ? [plural(shiftFindings.length, 'component') + ' with large layout shifts'] : []),
+    // 큰 레이아웃 이동으로 밀린 컴포넌트(이름·위치)가 있을 때만 붙인다(지원하지 않는 브라우저와 이동이 없는 화면의 판정은 그대로다).
+    ...(shifts.moved > 0 ? [`${plural(shifts.moved, 'component')} moved by large layout shifts`] : []),
     `RDX badge ${problems.issues}${renders.monitoring ? '' : ' (render monitoring was off)'}`,
   ].join(', ');
   return {
