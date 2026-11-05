@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react';
 
 import { findQueryClients } from '../../core/reactQuery/cacheAudit.js';
-import { getTopRenders } from '../../core/render/monitor.js';
-import { RENDER_STORM } from '../../core/render/types.js';
+import { countProblems, findRenderStorms, stormItems, type RenderStorm, type WasteRow } from '../../core/problems.js';
 import { analyzeBursts, burstWindowMs, type BurstWindow } from '../../core/requests/bursts.js';
 import type { RequestClass } from '../../core/requests/classify.js';
 import type { RequestRecord } from '../../core/requests/types.js';
@@ -16,14 +15,6 @@ const FIND_CLIENTS_EVERY = 5;
 const RECENT_MS = 2000;
 // 응답이 끝나고 이만큼 지난 뒤에 판정한다(응답 뒤에 오는 화면 이동을 기다린다, 화면 진입의 응답 뒤 1초 창과 같다).
 const SETTLE_MS = 1000;
-
-/** 지금 렌더 폭주(최근 10초에 RENDER_STORM 번 이상) 중인 컴포넌트 이름 */
-const stormingNames = (now: number): Set<string> =>
-  new Set(
-    getTopRenders(500, now)
-      .filter((e) => e.recent >= RENDER_STORM)
-      .map((e) => e.name),
-  );
 
 /** 최근 판정에 쓸 기록. 판정할 창의 요청이 빠지지 않게, 최근에 끝난 요청의 가장 이른 시작보다 창 하나만큼 앞부터 둔다. */
 const recentRecords = (records: readonly RequestRecord[], now: number): RequestRecord[] => {
@@ -63,45 +54,48 @@ const followBursts = (windows: readonly BurstWindow[], lastBurst: number): { las
   return { last, fresh };
 };
 
+const NO_STORMS: ReadonlyMap<string, RenderStorm> = new Map();
+
 interface Signal {
-  storming: ReadonlySet<string>;
+  /** 키: 렌더 그룹 키(이름 + 그리는 위치) */
+  storming: ReadonlyMap<string, RenderStorm>;
   lastBurst: number;
   alert: boolean;
 }
 
 /**
  * RDX 버튼에 보여 줄 신호. 버튼은 패널을 닫아 둔 동안에도 알려야 하므로, 붙어 있는 동안 렌더 감시를 켠다.
- * - issues: 낭비 요청이 있는 엔드포인트 수 + 렌더 폭주 중인 컴포넌트 수
- * - wasteEndpoints·stormingNames: 배지가 센 항목의 이름(내역 표시용)
+ * - issues: 낭비 요청이 있는 엔드포인트 수 + 렌더 폭주 중인 컴포넌트 그룹 수. 보고서 summary.badge 와 같은 함수(core/problems.ts)로 센다
+ * - wasteEndpoints·storming: 배지가 센 항목(내역 표시용). storming 은 폭주 그룹마다 한 줄이라 배지 수와 맞는다
  * - alert: 새 요청 몰림이 생겼거나 새 컴포넌트가 렌더 폭주에 들어왔다(그 1초 동안만 켜진다)
  */
 export const useProblemSignal = (
   records: readonly RequestRecord[],
   classOf: (r: RequestRecord) => RequestClass,
-  wasteEndpoints: number,
-  wasteNames: readonly string[] = [],
+  endpoints: readonly WasteRow[] = [],
 ) => {
   useRenderMonitoring();
-  const [signal, setSignal] = useState<Signal>({ storming: new Set(), lastBurst: 0, alert: false });
+  const [signal, setSignal] = useState<Signal>({ storming: NO_STORMS, lastBurst: 0, alert: false });
   // 렌더에 쓰지 않는 횟수라 state 가 아니라 ref 에 센다(매초 다시 렌더하지 않게).
   const ticks = useRef(0);
   useInterval(() => {
     const now = Date.now();
     if (ticks.current++ % FIND_CLIENTS_EVERY === 0) findQueryClients();
-    const storming = stormingNames(now);
+    const storming = findRenderStorms(now);
     // useInterval 이 최신 콜백을 쓰므로 records 는 늘 지금 기록이다.
     const waste = wasteWindowsToAlert(records, classOf, now);
     setSignal((prev) => {
-      const newStorm = [...storming].some((name) => !prev.storming.has(name));
+      const newStorm = [...storming.keys()].some((key) => !prev.storming.has(key));
       const { last, fresh } = followBursts(waste, prev.lastBurst);
       return { storming, lastBurst: last, alert: newStorm || fresh };
     });
   }, TICK_MS);
-  // 배지 내역에 보일 이름. 폭주 이름은 시간 창 기준이라 시간이 지나면 빠진다.
+  // 배지 내역에 보일 항목. 폭주는 시간 창 기준이라 시간이 지나면 빠진다.
+  const problems = countProblems(endpoints, signal.storming);
   return {
-    issues: wasteEndpoints + signal.storming.size,
+    issues: problems.issues,
     alert: signal.alert,
-    wasteEndpoints: wasteNames,
-    stormingNames: [...signal.storming].sort(),
+    wasteEndpoints: problems.wasteEndpoints.map((e) => e.endpoint),
+    storming: stormItems(signal.storming),
   };
 };

@@ -22,6 +22,8 @@ interface Caller {
   observer?: string;
   /** 호출 스택에 앱 프레임이 없어 보낸 위치를 모른다 */
   noAppFrame?: true;
+  /** 그중 낭비(duplicates·sameResponses)로 센 수. 0 이면 두지 않는다 */
+  waste?: number;
 }
 
 export interface RequestSection {
@@ -85,7 +87,11 @@ const callerOf = (stack: string | undefined): string | undefined =>
  * 같은 호출 위치(frame)에서 보낸 것끼리 센다. route·component·queryKey 로 더 쪼개면 상위 3 자르기가 순위를 왜곡하므로 첫 기록의 것을 붙인다.
  * 스택이 끊겨 frame 이 라이브러리 내부인 요청은 호출한 곳을 queryKey 로 가른다.
  */
-const callersOf = (records: readonly RequestRecord[], queryOf: (record: RequestRecord) => QueryContext | undefined) => {
+const callersOf = (
+  records: readonly RequestRecord[],
+  queryOf: (record: RequestRecord) => QueryContext | undefined,
+  wasted: (record: RequestRecord) => boolean,
+) => {
   const counts = records.reduce((acc, r) => {
     const frame = callerOf(r.sourceStack ?? r.stack);
     const query = queryOf(r);
@@ -100,7 +106,7 @@ const callersOf = (records: readonly RequestRecord[], queryOf: (record: RequestR
       ...(query && { queryKey: query.queryKey, ...(query.observer && { observer: query.observer }) }),
       ...(r.noAppFrame && { noAppFrame: true as const }),
     };
-    return acc.set(key, { ...caller, count: caller.count + 1 });
+    return acc.set(key, { ...caller, count: caller.count + 1, ...(wasted(r) && { waste: (caller.waste ?? 0) + 1 }) });
   }, new Map<string, Caller>());
   return Array.from(counts.values())
     .sort((a, b) => b.count - a.count)
@@ -162,7 +168,7 @@ export const buildRequestSection = (
         failedDuplicates: s.failedDuplicates ?? 0,
         refetchReasons: refetchReasonsOf(own, classes),
         review: s.review,
-        callers: callersOf(own, queryOf),
+        callers: callersOf(own, queryOf, (r) => isWaste(classes.get(r.id))),
         repeatCauses: repeatCausesOf(own),
         wasteExamples: Array.from(new Set(own.filter((r) => isWaste(classes.get(r.id))).map((r) => redactUrl(r.url)))).slice(
           0,
@@ -178,6 +184,7 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   'The 2s duplicate window and the 200-record limit above are defaults; the values in effect are config.dedupeWindowMs and config.maxRecords. ignored: true also covers endpoints in config.ignore (set in code with configure(), not removable in the panel).',
   'failedDuplicates is the count of duplicates and sameResponses that were failed responses (4xx, 5xx, or network error). These may be retries or a local environment issue (backend down) rather than code waste — check the status code first.',
   'refetchReasons is a breakdown by cause of React Query refetches that received the same response. stale-elapsed (refetched after staleTime expired) and after-invalidate (invalidated but response unchanged) are repeats to review but are not counted as waste. stale-zero (staleTime is 0, so fetched every time) stays in sameResponses as waste — increase staleTime. Same-response matches against pre-reload records are not counted as waste.',
+  "callers.waste is how many of that caller's requests were counted as waste (duplicates or sameResponses); absent when none. summary points at the listed caller with the most waste.",
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',

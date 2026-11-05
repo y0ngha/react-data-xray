@@ -13,7 +13,7 @@ const setup = () => {
       issues={1}
       alert={false}
       handlers={handlers}
-      breakdown={{ waste: ['GET /a'], storming: ['Comp'] }}
+      breakdown={{ waste: ['GET /a'], storming: [{ name: 'Comp', key: 'Comp|' }] }}
       onSelect={onSelect}
     />,
   );

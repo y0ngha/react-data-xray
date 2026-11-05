@@ -56,6 +56,7 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 
 | Field | Contents |
 |---|---|
+| `summary` | Read first. `verdict` (one-line count), `badge` (the RDX button badge count and its breakdown), `topFindings[]` (up to 10, in fix order: `kind`, `severity`, `target` with location, `evidence`, estimated `savings`, `fix`, `detail` path to the full entry), `omitted` |
 | `requests.total` · `dropped` | Number of requests recorded; number dropped when the record limit (`config.maxRecords`, default 200) was exceeded. If `dropped` is non-zero, split the scenario into shorter runs |
 | `requests.endpoints[]` | Per-endpoint `count` · `duplicates` · `sameResponses` · `review` (polling, focus refetch) · `ignored` (in the panel or by `config.ignore`), example waste URLs, `callers` (code that sent the request) |
 | `reactQuery.findings[]` | Cache key audit findings with `fix` |
@@ -65,7 +66,7 @@ mkdir -p .claude/skills && cp -r node_modules/react-data-xray/skills/rdx-perf .c
 | `resetAt` | ms epoch of the last `reset()` call in this tab; `null` if never reset. When comparing two snapshots, check that both have a `resetAt` — if only one does, the comparison may mix post-reset and pre-reset data |
 | `diagnostics` | Same as `window.__RDX__.doctor()`: `renderHook` (`commitsSeen`, `reactVersion`, `strictMode`: `null` until a render was recorded), `capture` (`requestsBeforeInstall`), `requests` (`recorded`, `restored`, `jsonResponses`), `reportPlugin` (`ready` · `missing` · `forbidden-host` · `checking`), `sourceMaps.failures`, `sameResponseMemory`, and `problems` with how to fix each. Read `problems` first: if rdx loaded after react-dom, render data is empty and early requests are missing |
 | `config` | Detection settings in effect, set in code with `configure()` (see README) or the defaults: `ignore` (`code`: `configure()` endpoint names and `/RegExp/` strings; `panel`: chosen in the panel), `keyHeaders`, `dedupeWindowMs` (2000), `burst` (`{ windowMs: 500, count: 5 }`), `maxRecords` (200, max 5000), `reportPath` (`/__rdx/report`). `compare` warns when the detection criteria differ (`dedupeWindowMs`, `burst`, `keyHeaders`, `ignore`, and `maxRecords` when either report dropped requests) — their counts are not directly comparable |
-| `howToRead` | How to interpret the fields above |
+| `howToRead` · `howToReadVersion` | How to interpret the fields above, and its version. `report({ howToRead: false })` leaves `howToRead` out (files written by the plugin always include it) |
 
 - `snapshot(name)`: name may contain letters, digits, and `. _ -`, up to 64 characters; `report` is reserved. Rejected if the plugin is not running.
 - Security: to prevent other sites from injecting fake reports, the plugin accepts requests only from `localhost`, `*.localhost`, and IP addresses. For other hostnames use `rdx({ allowedHosts: ['my-app.local'] })`. Vite reuses `server.allowedHosts` automatically.

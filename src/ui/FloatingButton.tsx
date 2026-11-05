@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent, type Ref } from 'react';
 
+import type { StormItem } from '../core/problems.js';
 import type { Position } from './hooks/useDraggable.js';
 import type { Tab } from './panels/tabs.js';
 import { color, Z_PANEL } from './theme.js';
@@ -9,7 +10,8 @@ export const BUTTON_SIZE = 44;
 
 export interface Breakdown {
   waste: readonly string[];
-  storming: readonly string[];
+  /** 폭주 그룹마다 한 줄(배지 수와 같다). 같은 이름이 여럿이면 위치를 붙여 가른다 */
+  storming: readonly StormItem[];
 }
 
 const POPUP_WIDTH = 260;
@@ -34,8 +36,8 @@ interface FloatingButtonProps {
   alert: boolean;
   /** 배지가 센 항목 이름. 주면 마우스를 올리거나 포커스할 때 내역을 보인다 */
   breakdown?: Breakdown;
-  /** 내역의 항목을 눌렀을 때 그 탭으로 간다. key 는 엔드포인트나 컴포넌트 이름 */
-  onSelect?: (tab: Tab, key: string) => void;
+  /** 내역의 항목을 눌렀을 때 그 탭으로 간다. key 는 엔드포인트 이름이나 렌더 그룹 키, fallbacks 는 그 키로 못 찾을 때의 키 */
+  onSelect?: (tab: Tab, key: string, fallbacks?: readonly string[]) => void;
   handlers: {
     onPointerDown: (e: PointerEvent) => void;
     onPointerMove: (e: PointerEvent) => void;
@@ -112,27 +114,27 @@ const BreakdownPopup = ({
   id: string;
   position: Position;
   breakdown: Breakdown;
-  onSelect: (tab: Tab, key: string) => void;
+  onSelect: (tab: Tab, key: string, fallbacks?: readonly string[]) => void;
 }) => {
   const vp = clientViewport();
   const below = position.y < vp.height / 2;
-  const section = (label: string, names: readonly string[], tab: Tab, show: (n: string) => string) =>
-    names.length > 0 && (
+  const section = (label: string, items: ReadonlyArray<{ key: string; text: string; fallbacks?: readonly string[] }>, tab: Tab) =>
+    items.length > 0 && (
       <div>
         <strong>
-          {label} {names.length}
+          {label} {items.length}
         </strong>
-        {names.map((n) => (
+        {items.map((item) => (
           // mousedown 이 포커스를 가져가면(Safari) 클릭 전에 팝업이 닫힐 수 있어 막는다.
           <button
-            key={n}
+            key={item.key}
             type="button"
-            title={show(n)}
+            title={item.text}
             style={{ ...itemStyle, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onSelect(tab, n)}
+            onClick={() => (item.fallbacks ? onSelect(tab, item.key, item.fallbacks) : onSelect(tab, item.key))}
           >
-            {show(n)}
+            {item.text}
           </button>
         ))}
       </div>
@@ -154,8 +156,20 @@ const BreakdownPopup = ({
         zIndex: Z_PANEL,
       }}
     >
-      {section('wasted requests', breakdown.waste, 'requests', (n) => n)}
-      {section('render storm', breakdown.storming, 'renders', (n) => `<${n}>`)}
+      {section(
+        'wasted requests',
+        breakdown.waste.map((n) => ({ key: n, text: n })),
+        'requests',
+      )}
+      {section(
+        'render storm',
+        breakdown.storming.map((s) => ({
+          key: s.key,
+          text: `<${s.name}>${s.location ? ` · ${s.location}` : ''}`,
+          fallbacks: s.fallbacks,
+        })),
+        'renders',
+      )}
       <div style={{ marginTop: 4, color: color.muted }}>Render storm is based on the last 10s and will clear over time.</div>
     </div>
   );
@@ -184,9 +198,10 @@ export const FloatingButton = ({ breakdown, onSelect, ...rest }: FloatingButtonP
           id={popupId}
           position={rest.position}
           breakdown={breakdown}
-          onSelect={(tab, key) => {
+          onSelect={(tab, key, fallbacks) => {
             close();
-            onSelect(tab, key);
+            if (fallbacks) onSelect(tab, key, fallbacks);
+            else onSelect(tab, key);
             // 눌린 항목이 사라지면 포커스가 body 로 떨어지므로 RDX 버튼으로 옮긴다(다시 열리지 않게).
             settling.current = true;
             button.current?.focus();
