@@ -72,7 +72,7 @@ export const useRenderGroups = (
         mine.done = done;
       }
       return done;
-    });
+    }, 'ui');
   }, [now, scope, host, sourceOf, sort]);
   useEffect(
     () => () => {

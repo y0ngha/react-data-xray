@@ -4,7 +4,8 @@ import { valueAt } from '../../shared/format.js';
 import type { RequestRecord } from '../requests/types.js';
 import type { Hit } from './types.js';
 
-const MAX_TEXT_LENGTH = 200;
+/** 이보다 긴 화면 글자는 값 하나가 아니라 문단으로 보고 비교하지 않는다. */
+export const MAX_TEXT_LENGTH = 200;
 
 const findInBody = (record: RequestRecord, needle: string, limit: number): Hit[] => {
   const hits: Hit[] = [];
@@ -34,12 +35,20 @@ export const guessByText = (text: string, limit = 5): Hit[] => {
   return hits;
 };
 
-/** 화면 글자와 같은 값인지. 숫자는 화면 표기의 천 단위 쉼표를 걷어 낸다(1,234 = 1234). */
+/** 화면 글자가 숫자면 그 값. 화면 표기의 천 단위 쉼표를 걷어 낸다(1,234 = 1234). 숫자가 아니면 undefined */
+export const numberInText = (text: string): number | undefined => {
+  const plain = text.replace(/,/g, '');
+  if (plain.trim() === '') return undefined;
+  const n = Number(plain);
+  return Number.isNaN(n) ? undefined : n;
+};
+
+/** 화면 글자와 같은 값인지. 숫자는 화면 표기의 천 단위 쉼표를 걷어 낸다. 과다 응답 세기(visibleFields)도 같은 규칙을 쓴다. */
 const sameValue = (value: unknown, needle: string): boolean =>
   value !== null &&
   value !== undefined &&
   typeof value !== 'object' &&
-  (String(value) === needle || (typeof value === 'number' && needle !== '' && Number(needle.replace(/,/g, '')) === value));
+  (String(value) === needle || (typeof value === 'number' && numberInText(needle) === value));
 
 /** base 아래에서 needle 과 같은 값을 가진 경로들(최대 2개까지만 찾는다: 하나인지만 알면 된다) */
 const fieldPathsOf = (base: unknown, basePath: string, needle: string): string[] => {
