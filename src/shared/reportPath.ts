@@ -2,6 +2,8 @@
 export const REPORT_PATH = '/__rdx/report';
 /** 미들웨어가 붙어 있다는 표시. 이 헤더가 없으면 프록시·SPA 폴백이 답한 것이라 보고서를 보내지 않는다. */
 export const REPORT_HEADER = 'x-rdx-report';
+/** Next.js 가 middleware(proxy)의 rewrite 목적지를 알려 주는 응답 헤더. rdx 경로가 가로채였는지 볼 때 쓴다(#125). */
+export const NEXT_REWRITE_HEADER = 'x-middleware-rewrite';
 /** 자동 보고서 파일 이름(.rdx/report.json) */
 export const DEFAULT_REPORT_NAME = 'report';
 

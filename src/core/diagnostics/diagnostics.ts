@@ -4,7 +4,7 @@ import { captureStatus } from '../capture/install.js';
 import { sourceMapFailures } from '../capture/sourceMap.js';
 import { commitHookStatus } from '../render/devtoolsHook.js';
 import { strictModeSeen } from '../render/monitor.js';
-import { getReportPluginState, type ReportPluginState } from '../report/endpointState.js';
+import { getReportPluginState, getReportRewrite, type ReportPluginState } from '../report/endpointState.js';
 import { sameResponseMemory } from '../requests/repeatDetection.js';
 import { getDroppedCount, getRecords } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
@@ -39,7 +39,7 @@ export interface RdxDiagnostics {
     /** 200건을 넘어 목록에서 밀려난 수 */
     dropped: number;
   };
-  /** dev 서버 보고서 플러그인: ready, missing(없음), forbidden-host(이 호스트를 막음), checking(확인 중) */
+  /** dev 서버 보고서 플러그인: ready, missing(없음), forbidden-host(이 호스트를 막음), rewritten(Next middleware 가 경로를 바꿈), checking(확인 중) */
   reportPlugin: ReportPluginState;
   /** 소스맵을 받거나 읽지 못한 모듈 수 */
   sourceMaps: { failures: number };
@@ -73,8 +73,14 @@ export const problemCount = (): number => {
     Number(noCommits) +
     Number(!!early && early.count > 0) +
     Number(!captureStatus().installed) +
-    Number(getReportPluginState() === 'forbidden-host')
+    Number(getReportPluginState() === 'forbidden-host') +
+    Number(getReportPluginState() === 'rewritten')
   );
+};
+
+const rewrittenProblem = (): string[] => {
+  const rewrite = getReportPluginState() === 'rewritten' ? getReportRewrite() : undefined;
+  return rewrite ? [MESSAGES.rewrittenRoute(rewrite.path, rewrite.to)] : [];
 };
 
 const problemsOf = (retainedChars: number): string[] => {
@@ -85,6 +91,7 @@ const problemsOf = (retainedChars: number): string[] => {
     ...loadOrder,
     ...(captureStatus().installed ? [] : [MESSAGES.captureMissing]),
     ...(getReportPluginState() === 'forbidden-host' ? [MESSAGES.forbiddenHost(...host())] : []),
+    ...rewrittenProblem(),
     ...(retainedChars > 0 ? [MESSAGES.retainedText(retainedChars)] : []),
   ];
 };

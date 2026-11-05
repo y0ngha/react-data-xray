@@ -51,7 +51,7 @@ export default {
 export { GET, POST } from 'react-data-xray/next';
 ```
 
-Next.js treats folders starting with `_` as private and leaves them out of routing, so the first `_` of `__rdx` is written as `%5F` (`%5F_rdx`); the route still answers at `/__rdx/report`. It only answers under `next dev` and returns 404 in `next build`/`next start`. With a `basePath`, keep the route file where it is (Next serves it at `<basePath>/__rdx/report`) and call `configure({ reportPath: '<basePath>/__rdx/report' })` in the browser entry (see README).
+Next.js treats folders starting with `_` as private and leaves them out of routing, so the first `_` of `__rdx` is written as `%5F` (`%5F_rdx`); the route still answers at `/__rdx/report`. It only answers under `next dev` and returns 404 in `next build`/`next start`. With a `basePath`, keep the route file where it is (Next serves it at `<basePath>/__rdx/report`) and call `configure({ reportPath: '<basePath>/__rdx/report' })` in the browser entry (see README). A `middleware.ts`/`proxy.ts` (next-intl and other locale routing) must leave `__rdx` out of its `matcher`; otherwise it rewrites the route away, and `doctor()` reports `reportPlugin: 'rewritten'` with the fix.
 
 **Drive it from the terminal (no browser tool)**: with the plugin attached and the app open in a browser tab, the `react-data-xray` command runs `reset` and `snapshot` in that tab through the dev server. Run it in the app folder (inside the app, `pnpm exec rdx` / `npx rdx` is the same command; outside it, `npx rdx` would fetch an unrelated npm package named `rdx`). An AI agent without a browser tool can then run the whole loop on its own.
 

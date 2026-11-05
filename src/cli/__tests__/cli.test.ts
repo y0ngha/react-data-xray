@@ -235,6 +235,23 @@ describe('rdx CLI(#69)', { timeout: 20_000 }, () => {
     }
   });
 
+  it('명령 경로가 Next.js middleware 에 rewrite 되면 matcher 에서 __rdx 를 빼라고 알린다 (#125)', async () => {
+    const proxied = createServer((_req, res) => {
+      res.statusCode = 404;
+      res.setHeader('x-middleware-rewrite', '/ko/__rdx/command/tabs');
+      res.end('not found');
+    });
+    await new Promise<void>((resolve) => proxied.listen(0, resolve));
+    try {
+      const a = proxied.address();
+      const { code, err } = await run(['tabs'], { RDX_URL: `http://localhost:${typeof a === 'object' && a ? a.port : 0}` });
+      expect(code).toBe(3);
+      expect(err).toMatch(/rewrote \/__rdx\/command to \/ko\/__rdx\/command\/tabs.*Exclude __rdx from its matcher/);
+    } finally {
+      await new Promise<void>((resolve) => proxied.close(() => resolve()));
+    }
+  });
+
   it('--url 의 경로(Next.js basePath) 밑에 명령 경로를 붙인다', async () => {
     const prefixed = await mkdtemp(join(tmpdir(), 'rdx-cli-base-'));
     const handle = rdxReportMiddleware(prefixed);

@@ -135,6 +135,12 @@ To have AI agents read `.rdx/report.json` (see [Working with AI agents](./docs/a
 export { GET, POST } from 'react-data-xray/next';
 ```
 
+If you have a `middleware.ts` or `proxy.ts` (next-intl and other locale routing), leave `__rdx` out of its `matcher`, or it rewrites `/__rdx/report` to a page that does not exist (`/ko/__rdx/report`) and returns 404. `window.__RDX__.doctor()` reports this as a problem.
+
+```ts
+export const config = { matcher: ['/((?!api|__rdx|_next/static|_next/image|favicon.ico).*)'] };
+```
+
 </details>
 
 <details>

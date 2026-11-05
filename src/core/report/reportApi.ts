@@ -1,4 +1,4 @@
-import { isReportName, REPORT_HEADER, reportFileFor, TAB_HEADER, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
+import { isReportName, NEXT_REWRITE_HEADER, REPORT_HEADER, reportFileFor, TAB_HEADER, TAB_HEARTBEAT_MS } from '../../shared/reportPath.js';
 import { config, subscribeConfig } from '../config.js';
 import { getNativeFetch } from '../capture/nativeFetch.js';
 import { whenSourcesResolved } from '../capture/requestContext.js';
@@ -11,7 +11,7 @@ import { getResetAt, writeResetAt } from './resetAt.js';
 import { buildReport, buildSnapshotReport, type RdxReport, type ReportOptions } from './buildReport.js';
 import { buildDiagnostics, type RdxDiagnostics } from '../diagnostics/diagnostics.js';
 import { MESSAGES } from '../diagnostics/messages.js';
-import { setReportPluginState } from './endpointState.js';
+import { getReportRewrite, setReportPluginState, setReportRewrite } from './endpointState.js';
 import { notePolled, notePollSent, receiveCommands, shouldPoll, tabState } from './commands.js';
 import { compare, toComparable, type ComparableReport, type ReportComparison } from './compare.js';
 import type { RenderRowTally } from './renderSection.js';
@@ -150,7 +150,7 @@ const HANDSHAKE_RETRY_MS = 3000;
 // 이만큼 연속으로 올리지 못하면 올리기를 쉬고 받아 가기(본문 없는 GET)만 가끔 보낸다. 받아 가기가 되면 다시 올린다.
 const MAX_UPLOAD_FAILURES = 3;
 
-type Endpoint = 'ready' | 'forbidden-host' | 'missing';
+type Endpoint = 'ready' | 'forbidden-host' | 'missing' | 'rewritten';
 // dev 서버 미들웨어가 있는지 그 경로로 확인한 결과. snapshot 이 확인이 끝나기 전에 불려도 기다린다.
 let checked: { path: string; state: Promise<Endpoint> } | undefined;
 // 주기 업로드가 도는 중(확인 중 포함)인지. reportPath 가 바뀌었을 때 멈춰 있으면 다시 시작한다.
@@ -179,6 +179,10 @@ const snapshot = async (name: string): Promise<RdxReport> => {
   const state = target ? await target.state : 'missing';
   if (state === 'forbidden-host') {
     throw new Error(`[react-data-xray] ${MESSAGES.forbiddenHost(location.host, location.hostname)}`);
+  }
+  if (state === 'rewritten') {
+    const r = getReportRewrite();
+    throw new Error(`[react-data-xray] ${MESSAGES.rewrittenRoute(r?.path ?? target!.path, r?.to ?? '?')}`);
   }
   if (!send || !target || state === 'missing') {
     throw new Error(NO_PLUGIN_MESSAGE);
@@ -240,6 +244,13 @@ const checkEndpoint = async (send: typeof fetch, path: string): Promise<Endpoint
   const mark = res?.headers.get(REPORT_HEADER);
   if (mark === 'forbidden-host') {
     console.warn(`[react-data-xray] ${MESSAGES.forbiddenHost(location.host, location.hostname)}`);
+  }
+  // 표시 없이 Next 의 rewrite 헤더가 왔으면 middleware(proxy)가 rdx 경로를 가로챈 것이다(#125).
+  const rewrittenTo = mark ? null : res?.headers.get(NEXT_REWRITE_HEADER);
+  setReportRewrite(rewrittenTo ? { path, to: rewrittenTo } : undefined);
+  if (rewrittenTo) {
+    console.warn(`[react-data-xray] ${MESSAGES.rewrittenRoute(path, rewrittenTo)}`);
+    return 'rewritten';
   }
   return mark === '1' ? 'ready' : mark === 'forbidden-host' ? 'forbidden-host' : 'missing';
 };
