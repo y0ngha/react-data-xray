@@ -40,8 +40,12 @@ export interface Box {
   fiber: unknown;
 }
 
+/** 소비자를 찾은 방법: 같은 참조, 또는 필드 값 겹침(가공한 객체) */
+export type ConsumerMatch = Extract<MatchKind, 'exact' | 'derived'>;
+
 /** 요청의 응답 데이터를 쓰는 컴포넌트 */
 export interface Consumer {
+  match: ConsumerMatch;
   /** 트리 탐색 순번(화면 key) */
   id: number;
   name: string;

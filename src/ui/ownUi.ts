@@ -1,6 +1,6 @@
-/** rdx 자신이 그린 요소에 붙이는 표식. 요소 선택·박스 계산에서 뺀다. */
-const ROOT_ATTR = 'data-rdx-root';
+import { ROOT_ATTR } from '../shared/ownUi.js';
+
+// 판정은 core 도 쓴다(쓰지 않는 응답 판정이 패널을 소비자로 세지 않게). 표식과 판정은 shared 에 둔다.
+export { isOwnUi } from '../shared/ownUi.js';
 
 export const ownUiProps = { [ROOT_ATTR]: '' };
-
-export const isOwnUi = (el: Element | null): boolean => !!el?.closest(`[${ROOT_ATTR}]`);

@@ -2,7 +2,7 @@ import { nPlusOneHint } from '../../../core/requests/nPlusOne.js';
 import { pathOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Badge } from '../../components/Badge.js';
-import { ClassBadge } from '../../request/ClassBadge.js';
+import { ClassBadge, UnusedBadge } from '../../request/ClassBadge.js';
 import { RequestLink } from '../../request/RequestLink.js';
 import { RequestParams } from '../../request/RequestParams.js';
 import { RequestStatusLine } from '../../request/RequestSummary.js';
@@ -23,6 +23,7 @@ export const RequestLogRow = ({ record, nPlusOne = false }: { record: RequestRec
             <Badge color={color.review}>N+1</Badge>
           </span>
         )}
+        <UnusedBadge record={record} />
       </div>
       <RequestStatusLine record={record} />
       <RequestParams record={record} />
