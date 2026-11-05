@@ -4,6 +4,7 @@ import { markOverlapCancelled } from '../reactQuery/overlapCancel.js';
 import { currentCommitSeq } from '../render/commitCauses.js';
 import { isAborted } from './aborted.js';
 import { repeatCauseStep } from './repeatCause.js';
+import { markNPlusOne } from './nPlusOne.js';
 import { detectDuplicate, detectSameResponse, resetRepeatDetection } from './repeatDetection.js';
 import { createResponseHasher, digestOf, HASH_CHUNK } from './responseHash.js';
 import type { RequestRecord } from './types.js';
@@ -117,6 +118,11 @@ export const finishRecord = (record: RequestRecord, status: number, error?: stri
     records.shift();
     dropped++;
   }
+  // 항목마다 보낸 요청(N+1)인지는 끝난 요청이 든 패턴만 유휴 큐에서 다시 본다. 보낸 컴포넌트·중복 판정은 요청을 시작할 때 걸린 step 이 앞서 채운다.
+  enqueue(() => {
+    if (!isStale(record) && markNPlusOne(record, records)) notify();
+    return true;
+  });
   notify();
 };
 

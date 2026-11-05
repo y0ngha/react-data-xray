@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 
-import { isWastefulStat, type EndpointStat } from '../../../core/requests/endpointStats.js';
+import { isWastefulStat, type EndpointStat, type NPlusOneSender } from '../../../core/requests/endpointStats.js';
+import { N_PLUS_ONE_HINT } from '../../../core/requests/nPlusOne.js';
 import { useReveal } from '../../hooks/useReveal.js';
 import type { FocusRequest } from '../../viewState.js';
 import { Button } from '../../components/Button.js';
@@ -35,6 +36,8 @@ interface Segment {
   bold?: boolean;
 }
 
+const senderLabel = (sender: NPlusOneSender): string => (sender.component ? `<${sender.component}>` : 'same caller');
+
 /** 요약 줄의 조각들. 없는 지표는 뺀다. */
 const segments = (stat: EndpointStat): Segment[] => {
   const all: Array<Segment | null> = [
@@ -49,6 +52,11 @@ const segments = (stat: EndpointStat): Segment[] => {
       ? { text: `failed: ${stat.failedCodes.join('·')}`, title: 'Status codes of failed requests regardless of waste' }
       : null,
     stat.review > 0 ? { text: `review: ${stat.review}`, color: color.review } : null,
+    ...(stat.nPlusOne ?? []).map((sender) => ({
+      text: `N+1: ${senderLabel(sender)}×${sender.count}`,
+      title: sender.location ? `${N_PLUS_ONE_HINT}\n${sender.location}` : N_PLUS_ONE_HINT,
+      color: color.review,
+    })),
     stat.explained > 0 ? { text: `expected: ${stat.explained}` } : null,
   ];
   return all.filter((seg): seg is Segment => seg !== null);

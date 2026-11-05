@@ -25,7 +25,27 @@ export interface EndpointStat {
   failedCodes?: string[];
   /** 요청을 보낸 경로·컴포넌트별 건수, 많은 순. 경로도 컴포넌트도 모르는 요청은 뺀다 */
   sites?: EndpointSite[];
+  /** 항목마다 보낸 요청(N+1)으로 짚은 요청의 보낸 곳(컴포넌트, 모르면 호출 위치)별 수, 많은 순. 없으면 비운다 */
+  nPlusOne?: NPlusOneSender[];
 }
+
+export interface NPlusOneSender {
+  component?: string;
+  location?: string;
+  count: number;
+}
+
+/** N+1 로 짚은 요청의 보낸 곳별 수, 많은 순 */
+const nPlusOneOf = (records: readonly RequestRecord[]): NPlusOneSender[] =>
+  Array.from(
+    records.reduce((acc, r) => {
+      if (!r.nPlusOne) return acc;
+      const key = JSON.stringify([r.nPlusOne.component, r.nPlusOne.location]);
+      const sender = acc.get(key) ?? { ...r.nPlusOne, count: 0 };
+      return acc.set(key, { ...sender, count: sender.count + 1 });
+    }, new Map<string, NPlusOneSender>()),
+    ([, sender]) => sender,
+  ).sort((a, b) => b.count - a.count);
 
 export interface EndpointSite {
   route?: string;
@@ -117,13 +137,16 @@ export const getEndpointStats = (
   return Array.from(byEndpoint.values(), ({ totalMs, ...stat }): EndpointStat => {
     const variants = pathsByEndpoint.get(stat.endpoint)?.size ?? 0;
     const codes = failedCodesByEndpoint.get(stat.endpoint);
-    const sites = sitesOf(recordsByEndpoint.get(stat.endpoint) ?? []);
+    const own = recordsByEndpoint.get(stat.endpoint) ?? [];
+    const sites = sitesOf(own);
+    const nPlusOne = nPlusOneOf(own);
     return Object.assign(
       stat,
       { avgMs: Math.round(totalMs / stat.count) },
       variants > 1 ? { idVariants: variants } : {},
       codes ? { failedCodes: codes } : {},
       sites.length > 0 ? { sites } : {},
+      nPlusOne.length > 0 ? { nPlusOne } : {},
     );
   }).sort((a, b) => wasteCount(b) - wasteCount(a) || b.count - a.count);
 };
