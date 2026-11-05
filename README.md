@@ -151,6 +151,7 @@ configure({
   keyHeaders: ['x-tenant'], // requests that differ only in these headers are different requests
   dedupeWindowMs: 2000, // the same request again within this time is a duplicate
   burst: { windowMs: 500, count: 5 }, // this many requests starting within windowMs is a burst
+  nPlusOne: { windowMs: 1000, count: 5 }, // this many different IDs to one endpoint from one sender within windowMs is N+1
   maxRecords: 200, // requests to remember
   reportPath: '/__rdx/report', // where the browser sends reports (e.g. '/docs/__rdx/report' under a Next.js basePath)
 });
@@ -159,7 +160,7 @@ configure({
 - `ignore` is merged with the endpoints you ignore in the panel; those rows show "Ignored (config)" and cannot be unignored there.
 - Each call replaces the previous settings. Invalid values print a warning and fall back to the default; `maxRecords` is capped at 5000.
 - `reportPath` is where the browser sends reports; the dev server must answer at the same path: `rdx({ path })` (Vite), `rdxReportMiddleware(root, { path })` (webpack). The Next.js route answers wherever Next serves it.
-- The settings in effect are written to the report (`config`, with code and panel ignores listed separately). Comparing two reports warns when the detection criteria differ (`dedupeWindowMs`, `burst`, `keyHeaders`, `ignore`, and `maxRecords` when requests were dropped).
+- The settings in effect are written to the report (`config`, with code and panel ignores listed separately). Comparing two reports warns when the detection criteria differ (`dedupeWindowMs`, `burst`, `nPlusOne`, `keyHeaders`, `ignore`, and `maxRecords` when requests were dropped).
 
 </details>
 

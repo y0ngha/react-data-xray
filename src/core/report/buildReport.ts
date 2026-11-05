@@ -68,7 +68,7 @@ export const HOW_TO_READ: readonly string[] = [
   ...RENDER_HOW_TO_READ_EXTRA,
   ...REACT_QUERY_HOW_TO_READ_EXTRA,
   'Check diagnostics.problems first: if rdx was loaded after react-dom (renderHook.commitsSeen is 0) or requests went out before it loaded (capture.requestsBeforeInstall), the rest of the report is incomplete. Each problem says how to fix it.',
-  'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
+  'config is the detection settings in effect (configure() in code, or the defaults): ignore (endpoints not counted as waste: code = configure() names and /RegExp/ strings, panel = chosen in the panel), keyHeaders (request headers that are part of the request identity), dedupeWindowMs, burst (windowMs, count), nPlusOne (windowMs, count), maxRecords, reportPath. compare warns when the detection criteria (dedupeWindowMs, burst, nPlusOne, keyHeaders, ignore, and maxRecords when requests were dropped) differ.',
   'resetAt is the ms epoch of the last reset() call in this tab (null if never reset). When comparing two reports, both should have a resetAt so you know each was measured from a clean slate.',
   'howToReadVersion is the version of these lines. If you already read this version, call window.__RDX__.report({ howToRead: false }) to leave them out.',
 ];

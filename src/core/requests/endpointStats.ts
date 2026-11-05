@@ -1,6 +1,7 @@
 import { isFailed, isWaste, needsReview, type RequestClass } from './classify.js';
 import { endpointOf, pathOf } from './requestKey.js';
-import { groupBy } from '../../shared/collections.js';
+import { countBy, groupBy } from '../../shared/collections.js';
+import { senderKeyOf } from './nPlusOne.js';
 import type { RequestRecord } from './types.js';
 
 export interface EndpointStat {
@@ -35,17 +36,22 @@ export interface NPlusOneSender {
   count: number;
 }
 
-/** N+1 로 짚은 요청의 보낸 곳별 수, 많은 순 */
-const nPlusOneOf = (records: readonly RequestRecord[]): NPlusOneSender[] =>
-  Array.from(
-    records.reduce((acc, r) => {
-      if (!r.nPlusOne) return acc;
-      const key = JSON.stringify([r.nPlusOne.component, r.nPlusOne.location]);
-      const sender = acc.get(key) ?? { ...r.nPlusOne, count: 0 };
-      return acc.set(key, { ...sender, count: sender.count + 1 });
-    }, new Map<string, NPlusOneSender>()),
-    ([, sender]) => sender,
-  ).sort((a, b) => b.count - a.count);
+/** N+1 로 짚은 요청의 보낸 곳별 서로 다른 경로(ID) 수, 많은 순. 보고서 requests.nPlusOne 의 count 와 같은 단위다 */
+const nPlusOneOf = (records: readonly RequestRecord[]): NPlusOneSender[] => {
+  const seen = new Set<string>();
+  return countBy(
+    records,
+    (r) => {
+      if (!r.nPlusOne) return undefined;
+      const sender = senderKeyOf(r.nPlusOne);
+      const path = `${sender} ${pathOf(r.url)}`;
+      if (seen.has(path)) return undefined;
+      seen.add(path);
+      return sender;
+    },
+    (r): Omit<NPlusOneSender, 'count'> => ({ ...r.nPlusOne }),
+  );
+};
 
 export interface EndpointSite {
   route?: string;
@@ -55,16 +61,11 @@ export interface EndpointSite {
 
 /** 경로·컴포넌트 조합별 건수, 많은 순 */
 export const sitesOf = (records: readonly RequestRecord[]): EndpointSite[] =>
-  Array.from(
-    records
-      .filter((r) => r.route !== undefined || r.component !== undefined)
-      .reduce((acc, r) => {
-        const key = JSON.stringify([r.route, r.component]);
-        const site = acc.get(key) ?? { route: r.route, component: r.component, count: 0 };
-        return acc.set(key, { ...site, count: site.count + 1 });
-      }, new Map<string, EndpointSite>())
-      .values(),
-  ).sort((a, b) => b.count - a.count);
+  countBy(
+    records,
+    (r) => (r.route !== undefined || r.component !== undefined ? JSON.stringify([r.route, r.component]) : undefined),
+    (r): Omit<EndpointSite, 'count'> => ({ route: r.route, component: r.component }),
+  );
 
 const emptyStat = (endpoint: string): EndpointStat & { totalMs: number } => ({
   endpoint,

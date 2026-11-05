@@ -2,8 +2,8 @@ import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
 import { callerOf } from '../requests/callerFrames.js';
-import { N_PLUS_ONE_MIN, N_PLUS_ONE_WINDOW_MS, nPlusOneRuns, type NPlusOneRun } from '../requests/nPlusOne.js';
-import { endpointOf } from '../requests/requestKey.js';
+import { nPlusOneRuns, type NPlusOneRun } from '../requests/nPlusOne.js';
+import { endpointOf, pathOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
 import { getDroppedCount } from '../requests/store.js';
 import type { RequestRecord } from '../requests/types.js';
@@ -64,7 +64,7 @@ export interface NPlusOneEntry {
   component?: string;
   /** 보낸 코드 위치(첫 요청의 호출 스택 앞쪽 3줄, 소스맵으로 바꾼 것) */
   location?: string;
-  /** 서로 다른 ID 로 나간 요청 수 */
+  /** 서로 다른 ID(경로) 수 */
   count: number;
   /** 첫 요청부터 마지막 요청까지의 시작 시각 간격(ms) */
   windowMs: number;
@@ -150,9 +150,10 @@ const nPlusOneEntryOf = (run: NPlusOneRun): NPlusOneEntry => {
     endpoint: run.endpoint,
     ...(run.component && { component: run.component }),
     ...(location && { location }),
-    count: run.records.length,
+    count: run.distinct,
     windowMs: (run.records.at(-1)?.startedAt ?? first.startedAt) - first.startedAt,
-    examples: run.records.slice(0, MAX_EXAMPLES).map((r) => redactUrl(r.url)),
+    // 같은 ID 의 다른 쿼리는 예로 겹쳐 싣지 않는다
+    examples: [...new Map(run.records.map((r) => [pathOf(r.url), r.url])).values()].slice(0, MAX_EXAMPLES).map(redactUrl),
   };
 };
 
@@ -206,6 +207,6 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   "callers.waste is how many of that caller's requests were counted as waste (duplicates or sameResponses); absent when none. summary points at the listed caller with the most waste.",
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
-  `requests.nPlusOne lists requests sent once per list item (N+1): ${N_PLUS_ONE_MIN}+ requests for different IDs to the same endpoint (IDs masked as :id) from the same component (or, when the component is unknown, the same caller location) within ${N_PLUS_ONE_WINDOW_MS / 1000}s. count is the number of such requests, windowMs the time from the first to the last, examples a few URLs. Repeats of the same ID are duplicates and are not included. It is review (may be intended, e.g. a virtualized list), not waste: fetch them in one request from the list (batch endpoint, include/expand) or fetch once in the parent.`,
+  'requests.nPlusOne lists requests sent once per list item (N+1): config.nPlusOne.count (default 5)+ requests for different IDs to the same endpoint (an :id path segment) from the same component (or, when the component is unknown, the same caller location) within config.nPlusOne.windowMs (default 1000). count is the number of different IDs (paths), windowMs the time from the first to the last request, examples a few URLs (one per ID). Ignored endpoints are left out. Repeats of the same ID are duplicates and are not included. It is review (may be intended, e.g. a virtualized list), not waste: fetch them in one request from the list (batch endpoint, include/expand) or fetch once in the parent.',
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
 ];

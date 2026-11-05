@@ -1,4 +1,4 @@
-import { N_PLUS_ONE_HINT } from '../../../core/requests/nPlusOne.js';
+import { nPlusOneHint } from '../../../core/requests/nPlusOne.js';
 import { pathOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
 import { Badge } from '../../components/Badge.js';
@@ -8,8 +8,8 @@ import { RequestParams } from '../../request/RequestParams.js';
 import { RequestStatusLine } from '../../request/RequestSummary.js';
 import { color, rowStyle } from '../../theme.js';
 
-/** 요청 기록 한 줄. 누르면 요청 상세, 호버하면 쓰는 컴포넌트 강조 */
-export const RequestLogRow = ({ record }: { record: RequestRecord }) => (
+/** 요청 기록 한 줄. 누르면 요청 상세, 호버하면 쓰는 컴포넌트 강조. nPlusOne 이면 N+1 배지(무시 여부는 부르는 쪽이 본다) */
+export const RequestLogRow = ({ record, nPlusOne = false }: { record: RequestRecord; nPlusOne?: boolean }) => (
   <div style={rowStyle}>
     <RequestLink record={record}>
       <div style={{ display: 'flex', gap: 4, minWidth: 0 }}>
@@ -18,8 +18,8 @@ export const RequestLogRow = ({ record }: { record: RequestRecord }) => (
           {record.method} {pathOf(record.url)}
         </u>
         <ClassBadge record={record} short />
-        {record.nPlusOne && (
-          <span title={N_PLUS_ONE_HINT}>
+        {nPlusOne && (
+          <span title={nPlusOneHint()}>
             <Badge color={color.review}>N+1</Badge>
           </span>
         )}
