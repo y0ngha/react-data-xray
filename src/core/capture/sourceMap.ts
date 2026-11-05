@@ -1,3 +1,5 @@
+import { REPORT_PATH } from '../../shared/reportPath.js';
+import { config } from '../config.js';
 import { enqueue } from '../scheduler/idleQueue.js';
 import { isLibraryFrame } from './libraryFrame.js';
 import { getNativeFetch } from './nativeFetch.js';
@@ -6,6 +8,7 @@ import { getNativeFetch } from './nativeFetch.js';
  * 호출 스택의 위치(dev 서버가 변환한 코드 기준)를 원본 소스 위치로 바꾼다.
  * Vite 처럼 모듈 끝에 sourceMappingURL(data URL 또는 파일)을 붙이는 dev 서버에서 동작한다.
  * Next.js Turbopack 이 내는 index map(모듈마다 offset 을 둔 sections)도 하나로 합쳐 푼다.
+ * Next.js 서버 컴포넌트 프레임(about://React/Server/file:///…)은 dev 서버의 /__nextjs_source-map 에서 소스맵을 받는다(#120).
  * 라이브러리 프레임(node_modules, Vite 의 사전 번들)은 건너뛴다. 알고 싶은 것은 앱 코드 위치이고, 큰 번들의 소스맵은 비싸다.
  */
 
@@ -193,6 +196,11 @@ const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   const json = mapUrl.startsWith('data:')
     ? parseMapJson(dataUrlText(mapUrl))
     : parseMapJson(await send(mapUrl, { credentials: 'same-origin' }).then(textOf));
+  return parseMapJsonTree(json, scriptUrl);
+};
+
+/** 받은 소스맵 JSON(일반 맵 또는 index map)을 푼다. 읽을 수 없으면 실패로 센다. */
+const parseMapJsonTree = (json: unknown, scriptUrl: string): Promise<ParsedMap | null> | null => {
   const map = json as RawMap | null;
   const base = entryBase();
   if (Array.isArray(map?.sections)) {
@@ -208,15 +216,36 @@ const loadMap = async (scriptUrl: string): Promise<ParsedMap | null> => {
   return parseFlatMap(map, scriptUrl, base);
 };
 
+/** Next.js dev 서버가 서버 청크의 소스맵을 내주는 경로. basePath 는 rdx 보고서 경로(configure({ reportPath }))에서 얻는다. */
+const nextSourceMapUrl = (fileUrl: string): string => {
+  const reportPath = config().reportPath;
+  const basePath = reportPath.endsWith(REPORT_PATH) ? reportPath.slice(0, -REPORT_PATH.length) : '';
+  return `${basePath}/__nextjs_source-map?filename=${encodeURIComponent(fileUrl)}`;
+};
+
+/**
+ * 서버 컴포넌트 프레임의 소스맵. 모듈 코드를 받을 수 없으니(서버 파일) 소스맵을 바로 받고, 크기는 맵으로 판단한다.
+ * 이 경로가 없으면(Next.js 가 아니거나 버전이 달라 404·204) 원래 프레임을 그대로 둔다. 실패로 세지는 않는다.
+ */
+const loadServerMap = async (fileUrl: string): Promise<ParsedMap | null> => {
+  const send = getNativeFetch();
+  if (!send) return null;
+  const res = await send(nextSourceMapUrl(fileUrl), { credentials: 'same-origin' });
+  if (!res.ok || res.status === 204) return null;
+  const text = await res.text();
+  if (text.length > MAX_TURBOPACK_APP_CHUNK_BYTES) return null;
+  return parseMapJsonTree(parseMapJson(text), fileUrl);
+};
+
 // HMR 이 모듈 주소에 ?t= 를 붙여 새 키가 계속 생기므로, 오래된 것부터 버린다.
 const MAX_MAPS = 200;
 // 모듈마다 한 번만 받는다. 소스맵이 없는 모듈은 기억하고, 네트워크 실패(dev 서버 재시작 중 등)는 다음에 다시 받는다.
 const maps = new Map<string, Promise<ParsedMap | null>>();
 
-const mapOf = (scriptUrl: string): Promise<ParsedMap | null> => {
+const mapOf = (scriptUrl: string, load: (url: string) => Promise<ParsedMap | null> = loadMap): Promise<ParsedMap | null> => {
   const cached = maps.get(scriptUrl);
   if (cached) return cached;
-  const loading: Promise<ParsedMap | null> = loadMap(scriptUrl).catch(() => {
+  const loading: Promise<ParsedMap | null> = load(scriptUrl).catch(() => {
     noteFailure(scriptUrl);
     // 그 사이 캐시에서 밀려났다가 다시 받은 항목은 지우지 않는다.
     if (maps.get(scriptUrl) === loading) maps.delete(scriptUrl);
@@ -256,6 +285,8 @@ const projectPath = (absolute: string): string => {
 const sourcePath = (source: string, scriptUrl: string, base: string): string => {
   if (/^(\/|[a-z]+:)/i.test(source) && !source.startsWith('http')) return projectPath(source.replace(/^[a-z]+:\/\/\/?/i, '/'));
   const path = new URL(source, scriptUrl).pathname;
+  // 서버 파일(file:) 기준 상대 경로는 파일 시스템 경로가 되므로 프로젝트 기준으로 줄인다(홈 폴더를 남기지 않게).
+  if (scriptUrl.startsWith('file:')) return projectPath(path);
   return path.startsWith(base) ? path.slice(base.length) : path.replace(/^\//, '');
 };
 
@@ -274,6 +305,8 @@ export const originalPosition = (map: ParsedMap, line: number, column: number): 
 // V8: "at fn (url:1:2)" 또는 "at url:1:2", Firefox·Safari: "fn@url:1:2"
 // 브라우저 스택의 http(s) 주소만 본다(테스트 환경의 파일 경로 등은 건너뛴다).
 const FRAME = /^(.*?)(\(?)(https?:\/\/[^\s()]+):(\d+):(\d+)(\)?)$/;
+// React 가 서버 컴포넌트 스택에 붙이는 주소: about://React/Server/<file URL>?<환경 번호>:줄:열 (환경 번호는 떼고 쓴다)
+const SERVER_FRAME = /^(.*?)(\(?)about:\/\/React\/Server\/(file:\/\/[^\s()?]+)(?:\?[^\s():]*)?:(\d+):(\d+)(\)?)$/;
 
 const isSameOrigin = (url: string): boolean => {
   try {
@@ -287,6 +320,14 @@ const isSameOrigin = (url: string): boolean => {
 export const resolveStack = async (stack: string): Promise<string> => {
   const lines = await Promise.all(
     stack.split('\n').map(async (line) => {
+      const server = SERVER_FRAME.exec(line.trim());
+      if (server) {
+        const [, before, open, fileUrl, lineNo, column, close] = server;
+        if (isLibraryFrame(fileUrl)) return line;
+        const map = await mapOf(`server:${fileUrl}`, () => loadServerMap(fileUrl));
+        const original = map && originalPosition(map, Number(lineNo), Number(column));
+        return original ? `${before}${open}${original}${close}` : line;
+      }
       const m = FRAME.exec(line.trim());
       if (!m) return line;
       const [, before, open, url, lineNo, column, close] = m;

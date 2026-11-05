@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { mockFetch } from '../../../testing/fetchMock.js';
+import { configure } from '../../config.js';
 import { enqueue, flushQueue, isQueuePending } from '../../scheduler/idleQueue.js';
 import { parseMappings, parseMappingsStepped, resolveStack, sourceMapFailures } from '../sourceMap.js';
 
@@ -87,6 +88,44 @@ describe('소스맵', () => {
     const lib = `at jsxDEV (${CHUNKS}/node_modules_next_0xwmtz0bm-kxf._.js:3:1)`;
     expect(await resolveStack(lib)).toBe(lib);
     expect(mockFetch.mock.calls.some(([u]) => String(u).includes('node_modules_'))).toBe(false);
+  });
+
+  // Next.js 서버 컴포넌트가 만든 element 의 프레임: about://React/Server/<서버 청크 file URL>?<환경 번호>:줄:열 (#120)
+  const SERVER_CHUNK = 'file:///Users/me/app/.next/dev/server/chunks/ssr/%5Broot-of-the-server%5D__0magscunfp0sa._.js';
+  const serverFrame = (fn: string, chunk = SERVER_CHUNK) => `at ${fn} (about://React/Server/${chunk}?227:3:1)`;
+  const serverMap = { version: 3, sources: ['file:///Users/me/app/src/app/[locale]/page.tsx'], mappings: MAPPINGS };
+
+  it('서버 컴포넌트 프레임은 dev 서버의 /__nextjs_source-map 으로 소스맵을 받아 원본 위치로 바꾼다 (#120)', async () => {
+    mockFetch.mockImplementation(async () => new Response(JSON.stringify(serverMap)));
+    const failuresBefore = sourceMapFailures();
+    expect(await resolveStack(serverFrame('Page'))).toBe('at Page (app/src/app/[locale]/page.tsx:10:3)');
+    // 환경 번호(?227)는 떼고, 모듈 코드는 받지 않고 소스맵만 받는다.
+    expect(mockFetch.mock.calls.map(([u]) => String(u))).toEqual([`/__nextjs_source-map?filename=${encodeURIComponent(SERVER_CHUNK)}`]);
+    expect(sourceMapFailures()).toBe(failuresBefore);
+  });
+
+  it('basePath 가 있으면(configure({ reportPath })) 그 밑의 /__nextjs_source-map 으로 받는다 (#120)', async () => {
+    configure({ reportPath: '/docs/__rdx/report' });
+    mockFetch.mockImplementation(async () => new Response(JSON.stringify(serverMap)));
+    const chunk = SERVER_CHUNK.replace('0magscunfp0sa', 'basepath0001');
+    expect(await resolveStack(serverFrame('Page', chunk))).toBe('at Page (app/src/app/[locale]/page.tsx:10:3)');
+    expect(String(mockFetch.mock.calls[0]?.[0])).toMatch(/^\/docs\/__nextjs_source-map\?filename=/);
+  });
+
+  it('소스맵 경로가 없으면(404·204) 서버 프레임을 그대로 두고 실패로 세지 않으며, 서버의 node_modules_… 청크는 받지 않는다 (#120)', async () => {
+    const failuresBefore = sourceMapFailures();
+    mockFetch.mockImplementation(async (input) =>
+      String(input).includes('nomap0001') ? new Response(null, { status: 204 }) : new Response('not found', { status: 404 }),
+    );
+    const missing = serverFrame('Page', SERVER_CHUNK.replace('0magscunfp0sa', 'missing0001'));
+    const empty = serverFrame('Page', SERVER_CHUNK.replace('0magscunfp0sa', 'nomap0001'));
+    expect(await resolveStack(missing)).toBe(missing);
+    expect(await resolveStack(empty)).toBe(empty);
+    expect(sourceMapFailures()).toBe(failuresBefore);
+    mockFetch.mockClear();
+    const lib = serverFrame('Router', 'file:///Users/me/app/.next/dev/server/chunks/ssr/node_modules_next_dist_0abc._.js');
+    expect(await resolveStack(lib)).toBe(lib);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('mappings_parsed_in_steps: 2000줄 mappings 는 flush 전에는 끝나지 않고, flush 뒤 원본 위치로 끝난다', async () => {

@@ -44,7 +44,12 @@ export const getComponentName = (fiber: Pick<Fiber, 'type'>): string => {
 };
 
 /** 파일 경로·모듈 주소를 src/... 부터로 줄인다(번들러가 붙인 쿼리는 뗀다). */
-const shortPath = (path: string): string => path.split('?')[0].replace(/^.*?\/(src|app|pages|components)\//, '$1/');
+const shortPath = (path: string): string =>
+  path
+    .split('?')[0]
+    // 서버 컴포넌트 프레임(about://React/Server/file:///…/.next/…): 소스맵이 오기 전에도 홈 폴더 경로를 남기지 않게 .next/ 부터
+    .replace(/^about:\/\/React\/Server\/file:\/\/.*?\/(\.next\/)/, '$1')
+    .replace(/^.*?\/(src|app|pages|components)\//, '$1/');
 
 // React 19 의 _debugStack 맨 위에 있는 React 런타임 프레임(jsx 를 부른 쪽이 아니다).
 // 경로로 모를 때(Turbopack 은 런타임을 next 청크에 넣는다)를 위해 함수 이름 jsxDEV·jsx·jsxs 로도 알아본다.
