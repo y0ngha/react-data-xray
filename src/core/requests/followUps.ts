@@ -19,13 +19,16 @@ export interface FollowUp {
   periodic: boolean;
 }
 
+/** 서버 상태를 바꾸는 요청(POST·PUT·PATCH·DELETE)인지 */
+export const isMutation = (r: Pick<RequestRecord, 'method'>): boolean => MUTATING.has(r.method.toUpperCase());
+
 /** 변경 요청이 아니면 빈 배열. 같은 페이지 로드 안의 조회만 보고, 근거는 시간 근접이다. queryKeyOf 는 React Query 문맥(호출하는 쪽이 넘긴다). */
 export const followUps = (
   mutation: RequestRecord,
   records: readonly RequestRecord[] = getRecords(),
   queryKeyOf: (r: RequestRecord) => string | undefined = () => undefined,
 ): FollowUp[] => {
-  if (!MUTATING.has(mutation.method.toUpperCase())) return [];
+  if (!isMutation(mutation)) return [];
   const from = mutation.startedAt + mutation.durationMs;
   const load = mutation.load ?? 0;
   const sameLoad = records.filter((r) => (r.load ?? 0) === load);

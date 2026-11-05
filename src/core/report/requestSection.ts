@@ -1,5 +1,7 @@
 import { refetchReason, type RefetchReason } from '../reactQuery/cacheAudit.js';
+import { analyzeBursts, type BurstSegment, type EntryReason } from '../requests/bursts.js';
 import { isWaste, type RequestClass } from '../requests/classify.js';
+import { followUps, isMutation } from '../requests/followUps.js';
 import { getEndpointStats } from '../requests/endpointStats.js';
 import { endpointOf } from '../requests/requestKey.js';
 import { redactUrl } from '../requests/sessionRecords.js';
@@ -11,6 +13,10 @@ import { toIgnoreMatcher, type IgnoreMatcher } from '../../shared/ignoredEndpoin
 
 const MAX_CALLERS = 3;
 const MAX_EXAMPLES = 3;
+const MAX_BURST_ENDPOINTS = 3;
+// 기록 상한(maxRecords)을 크게 잡으면 몰림 구간도 많아진다. 낭비 먼저, 건수가 많은 순으로 이만큼만 싣는다.
+const MAX_BURSTS = 20;
+const MAX_FOLLOW_UPS = 20;
 
 interface Caller {
   frame: string;
@@ -52,6 +58,49 @@ export interface RequestSection {
     /** 낭비로 판정된 요청의 URL 예(쿼리 포함) */
     wasteExamples: string[];
   }>;
+  /** 요청 몰림 구간(panel 타임라인과 같은 analyzeBursts). 낭비 먼저, 그다음 건수가 많은 순 */
+  bursts: BurstEntry[];
+  /** 몰림 구간이 MAX_BURSTS 를 넘어 싣지 못한 수 */
+  burstsOmitted: number;
+  /** 변경 요청 응답 뒤 1초 안에 다시 나간 조회(요청 상세와 같은 followUps)를 변경·재조회 엔드포인트 쌍으로 모은 것 */
+  followUps: FollowUpEntry[];
+}
+
+export interface BurstEntry {
+  /** 첫·마지막 요청의 시작 시각(ms epoch) */
+  from: number;
+  to: number;
+  /** 구간에 든 요청 수(무시·StrictMode·새로고침 전 요청은 세지 않는다) */
+  count: number;
+  /** entry: 화면 진입(페이지 첫 로딩·화면 이동) 직후라 흔한 몰림. waste: 진입과 무관한 몰림 */
+  kind: 'entry' | 'waste';
+  /** entry 의 근거. waste 면 no-entry(페이지 로딩 3초 안도, 앞뒤 화면 이동도 없다) */
+  reason: EntryReason | 'no-entry';
+  /** 그중 낭비(중복·같은 응답)로 센 요청 수 */
+  wasted: number;
+  /** 첫 요청을 보낸 때의 경로. 모르면 없다 */
+  route?: string;
+  /** 구간에 많이 든 엔드포인트(상위 3) */
+  topEndpoints: Array<{ endpoint: string; count: number }>;
+}
+
+export interface FollowUpEntry {
+  /** 변경 요청(메서드 + 엔드포인트) */
+  mutation: string;
+  /** 그 뒤 1초 안에 다시 받은 조회 엔드포인트 */
+  refetched: string;
+  /** 이 쌍이 나온 변경 요청 수 */
+  mutations: number;
+  /** 다시 받은 조회 수 */
+  count: number;
+  /** 그중 직전과 같은 응답을 받은 수(무효화했지만 바뀐 것이 없다) */
+  sameResponse: number;
+  /** React Query 로 다시 받았으면 그 queryKey(JSON) */
+  queryKey?: string;
+  /** 다시 받은 조회가 주기 반복(polling)에 들었다. 변경 때문이 아닐 수 있다 */
+  periodic?: true;
+  /** 다시 받은 엔드포인트를 무시(패널·configure)했다. summary 는 짚지 않는다 */
+  ignored?: true;
 }
 
 /** 순서는 buildReport 가 다른 섹션 줄과 맞춘다. */
@@ -140,6 +189,66 @@ const repeatCausesOf = (own: readonly RequestRecord[]) => {
     : undefined;
 };
 
+const topEndpointsOf = (records: readonly RequestRecord[]) =>
+  Array.from(groupBy(records, endpointOf), ([endpoint, list]) => ({ endpoint, count: list.length }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, MAX_BURST_ENDPOINTS);
+
+const burstEntryOf = (seg: BurstSegment, classes: ReadonlyMap<number, RequestClass>): BurstEntry => {
+  const route = seg.records[0]?.route;
+  return {
+    from: seg.from,
+    to: seg.to,
+    count: seg.records.length,
+    kind: seg.entry ? 'entry' : 'waste',
+    reason: seg.entryReason ?? 'no-entry',
+    wasted: seg.records.filter((r) => isWaste(classes.get(r.id))).length,
+    ...(route !== undefined && { route }),
+    topEndpoints: topEndpointsOf(seg.records),
+  };
+};
+
+/** 타임라인·버튼과 같은 analyzeBursts 로 찾는다. 무시한 엔드포인트(classes 의 ignored)는 analyzeBursts 가 세지 않는다 */
+const burstsOf = (records: readonly RequestRecord[], classes: ReadonlyMap<number, RequestClass>) => {
+  const all = analyzeBursts(records, (r) => classes.get(r.id) ?? 'ok')
+    .map((seg) => burstEntryOf(seg, classes))
+    .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'waste' ? -1 : 1) || b.count - a.count || a.from - b.from);
+  return { bursts: all.slice(0, MAX_BURSTS), burstsOmitted: Math.max(0, all.length - MAX_BURSTS) };
+};
+
+/**
+ * 요청 상세와 같은 followUps 로 변경 요청마다 뒤따른 조회를 찾고, 변경·재조회 엔드포인트 쌍으로 모은다.
+ * 수는 패널과 같게 두고, 무시한 엔드포인트(의도된 반복)로 다시 받은 쌍은 ignored 로 표시한다(엔드포인트 행과 같다).
+ */
+const followUpsOf = (
+  records: readonly RequestRecord[],
+  matcher: IgnoreMatcher,
+  queryOf: (record: RequestRecord) => QueryContext | undefined,
+): FollowUpEntry[] => {
+  const pairs = new Map<string, FollowUpEntry>();
+  records.filter(isMutation).forEach((m) => {
+    const mutation = endpointOf(m);
+    followUps(m, records, (r) => queryOf(r)?.queryKey).forEach((f) => {
+      const key = JSON.stringify([mutation, f.endpoint]);
+      const prev = pairs.get(key);
+      const queryKey = prev?.queryKey ?? f.queryKey;
+      pairs.set(key, {
+        mutation,
+        refetched: f.endpoint,
+        mutations: (prev?.mutations ?? 0) + 1,
+        count: (prev?.count ?? 0) + f.count,
+        sameResponse: (prev?.sameResponse ?? 0) + f.sameResponse,
+        ...(queryKey !== undefined && { queryKey }),
+        ...((prev?.periodic || f.periodic) && { periodic: true as const }),
+        ...(matcher.sourceOf(f.endpoint) && { ignored: true as const }),
+      });
+    });
+  });
+  return Array.from(pairs.values())
+    .sort((a, b) => b.sameResponse - a.sameResponse || b.count - a.count)
+    .slice(0, MAX_FOLLOW_UPS);
+};
+
 /**
  * queryOf 는 요청의 React Query 문맥을 찾는 함수다. 기본은 fiber 트리를 걸어 찾는다(사용자가 요청한 보고서).
  * 5초 주기 업로드처럼 앱 경로 가까이서 돌 때는 knownQueryContextOf 를 넘겨 이미 찾아 둔 것만 쓴다.
@@ -176,6 +285,8 @@ export const buildRequestSection = (
         ),
       };
     }),
+    ...burstsOf(records, classes),
+    followUps: followUpsOf(records, matcher, queryOf),
   };
 };
 
@@ -187,5 +298,7 @@ export const REQUEST_HOW_TO_READ_EXTRA: readonly string[] = [
   "callers.waste is how many of that caller's requests were counted as waste (duplicates or sameResponses); absent when none. summary points at the listed caller with the most waste.",
   'callers.route is the path (no query string) at the time the request was sent; component is the sending component guessed from the first capitalized function name in the call stack. Absent when unknown.',
   'repeatCauses is a breakdown by reason why duplicate requests were re-issued. deps: an effect dependency at the given index changed (fix: clean up dependencies); remount: a parent branch change unmounted and remounted the child (fix: stabilize the parent branch); strict: StrictMode re-ran the effect (nothing to fix). Absent when unknown.',
+  'requests.bursts lists request bursts (config.burst.count, default 5, or more requests starting within config.burst.windowMs, default 500), the same ones the timeline draws. kind entry means it came right after page entry, and reason says why: initial-load (within 3s of the page load) or navigation (a route change from 3s before the burst to 1s after its last response) — screens commonly load everything at once, so review only if it looks excessive. kind waste (reason no-entry) has no page entry nearby: find what fires these requests together. from and to are the start times (ms epoch) of the first and last request, count the requests in it, wasted how many of them were duplicates or sameResponses, route the path when the first was sent, topEndpoints the endpoints with the most requests in it. As in the timeline, repeats classed ignored (an ignored endpoint), StrictMode re-runs and requests from before a reload are not counted. Waste bursts come first, then the largest; at most 20 (burstsOmitted is how many more). summary lists each waste burst as a medium request-burst finding.',
+  'requests.followUps lists GET requests sent within 1s after a mutation (POST, PUT, PATCH, DELETE) response, grouped by mutation (method + endpoint) and refetched endpoint — by timing only, the same as the request detail panel. mutations is how many such mutations were followed by it, count the refetches, sameResponse how many got a response identical to the previous one (invalidated but nothing changed: the invalidation is broader than the change), queryKey the React Query key when known. periodic: true means the refetched endpoint is polling and may be unrelated to the mutation. ignored: true means the refetched endpoint is ignored (in the panel or config.ignore) — skip it. Sorted by sameResponse, then count; at most 20. summary lists each pair that is neither periodic nor ignored with sameResponse > 0 as a medium refetch-after-mutation finding; the same refetches are also counted on the refetched endpoint (sameResponses, or review when React Query refetched after an invalidation), so do not add the savings twice.',
   'callers.queryKey and callers.observer are the query key and the component rendering the useQuery call for React Query requests. noAppFrame means the call stack was broken at an async boundary (like a timer in ky) and the sending location is unknown — use queryKey to identify it (frame is a library internal).',
 ];

@@ -9,7 +9,15 @@ import type { RequestSection } from './requestSection.js';
 const MAX_TOP_FINDINGS = 10;
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
-export type FindingKind = 'duplicate' | 'same-response' | 'react-query' | 'render-storm' | 'avoidable-renders' | 'remount';
+export type FindingKind =
+  | 'duplicate'
+  | 'same-response'
+  | 'request-burst'
+  | 'refetch-after-mutation'
+  | 'react-query'
+  | 'render-storm'
+  | 'avoidable-renders'
+  | 'remount';
 
 export interface TopFinding {
   kind: FindingKind;
@@ -46,6 +54,8 @@ export interface ReportSummary {
 const KIND_ORDER: Record<FindingKind, number> = {
   duplicate: 0,
   'same-response': 0,
+  'request-burst': 0,
+  'refetch-after-mutation': 0,
   'react-query': 1,
   'render-storm': 2,
   'avoidable-renders': 2,
@@ -91,6 +101,53 @@ const requestFindings = (endpoints: readonly Endpoint[], wasteful: ReadonlySet<E
       },
     ];
   });
+
+type Burst = RequestSection['bursts'][number];
+type FollowUp = RequestSection['followUps'][number];
+
+const BURST_FIX =
+  'These requests fired together outside page entry (no page load or navigation nearby). Find what triggers them at once in the top endpoints: fetch the list in one request instead of per item, share one fetch between components (a common ancestor or React Query), or debounce the trigger (input, scroll, resize).';
+
+/** 진입과 무관한 몰림. 배지는 세지 않는다(버튼이 1초 깜빡일 뿐이다). 줄일 양은 몰림이 한 건이 되는 것으로 본다 */
+const burstFindings = (bursts: readonly Burst[]): Ranked[] =>
+  bursts.flatMap((b, i): Ranked[] => {
+    const top = b.topEndpoints[0];
+    if (b.kind !== 'waste' || !top) return [];
+    return [
+      {
+        kind: 'request-burst',
+        severity: 'medium',
+        target: { endpoint: top.endpoint },
+        evidence: { count: b.count, spanMs: b.to - b.from, wasted: b.wasted, endpoints: b.topEndpoints.length },
+        savings: { requests: b.count - 1 },
+        fix: BURST_FIX,
+        detail: `requests.bursts[${i}]`,
+        rank: [b.count - 1, 0, b.count],
+      },
+    ];
+  });
+
+const followUpFix = (f: FollowUp): string =>
+  `After ${f.mutation}, ${f.refetched} was refetched and the response was unchanged. Narrow the invalidation after this mutation to the queries it actually changes (a more specific queryKey, exact: true), or update the cache from the mutation response (setQueryData) instead of refetching.`;
+
+/** 변경 뒤 재조회가 같은 응답을 받은 쌍. 폴링과 겹친 것(periodic)은 변경 때문이 아닐 수 있고, 무시한 엔드포인트는 의도된 반복이라 뺀다 */
+const followUpFindings = (list: readonly FollowUp[]): Ranked[] =>
+  list.flatMap((f, i): Ranked[] =>
+    f.sameResponse > 0 && !f.periodic && !f.ignored
+      ? [
+          {
+            kind: 'refetch-after-mutation',
+            severity: 'medium',
+            target: { endpoint: f.refetched, ...(f.queryKey && { queryKeys: [f.queryKey] }) },
+            evidence: { mutations: f.mutations, count: f.count, sameResponse: f.sameResponse },
+            savings: { requests: f.sameResponse },
+            fix: followUpFix(f),
+            detail: `requests.followUps[${i}]`,
+            rank: [f.sameResponse, 0, f.count],
+          },
+        ]
+      : [],
+  );
 
 const reactQueryFindings = (reactQuery: ReactQuerySection): Ranked[] =>
   reactQuery.findings.flatMap((f, i): Ranked[] => {
@@ -255,6 +312,8 @@ export const buildSummary = (
   const problems = countProblems(requests.endpoints, storms);
   const all = [
     ...requestFindings(requests.endpoints, new Set(problems.wasteEndpoints)),
+    ...burstFindings(requests.bursts),
+    ...followUpFindings(requests.followUps),
     ...reactQueryFindings(reactQuery),
     ...renderFindings(renders, storms),
   ].sort(byRank);
