@@ -1,7 +1,16 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { COMMAND_PATH, isReportName, REPORT_HEADER, SERVER_FILE, TOKEN_HEADER, type CommandOp } from '../shared/reportPath.js';
+import {
+  COMMAND_PATH,
+  isReportName,
+  NEXT_REWRITE_HEADER,
+  REPORT_HEADER,
+  SERVER_FILE,
+  TOKEN_HEADER,
+  type CommandOp,
+} from '../shared/reportPath.js';
+import { MESSAGES } from '../core/diagnostics/messages.js';
 
 /** CLI·MCP 가 함께 쓰는 설정 */
 export interface CliOptions {
@@ -149,6 +158,8 @@ const call = async (opts: CliOptions, suffix: string, init?: RequestInit): Promi
       `The dev server at ${server.base} refused this host. Use a localhost or IP address URL, or add the host to allowedHosts.`,
       EXIT.server,
     );
+  const rewrittenTo = mark ? null : res.headers.get(NEXT_REWRITE_HEADER);
+  if (rewrittenTo) throw new CliError(MESSAGES.rewrittenRoute(path.split('?')[0], rewrittenTo), EXIT.server);
   if (mark !== '1')
     throw new CliError(
       `${server.base} has no rdx command path (${res.status}). Attach the rdx dev server plugin (react-data-xray/vite, react-data-xray/middleware) and update react-data-xray. Next.js: add app/%5F_rdx/command/[[...id]]/route.ts with export { GET, POST, DELETE } from 'react-data-xray/next' and pass --url.`,

@@ -18,6 +18,8 @@ export const MESSAGES = {
   captureMissing: 'Request capture is not installed, so no request is recorded.',
   forbiddenHost: (host: string, hostname: string): string =>
     `The dev server blocked a report from ${host}. Allow this host in the rdx report plugin: Vite rdx({ allowedHosts: ['${hostname}'] }), webpack rdxReportMiddleware(root, { allowedHosts: ['${hostname}'] }), Next.js createRdxReportRoute(process.cwd(), { allowedHosts: ['${hostname}'] }).`,
+  rewrittenRoute: (path: string, to: string): string =>
+    `A Next.js middleware (middleware.ts or proxy.ts) rewrote ${path} to ${to}, so the rdx route never answers and reports are not saved. Exclude __rdx from its matcher, e.g. '/((?!api|__rdx|_next/static|_next/image|favicon.ico).*)'.`,
   retainedText: (chars: number): string =>
     `Same-response detection holds ${chars} characters of response text; it should keep only lengths and hashes.`,
   noRequests:
