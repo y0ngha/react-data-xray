@@ -13,7 +13,7 @@ describe('저장되는 state', () => {
       result.current.toggle('GET /a');
       result.current.toggle('GET /b');
     });
-    expect([...result.current.ignored]).toEqual(['GET /a', 'GET /b']);
+    expect([...result.current.ignored.panel]).toEqual(['GET /a', 'GET /b']);
     expect(JSON.parse(localStorage.getItem('react-data-xray:ignored-endpoints')!)).toEqual(['GET /a', 'GET /b']);
   });
 

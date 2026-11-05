@@ -4,6 +4,7 @@ import type { Fiber } from '../../../core/fiber/types.js';
 import { getEndpointStats, type EndpointStat } from '../../../core/requests/endpointStats.js';
 import { endpointOf } from '../../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../../core/requests/types.js';
+import { toIgnoreMatcher, type IgnoreMatcher } from '../../../shared/ignoredEndpoints.js';
 import { Button } from '../../components/Button.js';
 import { Muted } from '../../components/Muted.js';
 import { useRequestActions } from '../../contexts.js';
@@ -23,7 +24,8 @@ const REFRESH_MS = 1000;
 interface RequestsTabProps {
   records: readonly RequestRecord[];
   stats: readonly EndpointStat[];
-  ignored: ReadonlySet<string>;
+  /** 패널·코드 무시를 합친 판정(useIgnoredEndpoints). 패널 목록만 주면 지금 설정과 합친다 */
+  ignored: IgnoreMatcher | ReadonlySet<string>;
   onToggleIgnore: (endpoint: string) => void;
   /** 분석 대상 컴포넌트. 있으면 엔드포인트별 렌더도 그 아래 것만 센다 */
   scope?: Fiber | null;
@@ -33,9 +35,14 @@ interface RequestsTabProps {
  * 무시로 저장했지만 지금 기록의 어느 엔드포인트와도 맞지 않는 키. 엔드포인트 이름 규칙이 바뀐 옛 키(`POST /graphql` 처럼
  * 지금은 연산별로 나뉜 것)는 줄이 없어 풀 수 없으므로 여기서 지운다. 비교는 지금처럼 정확히 같은 이름끼리다.
  */
-const UnseenIgnored = ({ ignored, stats, onToggleIgnore }: Pick<RequestsTabProps, 'ignored' | 'stats' | 'onToggleIgnore'>) => {
+const UnseenIgnored = ({
+  ignored,
+  stats,
+  onToggleIgnore,
+}: Pick<RequestsTabProps, 'stats' | 'onToggleIgnore'> & { ignored: IgnoreMatcher }) => {
   const seen = new Set(stats.map((s) => s.endpoint));
-  const unseen = [...ignored].filter((e) => !seen.has(e));
+  // 패널에서 고른 키만 지울 수 있다. 코드로도 무시한 키는 지워도 다시 무시되므로 보이지 않는다.
+  const unseen = [...ignored.panel].filter((e) => !seen.has(e) && ignored.sourceOf(e) === 'panel');
   if (!unseen.length) return null;
   return (
     <div style={{ marginTop: 8 }}>
@@ -58,7 +65,8 @@ const UnseenIgnored = ({ ignored, stats, onToggleIgnore }: Pick<RequestsTabProps
 };
 
 /** 네트워크 › 요청: 엔드포인트별 지표와 전체 기록. 엔드포인트를 누르면 그 요청만 기록에 보여 준다. */
-export const RequestsTab = ({ records, stats, ignored, onToggleIgnore, scope = null }: RequestsTabProps) => {
+export const RequestsTab = ({ records, stats, ignored: ignoredInput, onToggleIgnore, scope = null }: RequestsTabProps) => {
+  const ignored = toIgnoreMatcher(ignoredInput);
   // 엔드포인트마다 그 응답이 일으킨 렌더를 보이려면 렌더 감시가 켜져 있어야 한다(#84). 세기는 유휴 큐에서 한다.
   useRenderMonitoring();
   const now = useNow(REFRESH_MS);
@@ -119,7 +127,7 @@ export const RequestsTab = ({ records, stats, ignored, onToggleIgnore, scope = n
             key={stat.endpoint}
             stat={stat}
             renders={renders?.get(stat.endpoint)}
-            ignored={ignored.has(stat.endpoint)}
+            ignored={ignored.sourceOf(stat.endpoint)}
             route={route}
             focus={focus?.key === stat.endpoint ? focus : undefined}
             onSelect={showEndpoint}

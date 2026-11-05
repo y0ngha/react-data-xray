@@ -148,7 +148,7 @@ describe('네트워크 탭 엔드포인트 행 (#84)', () => {
       <EndpointRow
         stat={stat}
         renders={{ count: 8, ms: 4.2, viaParent: { count: 2, ms: 0.5 }, fromSameResponse: { count: 4, ms: 2.1 } }}
-        ignored={false}
+        ignored={undefined}
         onSelect={() => undefined}
         onToggleIgnore={() => undefined}
       />,

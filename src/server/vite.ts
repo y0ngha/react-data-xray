@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import { rdxReportMiddleware, type RdxReportOptions } from './middleware.js';
+import { rdxReportMiddleware, type RdxMiddlewareOptions } from './middleware.js';
 
 // vite 를 의존성으로 두지 않으려고 쓰는 부분만 적는다.
 interface ViteDevServer {
@@ -19,7 +19,7 @@ interface HtmlContext {
   path?: string;
 }
 
-export interface RdxViteOptions extends RdxReportOptions {
+export interface RdxViteOptions extends RdxMiddlewareOptions {
   /**
    * true 면 Vite dev 서버가 내보내는 index.html 에 `import 'react-data-xray'` 모듈 스크립트를 넣는다.
    * 앱의 진입 모듈보다 먼저 평가되므로(Vite 의 client·react-refresh 프리앰블 다음) 진입 파일에서 import 하지 않아도

@@ -4,6 +4,7 @@ import { classifyRecords, type RequestClass } from '../../core/requests/classify
 import { getEndpointStats, isWastefulStat, type EndpointStat } from '../../core/requests/endpointStats.js';
 import { requestKeyOf } from '../../core/requests/requestKey.js';
 import type { RequestRecord } from '../../core/requests/types.js';
+import type { IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 import { useRecords } from './useRecords.js';
 
 export interface RequestAnalysis {
@@ -16,8 +17,11 @@ export interface RequestAnalysis {
   wasteCount: number;
 }
 
-/** 요청 기록을 분류하고 엔드포인트별로 모은다. 기록이 바뀌거나 무시 목록이 바뀔 때만 다시 계산한다. */
-export const useRequestAnalysis = (ignored: ReadonlySet<string>): RequestAnalysis => {
+/**
+ * 요청 기록을 분류하고 엔드포인트별로 모은다. 기록이 바뀌거나 무시 판정이 바뀔 때만 다시 계산한다.
+ * 판정(useIgnoredEndpoints)은 패널 무시나 설정(configure)이 바뀌면 새로 만들어지므로 그때도 다시 분류한다.
+ */
+export const useRequestAnalysis = (ignored: IgnoreMatcher | ReadonlySet<string>): RequestAnalysis => {
   const records = useRecords();
   return useMemo(() => {
     const classes = classifyRecords(records, ignored);

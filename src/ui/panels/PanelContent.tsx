@@ -1,6 +1,7 @@
 import type { Fiber } from '../../core/fiber/types.js';
 import type { Box, InspectResult } from '../../core/inspect/types.js';
 import type { RequestRecord } from '../../core/requests/types.js';
+import type { IgnoreMatcher } from '../../shared/ignoredEndpoints.js';
 import { Muted } from '../components/Muted.js';
 import type { Focus } from '../contexts.js';
 import type { RequestAnalysis } from '../hooks/useRequestAnalysis.js';
@@ -31,7 +32,7 @@ interface PanelContentProps {
   boxes: readonly Box[];
   /** 분석 대상이 쓰는 요청만 남긴 분석 */
   analysis: RequestAnalysis;
-  ignored: ReadonlySet<string>;
+  ignored: IgnoreMatcher | ReadonlySet<string>;
   onToggleIgnore: (endpoint: string) => void;
 }
 
