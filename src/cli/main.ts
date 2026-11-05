@@ -20,7 +20,7 @@ Commands:
 
 Options:
   --url <url>      Dev server address (default: RDX_URL, then the address the dev server saved in .rdx/.server.json;
-                   Next.js: required)
+                   Next.js: required, including the basePath, e.g. http://localhost:3000/docs)
   --tab <id>       Tab to run in (default: the visible tab focused most recently; see the tabs command)
   --dir <dir>      Report folder (default: .rdx)
   --timeout <s>    Seconds to wait for the tab to run a command (default: 90)
