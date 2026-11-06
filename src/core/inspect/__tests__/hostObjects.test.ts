@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Fiber } from '../../fiber/types.js';
 import { findRecentResponse } from '../../render/networkCause.js';
 import { clearRecords, createRecord, finishRecord, registerBody } from '../../requests/store.js';
-import { isOpaque } from '../../../shared/objectWalk.js';
+import { childEntries, isOpaque } from '../../../shared/objectWalk.js';
 import { flushIndex } from '../derivedMatch.js';
 import { findExactOrigins } from '../exactMatch.js';
 import { createFiberHolds, drain } from '../holders.js';
@@ -33,6 +33,12 @@ describe('브라우저 전역 객체(window)는 펼치지 않는다', () => {
   it('isOpaque 로 거른다', () => {
     expect(isOpaque(window)).toBe(true);
     expect(isOpaque({})).toBe(false);
+  });
+
+  it('childEntries 는 window 의 속성을 읽지 않는다(경고가 실제로 나던 곳)', () => {
+    expect(childEntries(window, 100)).toEqual([]);
+    expect(reads).toBe(0);
+    expect(childEntries({ a: 1 }, 100)).toEqual([['.a', 1]]);
   });
 
   it('요소 클릭의 정확 매칭은 window 를 펼치지도 파생 후보로 넘기지도 않는다', () => {
