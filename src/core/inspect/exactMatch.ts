@@ -1,5 +1,5 @@
 import { getOrigin } from '../requests/origins.js';
-import { childEntries, isDomNode } from '../../shared/objectWalk.js';
+import { childEntries, isHostObject } from '../../shared/objectWalk.js';
 import type { Hit } from './types.js';
 
 const MAX_SEARCH_DEPTH = 4;
@@ -32,7 +32,7 @@ export const findExactOrigins = (
   const seen = new WeakSet<object>();
   const walk = (value: unknown, where: string, depth: number): void => {
     if (hits.length >= MAX_HITS || value === null || typeof value !== 'object' || seen.has(value)) return;
-    if (isDomNode(value)) return;
+    if (isHostObject(value)) return;
     seen.add(value);
     const origin = getOrigin(value);
     if (origin) {
