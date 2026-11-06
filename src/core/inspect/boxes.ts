@@ -1,6 +1,7 @@
 import { findRootFibers, getComponentName, hostNodesOf, isMounted, toCurrent, unionRect, walkFibers } from '../fiber/tree.js';
 import { isComposite, type Fiber } from '../fiber/types.js';
 import { getOrigin } from '../requests/origins.js';
+import { isOpaque } from '../../shared/objectWalk.js';
 import { findDerivedOrigin, isIndexPending } from './derivedMatch.js';
 import { isSameOrChildPath } from './exactMatch.js';
 import { getRecords } from '../requests/store.js';
@@ -10,7 +11,7 @@ import type { Box, Hit } from './types.js';
 const MAX_BOXES = 500;
 
 const isPlainChild = (key: string, value: unknown): value is object =>
-  key !== 'children' && value !== null && typeof value === 'object' && !Array.isArray(value) && !(value as { $$typeof?: unknown }).$$typeof;
+  key !== 'children' && value !== null && typeof value === 'object' && !Array.isArray(value) && !isOpaque(value);
 
 // props 객체가 그대로면(렌더되지 않았으면) 지난번 결과를 쓴다. 파생 매칭이 비싸서 매번 다시 찾지 않는다.
 // 기억한 결과가 요청 목록에서 밀려난 응답을 가리키면 다시 찾는다. 수집은 모든 fiber 를 돌므로, 오래 사는
